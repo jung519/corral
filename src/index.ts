@@ -8,6 +8,10 @@
  */
 export * from './core/types.js';
 export * from './core/registry.js';
+export { ConcurrencyLimiter } from './core/concurrency-limiter.js';
+export { logger, makeLogger, type Logger } from './core/logger.js';
+export { bus, type CorralEvent, type EventKind } from './core/events.js';
+export { fetchRetry, fetchJson, HttpError, type FetchRetryOptions } from './core/fetch-retry.js';
 export * from './agent/types.js';
 export { createAgent, agentTransports, type AgentTransportCtx } from './agent/index.js';
 export * from './credentials/types.js';
