@@ -29,6 +29,25 @@
     docker = (await window.corral?.detectDocker()) ?? { available: false };
   }
 
+  type TestState = { ok: boolean; detail?: string } | 'pending' | undefined;
+  let test = $state<Record<string, TestState>>({});
+
+  async function testAgent() {
+    if (!window.corral) return;
+    test.agent = 'pending';
+    test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
+  }
+  async function testGithub() {
+    if (!window.corral) return;
+    test.github = 'pending';
+    test.github = await window.corral.validate.github(s.githubToken);
+  }
+  async function testNotion() {
+    if (!window.corral) return;
+    test.notion = 'pending';
+    test.notion = await window.corral.validate.notion(s.notionToken);
+  }
+
   async function finish() {
     for (let i = 0; i < steps.length; i++) {
       const e = validateStep(i, s);
@@ -53,6 +72,14 @@
     }
   }
 </script>
+
+{#snippet result(t: TestState)}
+  {#if t === 'pending'}
+    <span class="t">testing…</span>
+  {:else if t}
+    <span class="t" class:bad={!t.ok}>{t.ok ? '✓ ok' : `✗ ${t.detail ?? 'failed'}`}</span>
+  {/if}
+{/snippet}
 
 <div class="wizard">
   <aside>
@@ -83,6 +110,10 @@
       </div>
       <label>API key (BYOK — stored in the OS keychain){s.transport === 'cli' ? ' · optional for cli' : ''}</label>
       <input type="password" bind:value={s.agentKey} placeholder="sk-..." />
+      <div class="testrow">
+        <button onclick={testAgent} disabled={!hasBridge || !s.agentKey}>Test key</button>
+        {@render result(test.agent)}
+      </div>
       <div class="two">
         <div><label>Planning model</label><input bind:value={s.planningModel} /></div>
         <div><label>Implementation model</label><input bind:value={s.implementationModel} /></div>
@@ -92,6 +123,10 @@
       <input bind:value={s.repo} placeholder="acme/widgets" />
       <label>GitHub token (keychain)</label>
       <input type="password" bind:value={s.githubToken} />
+      <div class="testrow">
+        <button onclick={testGithub} disabled={!hasBridge || !s.githubToken}>Test token</button>
+        {@render result(test.github)}
+      </div>
       <div class="two">
         <div><label>Routing key</label><input bind:value={s.repoKey} /></div>
         <div><label>Production branch</label><input bind:value={s.production} /></div>
@@ -103,6 +138,10 @@
       <input bind:value={s.notionDb} />
       <label>Notion token (keychain)</label>
       <input type="password" bind:value={s.notionToken} />
+      <div class="testrow">
+        <button onclick={testNotion} disabled={!hasBridge || !s.notionToken}>Test token</button>
+        {@render result(test.notion)}
+      </div>
       <div class="two">
         <div><label>Status property</label><input bind:value={s.statusProp} /></div>
         <div><label>ID property</label><input bind:value={s.idProp} /></div>
@@ -236,6 +275,19 @@
   .hint {
     color: var(--text-dim);
     font-size: 13px;
+  }
+  .testrow {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+  }
+  .t {
+    font-size: 13px;
+    color: var(--green);
+  }
+  .t.bad {
+    color: var(--red);
   }
   .error {
     color: var(--red);

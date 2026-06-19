@@ -22,6 +22,13 @@ const api = {
   },
   /** Detect a usable Docker CLI (for the workspace-backend wizard step). */
   detectDocker: (): Promise<{ available: boolean; version?: string }> => ipcRenderer.invoke('docker:detect'),
+  /** Verify a token/key before writing config (wizard "Test" buttons). */
+  validate: {
+    notion: (token: string): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('validate:notion', token),
+    github: (token: string): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('validate:github', token),
+    agent: (provider: string, key: string): Promise<{ ok: boolean; detail?: string }> =>
+      ipcRenderer.invoke('validate:agent', provider, key),
+  },
   /** Start the orchestrator child + reload into the dashboard. */
   startOrchestrator: (): Promise<{ ok: boolean; port: number }> => ipcRenderer.invoke('orchestrator:start'),
 };

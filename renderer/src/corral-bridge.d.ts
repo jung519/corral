@@ -16,6 +16,11 @@ declare global {
         delete(service: string, account: string): Promise<void>;
       };
       detectDocker(): Promise<{ available: boolean; version?: string }>;
+      validate: {
+        notion(token: string): Promise<{ ok: boolean; detail?: string }>;
+        github(token: string): Promise<{ ok: boolean; detail?: string }>;
+        agent(provider: string, key: string): Promise<{ ok: boolean; detail?: string }>;
+      };
       startOrchestrator(): Promise<{ ok: boolean; port: number }>;
     };
   }
