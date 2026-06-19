@@ -14,12 +14,14 @@ import type {
   TrackerAdapter,
   WorkspaceAdapter,
 } from './core/types.js';
+import { type ResolvedProfile, resolveProfile } from './profile/index.js';
 import { repositories as repositoryRegistry } from './repository/index.js';
 import { trackers } from './tracker/index.js';
 import { workspaces } from './workspace/index.js';
 
 export interface App {
   config: Config;
+  profile: ResolvedProfile;
   tracker: TrackerAdapter;
   repositories: RepositoryAdapter[];
   agent: AgentAdapter;
@@ -68,7 +70,15 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
   const workspace = workspaces.create({ kind: config.workspace.backend }, undefined);
   const channel = channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
-  return { config, tracker, repositories: repositoryList, agent, workspace, channel };
+  return {
+    config,
+    profile: resolveProfile(config.profile),
+    tracker,
+    repositories: repositoryList,
+    agent,
+    workspace,
+    channel,
+  };
 }
 
 export async function bootstrapFromFile(path: string, deps?: BootstrapDeps): Promise<App> {

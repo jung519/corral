@@ -11,6 +11,7 @@ async function main(): Promise<void> {
 
   const lines = [
     `corral — config loaded from ${configPath}`,
+    `  profile      lang=${app.profile.language}, stack=${app.profile.stack.id}`,
     `  tracker      ${app.tracker.kind}`,
     `  repositories ${app.repositories.map((r) => `${r.key} (${r.kind})`).join(', ')}`,
     `  agent        ${app.agent.kind} (${app.config.agent.transport})`,

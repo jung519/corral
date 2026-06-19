@@ -15,6 +15,17 @@ export { EnvCredentialStore } from './credentials/env-store.js';
 export * from './config/schema.js';
 export { loadConfig, parseConfig } from './config/loader.js';
 export { bootstrap, bootstrapFromFile, type App, type BootstrapDeps } from './bootstrap.js';
+export {
+  resolveProfile,
+  type ResolvedProfile,
+  createTranslator,
+  type Translator,
+  type MessageKey,
+  availableLanguages,
+  resolveStackProfile,
+  availableStacks,
+  type StackProfile,
+} from './profile/index.js';
 export { trackers } from './tracker/index.js';
 export { repositories } from './repository/index.js';
 export { workspaces } from './workspace/index.js';
