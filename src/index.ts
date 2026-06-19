@@ -12,6 +12,8 @@ export { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 export { logger, makeLogger, type Logger } from './core/logger.js';
 export { bus, type CorralEvent, type EventKind } from './core/events.js';
 export { fetchRetry, fetchJson, HttpError, type FetchRetryOptions } from './core/fetch-retry.js';
+export { IssueStateStore, type IssueRuntime, DEFAULT_STATE_DIR } from './core/issue-state.js';
+export { CostTracker, type CostEntry } from './core/cost-tracker.js';
 export * from './agent/types.js';
 export { createAgent, agentTransports, type AgentTransportCtx } from './agent/index.js';
 export * from './credentials/types.js';

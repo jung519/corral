@@ -10,7 +10,11 @@ export type MessageKey =
   | 'review.unresolved'
   | 'signal.approved'
   | 'signal.requestMoreReview'
-  | 'cost.summaryHeading';
+  | 'cost.summaryHeading'
+  | 'cost.total'
+  | 'cost.dispatches'
+  | 'cost.tokens'
+  | 'cost.none';
 
 export type Messages = Record<MessageKey, string>;
 
@@ -20,7 +24,11 @@ const en: Messages = {
   'review.unresolved': 'unresolved',
   'signal.approved': 'APPROVED',
   'signal.requestMoreReview': 'REQUEST FURTHER REVIEW',
-  'cost.summaryHeading': 'Cost',
+  'cost.summaryHeading': 'Cost summary',
+  'cost.total': 'Total cost',
+  'cost.dispatches': 'Dispatches',
+  'cost.tokens': 'Tokens (in/out)',
+  'cost.none': 'No cost recorded.',
 };
 
 const ko: Messages = {
@@ -29,7 +37,11 @@ const ko: Messages = {
   'review.unresolved': '미해결',
   'signal.approved': '승인됨',
   'signal.requestMoreReview': '더 검토 요청',
-  'cost.summaryHeading': '비용',
+  'cost.summaryHeading': '비용 요약',
+  'cost.total': '총 비용',
+  'cost.dispatches': '디스패치 횟수',
+  'cost.tokens': '토큰 (입력/출력)',
+  'cost.none': '집계된 비용이 없습니다.',
 };
 
 const CATALOG: Record<string, Messages> = { en, ko };
