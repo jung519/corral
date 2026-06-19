@@ -38,6 +38,8 @@ export { EnvCredentialStore } from './credentials/env-store.js';
 export * from './config/schema.js';
 export { loadConfig, parseConfig } from './config/loader.js';
 export { bootstrap, bootstrapFromFile, type App, type BootstrapDeps } from './bootstrap.js';
+export { Orchestrator } from './orchestrator.js';
+export { processAttachments } from './attachments.js';
 export {
   resolveProfile,
   type ResolvedProfile,

@@ -41,7 +41,7 @@ export class ReviewOrchestrator {
     handle: WorkspaceHandle,
     issue: Issue,
     baseCommit: string,
-    model: string,
+    model: string | undefined,
     referencePath?: string,
     onRoundCost?: RoundCostFn,
     verifyCommands: string[] = [],
@@ -92,7 +92,7 @@ export class ReviewOrchestrator {
     issue: Issue,
     round: number,
     baseCommit: string,
-    model: string,
+    model: string | undefined,
     referencePath?: string,
     onRoundCost?: RoundCostFn,
   ): Promise<string | null> {

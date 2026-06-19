@@ -9,6 +9,9 @@ async function main(): Promise<void> {
   const configPath = process.argv[2] ?? 'corral.yaml';
   const app = await bootstrapFromFile(configPath);
 
+  await app.channel.start();
+  await app.orchestrator.start(); // recovers any in-flight issues; no polling
+
   const lines = [
     `corral — config loaded from ${configPath}`,
     `  profile      lang=${app.profile.language}, stack=${app.profile.stack.id}`,
@@ -18,7 +21,7 @@ async function main(): Promise<void> {
     `  workspace    ${app.workspace.kind}`,
     `  channel      ${app.channel.kind}`,
     '',
-    'Skeleton wired from config. Orchestrator loop arrives in S2.',
+    'Orchestrator ready. Drive it via the control plane (dashboard lands in S3).',
   ];
   console.log(lines.join('\n'));
 }

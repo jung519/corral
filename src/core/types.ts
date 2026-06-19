@@ -299,3 +299,9 @@ export const WAITING_PHASES: ReadonlySet<IssuePhase> = new Set([
   'pr_open',
   'auth_error_waiting',
 ]);
+
+/**
+ * Unattended phases (no human gate, no external wake event) that a restart can
+ * leave mid-run. On recovery these are marked retryable rather than auto-redispatched.
+ */
+export const RESUMABLE_PHASES: ReadonlySet<IssuePhase> = new Set(['implementing', 'review_fixing']);

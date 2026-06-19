@@ -27,7 +27,7 @@ export class PlanCritiqueOrchestrator {
   async run(
     handle: WorkspaceHandle,
     issue: Issue,
-    model: string,
+    model: string | undefined,
     referencePath?: string,
     onRoundCost?: RoundCostFn,
     focus?: string,
@@ -55,7 +55,7 @@ export class PlanCritiqueOrchestrator {
     handle: WorkspaceHandle,
     issue: Issue,
     round: number,
-    model: string,
+    model: string | undefined,
     referencePath?: string,
     onRoundCost?: RoundCostFn,
     focus?: string,

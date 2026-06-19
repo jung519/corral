@@ -14,6 +14,7 @@ import type {
   TrackerAdapter,
   WorkspaceAdapter,
 } from './core/types.js';
+import { Orchestrator } from './orchestrator.js';
 import { type ResolvedProfile, resolveProfile } from './profile/index.js';
 import { repositories as repositoryRegistry } from './repository/index.js';
 import { RepositoryRouter } from './repository/router.js';
@@ -30,6 +31,8 @@ export interface App {
   agent: AgentAdapter;
   workspace: WorkspaceAdapter;
   channel: ChannelAdapter;
+  /** The wired state machine (control-plane-driven). */
+  orchestrator: Orchestrator;
 }
 
 export interface BootstrapDeps {
@@ -73,15 +76,20 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
   const agent = createAgent(config.agent, { apiKey, io: workspace.io });
   const channel = channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
+  const profile = resolveProfile(config.profile);
+  const repositoryRouter = new RepositoryRouter(repositoryList);
+  const orchestrator = new Orchestrator(config, tracker, repositoryRouter, workspace, agent, channel, profile);
+
   return {
     config,
-    profile: resolveProfile(config.profile),
+    profile,
     tracker,
     repositories: repositoryList,
-    repositoryRouter: new RepositoryRouter(repositoryList),
+    repositoryRouter,
     agent,
     workspace,
     channel,
+    orchestrator,
   };
 }
 
