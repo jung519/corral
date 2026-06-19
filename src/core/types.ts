@@ -139,6 +139,8 @@ export interface RepositoryAdapter {
   fetchPullRequestComments(pr: PullRequest, since?: string): Promise<PullRequestComment[]>;
   createPullRequestComment(pr: PullRequest, body: string): Promise<void>;
   deleteBranch(branch: string): Promise<void>;
+  /** Re-fetch a single PR to learn its current (e.g. merged) state. null if gone. */
+  refreshPullRequest(number: number): Promise<PullRequest | null>;
 }
 
 // ─────────────────────────────────────────────────────────────── axis 3: agent

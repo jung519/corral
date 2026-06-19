@@ -38,6 +38,17 @@ const SemanticStatesSchema = z.object({
   canceled: z.string().optional(),
 });
 
+/** Optional gate restricting which issues Corral picks up (a checkbox, or a
+ * select/status property matching given values). */
+const NotionScopeSchema = z
+  .discriminatedUnion('type', [
+    z.object({ type: z.literal('checkbox'), property: z.string(), checked: z.boolean().default(true) }),
+    z.object({ type: z.literal('select'), property: z.string(), values: z.array(z.string()) }),
+    z.object({ type: z.literal('multi_select'), property: z.string(), values: z.array(z.string()) }),
+    z.object({ type: z.literal('status'), property: z.string(), values: z.array(z.string()) }),
+  ])
+  .optional();
+
 const NotionTrackerSchema = z.object({
   kind: z.literal('notion'),
   database_id: z.string().min(1),
@@ -50,8 +61,7 @@ const NotionTrackerSchema = z.object({
     /** Property that routes an issue to a repository `key`. */
     repo: z.string().optional(),
   }),
-  /** Optional checkbox/property gating which issues Corral picks up. */
-  scope: z.object({ property: z.string() }).optional(),
+  scope: NotionScopeSchema,
   poll_interval_ms: z.number().int().positive().default(30_000),
 });
 
@@ -70,8 +80,10 @@ const GithubRepositorySchema = z.object({
     .object({
       production: z.string().default('main'),
       development: z.string().default('develop'),
+      /** Issue labels that route work onto the production branch (hotfix). */
+      hotfix_labels: z.array(z.string()).default([]),
     })
-    .default({ production: 'main', development: 'develop' }),
+    .default({ production: 'main', development: 'develop', hotfix_labels: [] }),
   branch_prefix: z.string().default(''),
   /** Static verification commands (lint/typecheck/analyze). */
   verify: z.array(z.string()).default([]),

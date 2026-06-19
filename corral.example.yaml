@@ -25,7 +25,8 @@ tracker:
     in_review: "In review"
     done: "Done"
   scope:
-    property: "Corral"   # only issues with this checkbox are picked up
+    type: checkbox       # only issues with this checkbox are picked up
+    property: "Corral"
 
 repositories:
   - kind: github
