@@ -33,8 +33,13 @@ function loadTemplate(path: string): string {
   return templateSource;
 }
 
-/** Render the workflow guide for a dispatch. */
-export async function renderWorkflow(ctx: WorkflowContext, templatePath = 'WORKFLOW.md'): Promise<string> {
+/** Render the workflow guide for a dispatch. The template path defaults to
+ * CORRAL_WORKFLOW_PATH (set when the core is spawned with a non-repo cwd, e.g. by
+ * the desktop app) or 'WORKFLOW.md' relative to cwd for standalone/headless use. */
+export async function renderWorkflow(
+  ctx: WorkflowContext,
+  templatePath = process.env.CORRAL_WORKFLOW_PATH ?? 'WORKFLOW.md',
+): Promise<string> {
   return engine.parseAndRender(loadTemplate(templatePath), ctx as unknown as Record<string, unknown>);
 }
 

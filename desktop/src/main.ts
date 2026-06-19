@@ -17,9 +17,12 @@ const CONTROL_PLANE_PORT = 4100;
 
 /** Renderer location: a Vite dev server in development, built files in production. */
 function rendererUrl(hash: string): string {
-  const dev = process.env.CORRAL_RENDERER_URL;
+  const dev = process.env.CORRAL_RENDERER_URL; // Vite dev server in development
   if (dev) return `${dev}${hash}`;
-  return `file://${join(app.getAppPath(), '..', 'renderer', 'dist', 'index.html')}${hash}`;
+  const base = app.isPackaged
+    ? join(process.resourcesPath, 'renderer', 'index.html')
+    : join(app.getAppPath(), '..', 'renderer', 'dist', 'index.html');
+  return `file://${base}${hash}`;
 }
 
 let win: BrowserWindow | undefined;

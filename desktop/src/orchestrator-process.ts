@@ -18,17 +18,30 @@ let child: ChildProcess | undefined;
 function coreEntry(): string {
   const fromEnv = process.env.CORRAL_CORE_ENTRY;
   if (fromEnv && existsSync(fromEnv)) return fromEnv;
+  // packaged: extraResources copies the core to resources/core (see electron-builder.yml)
+  if (app.isPackaged) return join(process.resourcesPath, 'core', 'dist', 'main.js');
   // dev layout: desktop/ is a sibling of the built core at ../dist/main.js
   return join(app.getAppPath(), '..', 'dist', 'main.js');
+}
+
+/** Absolute path to the workflow template (the child's cwd is userData, not the
+ * repo, so the core can't find it relative to cwd). */
+function workflowPath(): string {
+  if (app.isPackaged) return join(process.resourcesPath, 'core', 'WORKFLOW.md');
+  return join(app.getAppPath(), '..', 'WORKFLOW.md');
 }
 
 export function startOrchestrator(): void {
   if (child) return;
   const entry = coreEntry();
   child = spawn(process.execPath, [entry, configPath()], {
+    // Run from a writable dir (logs/ + .corral-state/ are created relative to cwd;
+    // resources/ is read-only in a packaged app).
+    cwd: app.getPath('userData'),
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: '1', // run electron's bundled node, not a GUI process
+      CORRAL_WORKFLOW_PATH: workflowPath(),
       ...secretsAsEnv(),
     },
     stdio: 'inherit',

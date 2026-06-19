@@ -1,0 +1,29 @@
+appId: dev.corral.app
+productName: Corral
+directories:
+  output: release
+# The Electron app itself = the compiled main/preload.
+files:
+  - dist/**
+  - package.json
+# The headless core (run as a child node process) + the built renderer are shipped
+# as resources. The core needs its runtime node_modules (zod/yaml/liquidjs/marked).
+extraResources:
+  - from: ../dist
+    to: core/dist
+  - from: ../package.json
+    to: core/package.json
+  - from: ../node_modules
+    to: core/node_modules
+  - from: ../renderer/dist
+    to: renderer
+  - from: ../WORKFLOW.md
+    to: core/WORKFLOW.md
+mac:
+  category: public.app-category.developer-tools
+  target: dmg
+win:
+  target: nsis
+linux:
+  target: AppImage
+# No proprietary binaries are bundled (BYOK; provider CLIs are detected, not shipped).

@@ -14,6 +14,10 @@
     "start": "node dist/main.js",
     "test": "vitest run",
     "test:watch": "vitest",
+    "build:renderer": "pnpm -C renderer build",
+    "build:desktop": "pnpm -C desktop build",
+    "build:all": "pnpm build && pnpm build:renderer && pnpm build:desktop",
+    "package": "pnpm build:all && pnpm -C desktop dist",
     "preinstall": "npx only-allow pnpm"
   },
   "dependencies": {

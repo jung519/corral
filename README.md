@@ -39,13 +39,47 @@ Adding an integration = one adapter implementation + one config schema variant
 
 ## Development
 
+The repo has three packages: the core (root, headless orchestrator + control plane),
+`renderer/` (Svelte dashboard + setup wizard), and `desktop/` (Electron shell).
+
 ```bash
-pnpm install
-pnpm typecheck
-pnpm test
+pnpm install            # core deps
+pnpm typecheck && pnpm test
+pnpm -C renderer install && pnpm -C desktop install
 ```
 
 Requires Node.js >= 24 and pnpm.
+
+### Run headless (no GUI)
+
+```bash
+cp corral.example.yaml corral.yaml      # edit it
+export CORRAL_NOTION_DEFAULT=...        # BYOK secrets (see corral.example.yaml)
+export CORRAL_GITHUB_DEFAULT=...
+export CORRAL_ANTHROPIC_DEFAULT=...
+pnpm build && pnpm start corral.yaml    # control plane on http://localhost:4100
+```
+
+### Run the desktop app (dev)
+
+```bash
+pnpm build                              # build the core
+pnpm -C renderer dev                    # Vite dev server on :5173 (terminal 1)
+# terminal 2:
+pnpm -C desktop build
+CORRAL_RENDERER_URL=http://localhost:5173 CORRAL_CORE_ENTRY="$PWD/dist/main.js" pnpm -C desktop start
+```
+
+The wizard writes config to the OS app-data dir and secrets to the OS keychain.
+
+### Package installers
+
+```bash
+pnpm package            # builds core + renderer + desktop, then electron-builder
+```
+
+Output lands in `desktop/release/`. No proprietary binaries are bundled — provider
+CLIs are detected on the user's machine, never redistributed.
 
 ## License
 
