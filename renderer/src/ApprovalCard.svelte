@@ -8,7 +8,10 @@
   }
   let { action, onApprove, onFeedback }: Props = $props();
 
-  let selection: string | undefined = $state(action.options?.[0]);
+  // `chosen` overrides the derived default; reading the prop here (not in a $state
+  // initializer) avoids the state_referenced_locally warning.
+  let chosen = $state<string | undefined>(undefined);
+  const selection = $derived(chosen ?? action.options?.[0]);
   let notes = $state('');
 
   function approve() {
@@ -33,7 +36,13 @@
     <div class="options">
       {#each action.options as opt}
         <label class:selected={selection === opt}>
-          <input type="radio" name={`opt-${action.id}`} value={opt} bind:group={selection} />
+          <input
+            type="radio"
+            name={`opt-${action.id}`}
+            value={opt}
+            checked={selection === opt}
+            onchange={() => (chosen = opt)}
+          />
           {opt}
         </label>
       {/each}

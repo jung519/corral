@@ -67,12 +67,10 @@
     saving = true;
     try {
       if (window.corral) {
-        // Desktop: secrets → OS keychain, config → file, then start the child core.
         for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
         await window.corral.config.write(buildConfigYaml(s));
         await window.corral.startOrchestrator();
       } else {
-        // Headless/browser: persist via the control plane (file-backed credentials).
         const res = await fetch('/api/setup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -117,85 +115,86 @@
     <h1>{steps[step]}</h1>
 
     {#if step === 0}
-      <label>Provider</label>
+      <span class="lbl">Provider</span>
       <div class="row">
         {#each ['claude', 'gemini', 'gpt'] as p}
           <button class:sel={s.provider === p} onclick={() => (s.provider = p as WizardState['provider'])}>{p}</button>
         {/each}
       </div>
-      <label>Transport</label>
+      <span class="lbl">Transport</span>
       <div class="row">
         {#each ['cli', 'api'] as t}
           <button class:sel={s.transport === t} onclick={() => (s.transport = t as WizardState['transport'])}>{t}</button>
         {/each}
       </div>
-      <label>API key (BYOK — stored in the OS keychain){s.transport === 'cli' ? ' · optional for cli' : ''}</label>
-      <input type="password" bind:value={s.agentKey} placeholder="sk-..." />
+      <label class="field"
+        ><span>API key (BYOK — stored in the OS keychain){s.transport === 'cli' ? ' · optional for cli' : ''}</span>
+        <input type="password" bind:value={s.agentKey} placeholder="sk-..." /></label
+      >
       <div class="testrow">
         <button onclick={testAgent} disabled={!hasBridge || !s.agentKey}>Test key</button>
         {@render result(test.agent)}
       </div>
       <div class="two">
-        <div><label>Planning model</label><input bind:value={s.planningModel} /></div>
-        <div><label>Implementation model</label><input bind:value={s.implementationModel} /></div>
+        <label class="field"><span>Planning model</span><input bind:value={s.planningModel} /></label>
+        <label class="field"><span>Implementation model</span><input bind:value={s.implementationModel} /></label>
       </div>
     {:else if step === 1}
-      <label>Repository (owner/name)</label>
-      <input bind:value={s.repo} placeholder="acme/widgets" />
-      <label>GitHub token (keychain)</label>
-      <input type="password" bind:value={s.githubToken} />
+      <label class="field"><span>Repository (owner/name)</span><input bind:value={s.repo} placeholder="acme/widgets" /></label>
+      <label class="field"><span>GitHub token (keychain)</span><input type="password" bind:value={s.githubToken} /></label>
       <div class="testrow">
         <button onclick={testGithub} disabled={!hasBridge || !s.githubToken}>Test token</button>
         {@render result(test.github)}
       </div>
       <div class="two">
-        <div><label>Routing key</label><input bind:value={s.repoKey} /></div>
-        <div><label>Production branch</label><input bind:value={s.production} /></div>
+        <label class="field"><span>Routing key</span><input bind:value={s.repoKey} /></label>
+        <label class="field"><span>Production branch</span><input bind:value={s.production} /></label>
       </div>
-      <label>Development branch</label>
-      <input bind:value={s.development} />
+      <label class="field"><span>Development branch</span><input bind:value={s.development} /></label>
     {:else if step === 2}
-      <label>Tracker (where issues come from — not limited to Notion)</label>
+      <span class="lbl">Tracker (where issues come from — not limited to Notion)</span>
       <div class="row">
         <button class:sel={s.trackerKind === 'notion'} onclick={() => (s.trackerKind = 'notion' as TrackerKind)}>Notion</button>
-        <button class:sel={s.trackerKind === 'github_issues'} onclick={() => (s.trackerKind = 'github_issues' as TrackerKind)}>GitHub Issues</button>
+        <button class:sel={s.trackerKind === 'github_issues'} onclick={() => (s.trackerKind = 'github_issues' as TrackerKind)}
+          >GitHub Issues</button
+        >
       </div>
 
       {#if s.trackerKind === 'notion'}
-        <label>Notion database id</label>
-        <input bind:value={s.notionDb} />
-        <label>Notion token (keychain)</label>
-        <input type="password" bind:value={s.notionToken} />
+        <label class="field"><span>Notion database id</span><input bind:value={s.notionDb} /></label>
+        <label class="field"><span>Notion token (keychain)</span><input type="password" bind:value={s.notionToken} /></label>
         <div class="testrow">
           <button onclick={testNotion} disabled={!hasBridge || !s.notionToken}>Test token</button>
           {@render result(test.notion)}
         </div>
         <div class="two">
-          <div><label>Status property</label><input bind:value={s.statusProp} /></div>
-          <div><label>ID property</label><input bind:value={s.idProp} /></div>
+          <label class="field"><span>Status property</span><input bind:value={s.statusProp} /></label>
+          <label class="field"><span>ID property</span><input bind:value={s.idProp} /></label>
         </div>
         <div class="two">
-          <div><label>Repo property (optional)</label><input bind:value={s.repoProp} /></div>
-          <div><label>Scope checkbox (optional)</label><input bind:value={s.scopeProp} /></div>
+          <label class="field"><span>Repo property (optional)</span><input bind:value={s.repoProp} /></label>
+          <label class="field"><span>Scope checkbox (optional)</span><input bind:value={s.scopeProp} /></label>
         </div>
       {:else}
-        <label>Issues repo (blank = work repo{s.repo ? ` ${s.repo}` : ''})</label>
-        <input bind:value={s.issuesRepo} placeholder={s.repo || 'owner/name'} />
+        <label class="field"
+          ><span>Issues repo (blank = work repo{s.repo ? ` ${s.repo}` : ''})</span>
+          <input bind:value={s.issuesRepo} placeholder={s.repo || 'owner/name'} /></label
+        >
         <div class="two">
-          <div><label>Scope label (optional gate)</label><input bind:value={s.scopeLabel} /></div>
-          <div><label>Identifier prefix</label><input bind:value={s.identifierPrefix} /></div>
+          <label class="field"><span>Scope label (optional gate)</span><input bind:value={s.scopeLabel} /></label>
+          <label class="field"><span>Identifier prefix</span><input bind:value={s.identifierPrefix} /></label>
         </div>
         <p class="hint">Uses your GitHub token. Semantic states map to issue labels below.</p>
       {/if}
 
-      <label>{s.trackerKind === 'notion' ? 'State → Notion status' : 'State → GitHub label'}</label>
+      <span class="lbl">{s.trackerKind === 'notion' ? 'State → Notion status' : 'State → GitHub label'}</span>
       <div class="states">
         {#each Object.keys(s.states) as k}
-          <div><span>{k}</span><input bind:value={s.states[k as keyof WizardState['states']]} /></div>
+          <label><span>{k}</span><input bind:value={s.states[k as keyof WizardState['states']]} /></label>
         {/each}
       </div>
     {:else if step === 3}
-      <label>Workspace backend</label>
+      <span class="lbl">Workspace backend</span>
       <div class="row">
         {#each ['local', 'docker'] as b}
           <button class:sel={s.backend === b} onclick={() => (s.backend = b as WizardState['backend'])}>{b}</button>
@@ -205,12 +204,12 @@
       {#if docker}<p class="hint">{docker.available ? `✓ ${docker.version}` : '✗ Docker not found — use local'}</p>{/if}
     {:else if step === 4}
       <div class="two">
-        <div><label>Control-plane port</label><input type="number" bind:value={s.port} /></div>
-        <div><label>Max active issues</label><input type="number" bind:value={s.maxActive} /></div>
+        <label class="field"><span>Control-plane port</span><input type="number" bind:value={s.port} /></label>
+        <label class="field"><span>Max active issues</span><input type="number" bind:value={s.maxActive} /></label>
       </div>
       <div class="two">
-        <div><label>Language</label><input bind:value={s.language} /></div>
-        <div><label>Stack profile</label><input bind:value={s.stack} /></div>
+        <label class="field"><span>Language</span><input bind:value={s.language} /></label>
+        <label class="field"><span>Stack profile</span><input bind:value={s.stack} /></label>
       </div>
     {/if}
 
@@ -277,11 +276,21 @@
     font-size: 20px;
     margin: 0 0 20px;
   }
-  label {
+  .lbl {
     display: block;
     font-size: 13px;
     color: var(--text-dim);
     margin: 14px 0 6px;
+  }
+  .field {
+    display: block;
+    margin-top: 14px;
+  }
+  .field > span {
+    display: block;
+    font-size: 13px;
+    color: var(--text-dim);
+    margin-bottom: 6px;
   }
   .row {
     display: flex;
@@ -300,7 +309,7 @@
     display: grid;
     gap: 6px;
   }
-  .states div {
+  .states label {
     display: grid;
     grid-template-columns: 120px 1fr;
     align-items: center;
