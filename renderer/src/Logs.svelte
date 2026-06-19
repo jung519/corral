@@ -45,9 +45,7 @@
 
 <style>
   .view {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 24px;
+    padding: 24px 28px;
   }
   h1 {
     font-size: 18px;

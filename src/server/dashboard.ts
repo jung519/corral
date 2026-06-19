@@ -53,6 +53,15 @@ export class DashboardServer {
       this.server = createServer((req, res) => {
         const url = req.url ?? '/';
         const method = req.method ?? 'GET';
+        // The Electron renderer is loaded from file:// (origin "null"); allow it to
+        // reach this localhost control plane (and SSE) across origins.
+        res.setHeader('Access-Control-Allow-Origin', '*');
+        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+        if (method === 'OPTIONS') {
+          res.writeHead(204);
+          res.end();
+          return;
+        }
         const json = (code: number, body: unknown): void => {
           res.writeHead(code, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(body));

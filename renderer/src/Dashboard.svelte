@@ -169,9 +169,7 @@
     background: var(--green);
   }
   main {
-    max-width: 900px;
-    margin: 0 auto;
-    padding: 20px;
+    padding: 20px 28px;
   }
   h2 {
     font-size: 14px;

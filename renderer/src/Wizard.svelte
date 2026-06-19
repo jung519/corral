@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
     buildConfigYaml,
@@ -24,6 +25,15 @@
   let docker = $state<{ available: boolean; version?: string } | null>(null);
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
+
+  // Already configured? Then this is a re-run from Settings → allow closing back.
+  let canExit = $state(false);
+  onMount(() => {
+    fetch('/api/status')
+      .then((r) => r.json())
+      .then((s: { configured: boolean }) => (canExit = s.configured))
+      .catch(() => {});
+  });
 
   function next() {
     const e = validateStep(step, s);
@@ -133,6 +143,9 @@
   </aside>
 
   <section>
+    {#if canExit}
+      <button class="close" onclick={() => (location.hash = '#/')}>✕ {t('wizard.exit')}</button>
+    {/if}
     {#if step === 0}
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
@@ -348,8 +361,16 @@
     color: var(--accent-text);
   }
   section {
+    position: relative;
     padding: 30px 36px;
-    max-width: 720px;
+    max-width: 860px;
+  }
+  .close {
+    position: absolute;
+    top: 22px;
+    right: 28px;
+    font-size: 13px;
+    padding: 5px 12px;
   }
   h1 {
     font-size: 22px;
