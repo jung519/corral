@@ -1,11 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import ApprovalCard from './ApprovalCard.svelte';
+  import PhaseBar from './PhaseBar.svelte';
+  import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
+  import { phaseColor, phaseLabelKey } from './lib/phase';
   import type { Candidate, CorralEvent, StateResponse } from './lib/types';
 
-  // NOTE: never name a reactive variable `state` — `$state` would be parsed as a
-  // store auto-subscription. Use `view` for the dashboard snapshot.
   let view: StateResponse = $state({ issues: [], pending: [], events: [] });
   let live: CorralEvent[] = $state([]);
   let candidates: Candidate[] = $state([]);
@@ -62,14 +63,14 @@
 <header>
   <span class="dot" class:on={online}></span>
   <h1>Corral</h1>
-  <span class="count">{view.issues.length} issue(s)</span>
-  <button class="primary" onclick={openCandidates}>+ Import issues</button>
+  <span class="count">{view.issues.length} {t('dash.count')}</span>
+  <button class="primary" onclick={openCandidates}>{t('dash.import')}</button>
 </header>
 
 <main>
   {#if view.pending.length > 0}
     <section>
-      <h2>Action needed</h2>
+      <h2>{t('dash.actionNeeded')}</h2>
       {#each view.pending as action (action.id)}
         <ApprovalCard {action} {onApprove} {onFeedback} />
       {/each}
@@ -77,30 +78,31 @@
   {/if}
 
   <section>
-    <h2>Issues</h2>
+    <h2>{t('dash.issues')}</h2>
     {#if view.issues.length === 0}
-      <p class="dim">No issues in flight. Import one to begin.</p>
+      <p class="dim">{t('dash.empty')}</p>
     {/if}
     {#each view.issues as issue (issue.identifier)}
       <div class="issue">
         <div class="issue-head">
           <strong>{issue.identifier}</strong>
           <span class="title">{issue.title ?? ''}</span>
-          <span class="phase">{issue.phase}</span>
+          <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase))}</span>
           <span class="cost">${issue.cost.toFixed(4)}</span>
         </div>
+        <div class="bar-row"><PhaseBar phase={issue.phase} /></div>
         <div class="issue-actions">
-          {#if issue.url}<a href={issue.url} target="_blank" rel="noreferrer">tracker</a>{/if}
-          {#if issue.pr?.url}<a href={issue.pr.url} target="_blank" rel="noreferrer">PR #{issue.pr.number}</a>{/if}
-          {#if issue.pr}<button onclick={() => complete(issue.identifier)}>Complete</button>{/if}
-          {#if issue.stuck}<button onclick={() => retry(issue.identifier)}>Retry</button>{/if}
+          {#if issue.url}<a href={issue.url} target="_blank" rel="noreferrer">{t('dash.tracker')} ↗</a>{/if}
+          {#if issue.pr?.url}<a href={issue.pr.url} target="_blank" rel="noreferrer">PR #{issue.pr.number} ↗</a>{/if}
+          {#if issue.pr}<button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</button>{/if}
+          {#if issue.stuck}<button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</button>{/if}
         </div>
       </div>
     {/each}
   </section>
 
   <section>
-    <h2>Timeline</h2>
+    <h2>{t('dash.timeline')}</h2>
     <div class="timeline">
       {#each live.slice().reverse() as e}
         <div class="event"><span class="ev-id">{e.identifier}</span> {e.label}</div>
@@ -119,19 +121,19 @@
     }}
   >
     <div class="modal" role="dialog" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
-      <h2>Candidate issues</h2>
-      {#if candidates.length === 0}<p class="dim">None available.</p>{/if}
+      <h2>{t('dash.candidates')}</h2>
+      {#if candidates.length === 0}<p class="dim">{t('dash.none')}</p>{/if}
       {#each candidates as c (c.identifier)}
         <div class="candidate">
           <span><strong>{c.identifier}</strong> {c.title}</span>
           {#if c.inFlight}
-            <span class="dim">in flight</span>
+            <span class="dim">{t('dash.inFlight')}</span>
           {:else}
-            <button class="primary" onclick={() => start(c.identifier)}>Start</button>
+            <button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</button>
           {/if}
         </div>
       {/each}
-      <button onclick={() => (showCandidates = false)}>Close</button>
+      <button onclick={() => (showCandidates = false)}>{t('dash.close')}</button>
     </div>
   </div>
 {/if}
@@ -202,17 +204,19 @@
     background: var(--surface-2);
     border-radius: 6px;
     padding: 2px 8px;
-    font-size: 12px;
+    font-size: 11px;
   }
   .cost {
     color: var(--text-dim);
     font-size: 12px;
   }
+  .bar-row {
+    margin: 10px 0;
+  }
   .issue-actions {
     display: flex;
     align-items: center;
     gap: 12px;
-    margin-top: 8px;
   }
   .timeline {
     background: var(--surface);

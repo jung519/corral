@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './lib/i18n.svelte';
   import type { PendingAction } from './lib/types';
 
   interface Props {
@@ -49,11 +50,11 @@
     </div>
   {/if}
 
-  <textarea rows="2" placeholder="Notes (optional for approve, required to request changes)" bind:value={notes}></textarea>
+  <textarea rows="2" placeholder={t('card.notes')} bind:value={notes}></textarea>
 
   <div class="actions">
-    <button class="primary" onclick={approve}>Approve</button>
-    <button onclick={requestChanges} disabled={!notes.trim()}>Request changes</button>
+    <button class="primary" onclick={approve}>{t('card.approve')}</button>
+    <button onclick={requestChanges} disabled={!notes.trim()}>{t('card.requestChanges')}</button>
   </div>
 </div>
 
