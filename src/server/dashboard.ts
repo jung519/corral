@@ -18,7 +18,9 @@
  * Lifted from upstream (renamed SymphonyEvent → CorralEvent; start() is async so the
  * bound port is known — useful for ephemeral-port tests).
  */
-import { createServer, type IncomingMessage, type Server } from 'node:http';
+import { existsSync, readFileSync } from 'node:fs';
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { extname, join, normalize, resolve } from 'node:path';
 import type { WebChannel } from '../channel/web.js';
 import { bus, type CorralEvent } from '../core/events.js';
 import type { IssueRuntime } from '../core/issue-state.js';
@@ -56,9 +58,10 @@ export class DashboardServer {
 
         void (async () => {
           try {
-            if (url === '/' || url.startsWith('/?')) {
-              res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-              res.end(PAGE);
+            if (method === 'GET' && (url === '/' || url.startsWith('/?'))) {
+              this.serveRenderer('/index.html', res);
+            } else if (method === 'GET' && url.startsWith('/assets/')) {
+              this.serveRenderer((url.split('?')[0] ?? url), res);
             } else if (url.startsWith('/api/state')) {
               json(200, { issues: this.deps.snapshot(), pending: this.deps.channel.getPending(), events: bus.recent() });
             } else if (url.startsWith('/api/candidates')) {
@@ -118,6 +121,41 @@ export class DashboardServer {
   stop(): void {
     this.server?.close();
   }
+
+  /** Serve the built Svelte renderer (renderer/dist) for headless/browser use.
+   * In the packaged desktop app the renderer is loaded via file:// instead. */
+  private serveRenderer(rel: string, res: ServerResponse): void {
+    const dist = resolve(process.env.CORRAL_RENDERER_DIST ?? 'renderer/dist');
+    const file = join(dist, normalize(rel).replace(/^(\.\.[/\\])+/, ''));
+    if (!file.startsWith(dist)) {
+      res.writeHead(403);
+      res.end('forbidden');
+      return;
+    }
+    if (existsSync(file)) {
+      res.writeHead(200, { 'Content-Type': contentType(file) });
+      res.end(readFileSync(file));
+    } else if (rel === '/index.html') {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+      res.end(PAGE); // renderer not built — show the placeholder
+    } else {
+      res.writeHead(404);
+      res.end('not found');
+    }
+  }
+}
+
+function contentType(file: string): string {
+  return (
+    {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'text/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.json': 'application/json',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+    }[extname(file)] ?? 'application/octet-stream'
+  );
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
