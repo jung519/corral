@@ -64,13 +64,13 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     );
   }
 
-  const apiKey =
-    config.agent.transport === 'api' && config.agent.credential
-      ? await requireSecret(config.agent.credential, 'agent')
-      : null;
-  const agent = createAgent(config.agent, { apiKey });
-
   const workspace = workspaces.create({ kind: config.workspace.backend, ...config.workspace }, {});
+
+  // The agent's API key (BYOK) is resolved when a credential is configured. It is
+  // required for `api` (enforced by the schema) and optional for `cli` (the user
+  // may rely on their own CLI login instead).
+  const apiKey = config.agent.credential ? await requireSecret(config.agent.credential, 'agent') : null;
+  const agent = createAgent(config.agent, { apiKey, io: workspace.io });
   const channel = channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
   return {

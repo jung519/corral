@@ -1,15 +1,19 @@
-/** Provider-neutral AgentAdapter: maps an orchestrator run into a transport turn
- * and aggregates the normalized event stream into an AgentRunResult.
+/** Provider-neutral AgentAdapter: maps an orchestrator run into a transport turn,
+ * streams the transport's normalized events to the event bus (live timeline), and
+ * aggregates them into an AgentRunResult.
  *
  * This aggregation is net-new logic (NOT lifted from upstream) and is exercised by
- * tests with a fake transport, so it works before any real transport exists. */
-import type { AgentAdapter, AgentRunOptions, AgentRunResult, Issue, WorkspaceHandle } from '../core/types.js';
+ * tests with a fake transport, so it works before any real transport runs. */
+import { bus } from '../core/events.js';
+import type { AgentAdapter, AgentRunOptions, AgentRunResult, Issue, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 import type { AgentTransport, AgentTurnSpec, StageModels } from './types.js';
 
 export interface GenericAgentOptions {
   primary: boolean;
   /** Per-stage model mapping; opts.model overrides. */
   models: StageModels;
+  /** Workspace file IO, used by the transport to write the workflow guide. */
+  io: WorkspaceIO;
 }
 
 export class GenericAgent implements AgentAdapter {
@@ -26,11 +30,14 @@ export class GenericAgent implements AgentAdapter {
 
   async run(workspace: WorkspaceHandle, _issue: Issue, opts: AgentRunOptions): Promise<AgentRunResult> {
     const spec: AgentTurnSpec = {
-      cwd: workspace.workdir,
+      handle: workspace,
+      io: this.options.io,
       prompt: opts.prompt,
+      workflow: opts.workflow,
       model: opts.model ?? this.options.models[opts.stage],
       continueSession: opts.continueSession,
       maxTurns: opts.maxTurns,
+      maxBudgetUsd: opts.maxBudgetUsd,
       turnTimeoutMs: opts.turnTimeoutMs,
       allowedTools: opts.allowedTools,
       signal: opts.signal,
@@ -42,24 +49,27 @@ export class GenericAgent implements AgentAdapter {
     let error: AgentRunResult['error'];
     let exitCode: number | null = null;
 
-    for await (const ev of this.transport.run(spec)) {
-      switch (ev.type) {
+    await this.transport.run(spec, (event) => {
+      switch (event.type) {
         case 'usage':
-          costUsd += ev.costUsd;
-          inputTokens += ev.inputTokens;
-          outputTokens += ev.outputTokens;
+          costUsd = event.costUsd;
+          inputTokens += event.inputTokens;
+          outputTokens += event.outputTokens;
           break;
         case 'error':
-          error = ev.error;
+          error = event.error;
           break;
         case 'done':
-          exitCode = ev.exitCode;
+          exitCode = event.exitCode;
           break;
         case 'text':
+          bus.emitEvent({ identifier: workspace.id, kind: 'activity', label: `💬 ${event.text}`, data: { stage: opts.stage } });
+          break;
         case 'tool_use':
+          bus.emitEvent({ identifier: workspace.id, kind: 'activity', label: `🔧 ${event.name}`, data: { stage: opts.stage } });
           break;
       }
-    }
+    });
 
     const ok = !error && (exitCode === 0 || exitCode === null);
     return { ok, costUsd, inputTokens, outputTokens, error, exitCode };

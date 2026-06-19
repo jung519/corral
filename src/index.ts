@@ -16,6 +16,8 @@ export { IssueStateStore, type IssueRuntime, DEFAULT_STATE_DIR } from './core/is
 export { CostTracker, type CostEntry } from './core/cost-tracker.js';
 export * from './agent/types.js';
 export { createAgent, agentTransports, type AgentTransportCtx } from './agent/index.js';
+export { ClaudeCliTransport } from './agent/claude-cli.js';
+export { ClaudeApiTransport } from './agent/claude-api.js';
 export {
   renderWorkflow,
   kickoffPrompt,

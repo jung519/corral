@@ -14,7 +14,7 @@
  *
  * Concrete transports (ClaudeApi, ClaudeCli, …) land in S2+; api is the priority path.
  */
-import type { AgentStage } from '../core/types.js';
+import type { AgentStage, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 
 export type AgentProviderId = 'claude' | 'gemini' | 'gpt';
 export type AgentTransportId = 'api' | 'cli';
@@ -44,15 +44,20 @@ export type AgentEvent =
 
 /** A single agent turn, transport-neutral. */
 export interface AgentTurnSpec {
-  /** Working directory the turn executes in (workspace workdir). */
-  cwd: string;
+  /** The workspace (backend + id + workdir) the turn runs against. */
+  handle: WorkspaceHandle;
+  /** File IO into the workspace (used to write the workflow guide before running). */
+  io: WorkspaceIO;
   /** The turn message / instruction. */
   prompt: string;
+  /** Rendered workflow guide; empty string = don't (over)write it (e.g. side runs). */
+  workflow: string;
   /** Resolved model id for this stage, if any. */
   model?: string;
   /** Keep session memory across turns (provider's "continue" semantics). */
   continueSession: boolean;
   maxTurns?: number;
+  maxBudgetUsd?: number;
   turnTimeoutMs?: number;
   allowedTools?: string[];
   signal?: AbortSignal;
@@ -61,12 +66,16 @@ export interface AgentTurnSpec {
 /**
  * A transport bound to one provider (i.e. one cell of the provider × transport matrix).
  * Registered in the agent Registry under a `${provider}:${transport}` key.
+ *
+ * Streaming is callback-based: `run` invokes `onEvent` for each normalized event
+ * (text / tool_use / usage / error) and resolves when the turn ends (after a final
+ * `done` event). This avoids bridging spawn callbacks to an async iterator.
  */
 export interface AgentTransport {
   readonly provider: AgentProviderId;
   readonly transport: AgentTransportId;
   /** Verify usability without running a turn (key present / binary installed). */
   preflight(): Promise<PreflightResult>;
-  /** Execute one turn, yielding normalized events. */
-  run(spec: AgentTurnSpec): AsyncIterable<AgentEvent>;
+  /** Execute one turn, streaming normalized events through onEvent. */
+  run(spec: AgentTurnSpec, onEvent: (event: AgentEvent) => void): Promise<void>;
 }

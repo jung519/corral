@@ -8,9 +8,9 @@
 import type { WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 import { run } from '../util/exec.js';
 
-const USER = 'worker';
+export const WORKER_USER = 'worker';
 
-function containerName(handle: WorkspaceHandle): string {
+export function containerName(handle: WorkspaceHandle): string {
   return `corral-${handle.id}`;
 }
 
@@ -23,7 +23,7 @@ async function dexec(
   const args = [
     'exec',
     '--user',
-    USER,
+    WORKER_USER,
     '-w',
     handle.workdir,
     ...(input !== undefined ? ['-i'] : []),
