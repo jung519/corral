@@ -34,5 +34,6 @@ export {
 } from './profile/index.js';
 export { trackers } from './tracker/index.js';
 export { repositories } from './repository/index.js';
-export { workspaces } from './workspace/index.js';
+export { workspaces, dockerOptionsFromConfig, type WorkspaceCtx } from './workspace/index.js';
+export { run, runOrThrow, type ExecResult, type ExecOptions } from './util/exec.js';
 export { channels } from './channel/index.js';

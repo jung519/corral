@@ -67,7 +67,7 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
       : null;
   const agent = createAgent(config.agent, { apiKey });
 
-  const workspace = workspaces.create({ kind: config.workspace.backend }, undefined);
+  const workspace = workspaces.create({ kind: config.workspace.backend, ...config.workspace }, {});
   const channel = channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
   return {

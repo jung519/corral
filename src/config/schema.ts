@@ -132,14 +132,19 @@ export const AgentSchema = z
 export const WorkspaceSchema = z
   .object({
     backend: z.enum(['docker', 'local']).default('local'),
+    /** Local backend: host dir under which each issue's repo is cloned. */
+    root: z.string().default('.corral-workspaces'),
     docker: z
       .object({
         image: z.string().default('corral-worker:latest'),
         memory: z.string().optional(),
+        cpus: z.string().optional(),
+        /** Extra env injected into the worker container. */
+        env: z.record(z.string()).optional(),
       })
       .optional(),
   })
-  .default({ backend: 'local' });
+  .default({});
 
 // ───────────────────────────────────────────────────────────── axis 5: channel
 
