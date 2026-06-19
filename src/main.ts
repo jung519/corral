@@ -48,10 +48,12 @@ async function setup(input: SetupInput): Promise<{ ok: boolean; message?: string
 }
 
 async function main(): Promise<void> {
+  // Precedence: CORRAL_PORT env > config channel.port > default 4400.
   let port = Number(process.env.CORRAL_PORT) || 4400;
   if (existsSync(configPath)) {
     try {
-      port = (await loadConfig(configPath)).channel.port;
+      const cfg = await loadConfig(configPath);
+      if (!process.env.CORRAL_PORT) port = cfg.channel.port;
       await configure();
     } catch (err) {
       logger.error(`config present but failed to start: ${err instanceof Error ? err.message : String(err)}`);
