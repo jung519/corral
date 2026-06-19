@@ -13,6 +13,10 @@ export async function getState(): Promise<StateResponse> {
   return (await fetch('/api/state')).json() as Promise<StateResponse>;
 }
 
+export async function getStatus(): Promise<{ configured: boolean }> {
+  return (await fetch('/api/status')).json() as Promise<{ configured: boolean }>;
+}
+
 export async function getCandidates(): Promise<Candidate[]> {
   const data = (await (await fetch('/api/candidates')).json()) as { candidates: Candidate[] };
   return data.candidates;

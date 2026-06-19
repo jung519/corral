@@ -32,11 +32,11 @@
 첫 실행(설정 없음) ─────────────▶ 설정 마법사 (#/setup, 전체화면)
                                       └ 완료 → 앱 셸로 전환
 설정 있음 ───────────────────────▶ 앱 셸
-  ├─ Dashboard  (#/)        실행 중 이슈 + 액션 필요 + 타임라인
-  ├─ Issues     (#/issues)  이슈 가져오기/목록(후보 모달은 Dashboard에서)
-  ├─ Settings   (#/settings) 설정 재편집 + 자격증명 관리
-  ├─ Logs       (#/logs)     오케스트레이터/이슈 로그
-  └─ About      (#/about)    버전 · 오픈소스 라이선스
+  ├─ Dashboard  (#/)        실행 중 이슈 + 액션 필요 + 타임라인 (이슈 가져오기 모달 포함)
+  ├─ Logs       (#/logs)     전체 이벤트 로그 (실시간)
+  ├─ Settings   (#/settings) 설정 상태 · 다시 설정 · UI 언어
+  └─ About      (#/about)    태그라인 · 라이선스 · 저장소
+  (Issues는 Dashboard에 통합 — 별도 메뉴 없음)
 ```
 좌측 내비 폭 200px. 승인 필요 시 Dashboard 항목에 배지 + (Electron) OS 알림.
 
@@ -132,8 +132,8 @@ Timeline (live)
 | 마법사 5단계 | ✓ | ✓ **목업 일치** (프로바이더 카드·넓은 라디오·검증됨 배지·부제/헬퍼·스텝퍼+진행바) | 완료 |
 | 대시보드 헤더/이슈/타임라인 | ✓ | ✓ **PhaseBar(단계 진행 바)+phase 색 배지+i18n 적용** | 완료 |
 | 승인 카드 | ✓ | ✓ (i18n) | 완료 |
-| 앱 셸 좌측 내비(Issues/Settings/Logs/About) | ✓ | ✗ | 내비·Settings·Logs·About 화면 미구현 |
-| Toast 알림 | ✓ | ✗ | 미구현(현재 alert) |
-| a11y(label 연결) | ✓ | △ | 경고 다수 |
+| 앱 셸 좌측 내비(Dashboard/Logs/Settings/About) | ✓ | ✓ **구현** (해시 라우팅·active 강조·i18n) | 완료 (Issues는 Dashboard 통합) |
+| Toast 알림 | ✓ | ✗ (현재 alert) | 미구현 |
+| a11y(label 연결) | ✓ | ✓ | 완료 (svelte-check 0 warnings) |
 
 → 이 갭이 "보여준 UI와 다르다"의 실체입니다. 다음 작업에서 위 표를 위→아래로 좁힙니다.
