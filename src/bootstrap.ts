@@ -9,6 +9,7 @@ import { loadConfig } from './config/loader.js';
 import type { Config } from './config/schema.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import { type CredentialRef, type CredentialStore, envVarNameFor } from './credentials/types.js';
+import { logger } from './core/logger.js';
 import type {
   AgentAdapter,
   ChannelAdapter,
@@ -47,37 +48,42 @@ export interface BootstrapDeps {
 export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promise<App> {
   const credentials = deps.credentials ?? new EnvCredentialStore();
 
-  const requireSecret = async (ref: CredentialRef, what: string): Promise<string> => {
+  // Resolve secrets tolerantly: a missing credential does NOT block boot (so the
+  // control plane / dashboard / setup wizard can start before keys are configured).
+  // The relevant action fails later with a clear auth error when it actually needs it.
+  const missing: string[] = [];
+  const resolveSecret = async (ref: CredentialRef, what: string): Promise<string> => {
     const secret = await credentials.get(ref);
     if (!secret) {
-      throw new Error(
-        `missing credential for ${what} (service="${ref.service}", account="${ref.account}"); ` +
-          `set ${envVarNameFor(ref)}`,
-      );
+      missing.push(`${what} → ${envVarNameFor(ref)}`);
+      return '';
     }
     return secret;
   };
 
   const tracker = trackers.create(config.tracker, {
-    token: await requireSecret(config.tracker.credential, 'tracker'),
+    token: await resolveSecret(config.tracker.credential, 'tracker'),
   });
 
   const repositoryList: RepositoryAdapter[] = [];
   for (const repo of config.repositories) {
     repositoryList.push(
       repositoryRegistry.create(repo, {
-        token: await requireSecret(repo.credential, `repository "${repo.key}"`),
+        token: await resolveSecret(repo.credential, `repository "${repo.key}"`),
       }),
     );
   }
 
   const workspace = workspaces.create({ kind: config.workspace.backend, ...config.workspace }, {});
 
-  // The agent's API key (BYOK) is resolved when a credential is configured. It is
-  // required for `api` (enforced by the schema) and optional for `cli` (the user
-  // may rely on their own CLI login instead).
-  const apiKey = config.agent.credential ? await requireSecret(config.agent.credential, 'agent') : null;
-  const agent = createAgent(config.agent, { apiKey, io: workspace.io });
+  // The agent's API key (BYOK); optional for `cli` (the user may rely on their own
+  // CLI login). An empty resolution is treated as "no key" (null).
+  const resolvedKey = config.agent.credential ? await resolveSecret(config.agent.credential, 'agent') : '';
+  const agent = createAgent(config.agent, { apiKey: resolvedKey || null, io: workspace.io });
+
+  if (missing.length > 0) {
+    logger.warn(`starting without some credentials (configure before running issues): ${missing.join(', ')}`);
+  }
   const channel = channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
   const profile = resolveProfile(config.profile);

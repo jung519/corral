@@ -41,11 +41,13 @@ describe('bootstrap', () => {
     expect(app.channel.kind).toBe('web');
   });
 
-  it('fails with a clear message when a credential is missing', async () => {
-    const noAgentKey = new MapStore({ 'notion:default': 'ntn', 'github:default': 'ghp' });
-    await expect(bootstrap(config, { credentials: noAgentKey })).rejects.toThrow(
-      /missing credential for agent.*CORRAL_ANTHROPIC_DEFAULT/s,
-    );
+  it('boots even when credentials are missing (deferred, not fatal)', async () => {
+    const empty = new MapStore({}); // no secrets at all
+    const app = await bootstrap(config, { credentials: empty });
+    // The control plane must come up so the dashboard / setup wizard can run.
+    expect(app.tracker.kind).toBe('notion');
+    expect(app.agent.kind).toBe('claude');
+    expect(app.repositories).toHaveLength(1);
   });
 
   it('derives a github clone url and branch name from config', async () => {
