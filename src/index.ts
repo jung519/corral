@@ -35,6 +35,8 @@ export { runSemgrep, type SemgrepConfig } from './review/semgrep-runner.js';
 export { reviewRoundPrompt, planCritiquePrompt } from './review/prompt.js';
 export * from './credentials/types.js';
 export { EnvCredentialStore } from './credentials/env-store.js';
+export { FileCredentialStore } from './credentials/file-store.js';
+export { LayeredCredentialStore } from './credentials/layered.js';
 export * from './config/schema.js';
 export { loadConfig, parseConfig } from './config/loader.js';
 export { bootstrap, bootstrapFromFile, type App, type BootstrapDeps } from './bootstrap.js';
@@ -60,4 +62,4 @@ export { workspaces, dockerOptionsFromConfig, type WorkspaceCtx } from './worksp
 export { run, runOrThrow, type ExecResult, type ExecOptions } from './util/exec.js';
 export { channels } from './channel/index.js';
 export { WebChannel, type PendingAction, type IssueDiff } from './channel/web.js';
-export { DashboardServer, type DashboardDeps } from './server/dashboard.js';
+export { DashboardServer, type DashboardDeps, type SetupInput } from './server/dashboard.js';

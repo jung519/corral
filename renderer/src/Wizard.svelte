@@ -57,15 +57,29 @@
         return;
       }
     }
-    if (!window.corral) {
-      error = 'Run inside the Corral desktop app to save (the browser cannot access the keychain).';
-      return;
-    }
     saving = true;
     try {
-      for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
-      await window.corral.config.write(buildConfigYaml(s));
-      await window.corral.startOrchestrator();
+      if (window.corral) {
+        // Desktop: secrets → OS keychain, config → file, then start the child core.
+        for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
+        await window.corral.config.write(buildConfigYaml(s));
+        await window.corral.startOrchestrator();
+      } else {
+        // Headless/browser: persist via the control plane (file-backed credentials).
+        const res = await fetch('/api/setup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ config: buildConfigYaml(s), secrets: secretsFor(s) }),
+        });
+        const out = (await res.json()) as { ok: boolean; message?: string };
+        if (!out.ok) {
+          error = out.message ?? 'Setup failed.';
+          saving = false;
+          return;
+        }
+      }
+      location.hash = '#/';
+      location.reload();
     } catch (err) {
       error = `Save failed: ${err instanceof Error ? err.message : String(err)}`;
       saving = false;

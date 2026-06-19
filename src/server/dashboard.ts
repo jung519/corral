@@ -1,44 +1,46 @@
 /**
  * Control-plane HTTP server — read status AND drive every action over JSON + SSE.
- * No polling: the user's clicks (POSTs) advance the flow. This is the data plane
- * the orchestrator commands hang off; it runs headless (browser) and is the same
- * surface the Electron renderer loads.
+ * Runs even when Corral is NOT yet configured: in that state it serves the setup
+ * wizard and accepts POST /api/setup (write config + secrets), then the entrypoint
+ * brings the orchestrator up. No external program or pre-set config is required to
+ * start. Same surface the Electron renderer loads.
  *
- *   GET  /                → SPA placeholder (Svelte renderer lands next)
+ *   GET  /                → built renderer (wizard if unconfigured, else dashboard)
+ *   GET  /api/status      → { configured }
+ *   POST /api/setup       → { config (yaml), secrets:[{service,account,value}] }
  *   GET  /api/state       → { issues, pending, events }
  *   GET  /api/candidates  → on-demand tracker fetch
  *   GET  /api/diffs?id=   → diffs for an issue
- *   POST /api/start       → { identifier }
- *   POST /api/complete    → { identifier, force? }
- *   POST /api/retry       → { identifier }
- *   POST /api/refine      → { identifier, focus }
- *   POST /api/action      → { id, type:'approve'|'feedback', selection?, text? }
+ *   POST /api/start|complete|retry|refine|action
  *   GET  /events          → SSE live stream
- *
- * Lifted from upstream (renamed SymphonyEvent → CorralEvent; start() is async so the
- * bound port is known — useful for ephemeral-port tests).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { extname, join, normalize, resolve } from 'node:path';
 import type { WebChannel } from '../channel/web.js';
 import { bus, type CorralEvent } from '../core/events.js';
-import type { IssueRuntime } from '../core/issue-state.js';
 import { logger } from '../core/logger.js';
+import type { Orchestrator } from '../orchestrator.js';
+
+export interface SetupInput {
+  /** corral.yaml contents. */
+  config: string;
+  /** Secrets to persist to the credential store (keychain / file). */
+  secrets: Array<{ service: string; account: string; value: string }>;
+}
 
 export interface DashboardDeps {
-  snapshot: () => Array<IssueRuntime & { cost: number }>;
   channel: WebChannel;
-  listCandidates: () => Promise<Array<{ identifier: string; title: string; state: string; inFlight: boolean }>>;
-  startIssue: (identifier: string) => Promise<{ ok: boolean; message?: string }>;
-  completeIssue: (identifier: string, force: boolean) => Promise<{ ok: boolean; merged?: boolean; message?: string }>;
-  retryIssue: (identifier: string) => Promise<{ ok: boolean; message?: string }>;
-  refineIssue: (identifier: string, focus: string) => Promise<{ ok: boolean; message?: string }>;
+  /** The orchestrator once configured; undefined in setup mode. */
+  orchestrator: () => Orchestrator | undefined;
+  /** Persist config + secrets, then bring the orchestrator up. */
+  setup: (input: SetupInput) => Promise<{ ok: boolean; message?: string }>;
 }
+
+const NOT_CONFIGURED = { ok: false, message: 'Corral is not configured yet — finish setup first.' };
 
 export class DashboardServer {
   private server?: Server;
-  /** Actual listening port (differs from the requested one when 0 is passed). */
   boundPort = 0;
 
   constructor(
@@ -58,29 +60,34 @@ export class DashboardServer {
 
         void (async () => {
           try {
+            const o = this.deps.orchestrator();
             if (method === 'GET' && (url === '/' || url.startsWith('/?'))) {
               this.serveRenderer('/index.html', res);
             } else if (method === 'GET' && url.startsWith('/assets/')) {
-              this.serveRenderer((url.split('?')[0] ?? url), res);
+              this.serveRenderer(url.split('?')[0] ?? url, res);
+            } else if (url.startsWith('/api/status')) {
+              json(200, { configured: !!o });
+            } else if (url === '/api/setup' && method === 'POST') {
+              json(200, await this.deps.setup((await readBody(req)) as unknown as SetupInput));
             } else if (url.startsWith('/api/state')) {
-              json(200, { issues: this.deps.snapshot(), pending: this.deps.channel.getPending(), events: bus.recent() });
+              json(200, { issues: o ? o.snapshot() : [], pending: this.deps.channel.getPending(), events: bus.recent() });
             } else if (url.startsWith('/api/candidates')) {
-              json(200, { candidates: await this.deps.listCandidates() });
+              json(200, { candidates: o ? await o.listCandidates() : [] });
             } else if (url.startsWith('/api/diffs')) {
               const id = new URL(url, 'http://x').searchParams.get('id') ?? '';
               json(200, { diffs: this.deps.channel.getDiffs(id) });
             } else if (url === '/api/start' && method === 'POST') {
               const b = await readBody(req);
-              json(200, await this.deps.startIssue(String(b.identifier)));
+              json(200, o ? await o.startIssue(String(b.identifier)) : NOT_CONFIGURED);
             } else if (url === '/api/complete' && method === 'POST') {
               const b = await readBody(req);
-              json(200, await this.deps.completeIssue(String(b.identifier), b.force === true));
+              json(200, o ? await o.completeByUser(String(b.identifier), b.force === true) : NOT_CONFIGURED);
             } else if (url === '/api/retry' && method === 'POST') {
               const b = await readBody(req);
-              json(200, await this.deps.retryIssue(String(b.identifier)));
+              json(200, o ? await o.retry(String(b.identifier)) : NOT_CONFIGURED);
             } else if (url === '/api/refine' && method === 'POST') {
               const b = await readBody(req);
-              json(200, await this.deps.refineIssue(String(b.identifier), String(b.focus ?? '')));
+              json(200, o ? await o.refinePlan(String(b.identifier), String(b.focus ?? '')) : NOT_CONFIGURED);
             } else if (url === '/api/action' && method === 'POST') {
               const b = await readBody(req);
               const ok =
@@ -103,12 +110,12 @@ export class DashboardServer {
               res.end('not found');
             }
           } catch (err) {
-            logger.error('dashboard request failed', String(err));
+            logger.error('control-plane request failed', String(err));
             json(500, { ok: false, message: String(err) });
           }
         })();
       });
-      this.server.on('error', (err) => reject(err)); // e.g. EADDRINUSE — fail cleanly, don't crash
+      this.server.on('error', (err) => reject(err));
       this.server.listen(this.port, () => {
         const addr = this.server?.address();
         if (addr && typeof addr === 'object') this.boundPort = addr.port;
@@ -122,8 +129,7 @@ export class DashboardServer {
     this.server?.close();
   }
 
-  /** Serve the built Svelte renderer (renderer/dist) for headless/browser use.
-   * In the packaged desktop app the renderer is loaded via file:// instead. */
+  /** Serve the built Svelte renderer (renderer/dist) for headless/browser use. */
   private serveRenderer(rel: string, res: ServerResponse): void {
     const dist = resolve(process.env.CORRAL_RENDERER_DIST ?? 'renderer/dist');
     const file = join(dist, normalize(rel).replace(/^(\.\.[/\\])+/, ''));
@@ -137,25 +143,12 @@ export class DashboardServer {
       res.end(readFileSync(file));
     } else if (rel === '/index.html') {
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
-      res.end(PAGE); // renderer not built — show the placeholder
+      res.end(PAGE); // renderer not built — placeholder
     } else {
       res.writeHead(404);
       res.end('not found');
     }
   }
-}
-
-function contentType(file: string): string {
-  return (
-    {
-      '.html': 'text/html; charset=utf-8',
-      '.js': 'text/javascript; charset=utf-8',
-      '.css': 'text/css; charset=utf-8',
-      '.json': 'application/json',
-      '.svg': 'image/svg+xml',
-      '.ico': 'image/x-icon',
-    }[extname(file)] ?? 'application/octet-stream'
-  );
 }
 
 function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
@@ -172,11 +165,21 @@ function readBody(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-/** Placeholder page until the Svelte renderer is built and served (next step). */
+function contentType(file: string): string {
+  return (
+    {
+      '.html': 'text/html; charset=utf-8',
+      '.js': 'text/javascript; charset=utf-8',
+      '.css': 'text/css; charset=utf-8',
+      '.json': 'application/json',
+      '.svg': 'image/svg+xml',
+      '.ico': 'image/x-icon',
+    }[extname(file)] ?? 'application/octet-stream'
+  );
+}
+
 const PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Corral</title></head>
-<body style="font-family:system-ui,sans-serif;max-width:48rem;margin:3rem auto;padding:0 1rem;color:#1a1a1a">
+<body style="font-family:system-ui,sans-serif;max-width:48rem;margin:3rem auto;padding:0 1rem">
 <h1>Corral control plane</h1>
-<p>The API is up. The dashboard UI is built in the next step.</p>
-<p>Endpoints: <code>/api/state</code>, <code>/api/candidates</code>, <code>/api/start</code>,
-<code>/api/action</code>, and <code>/events</code> (SSE).</p>
+<p>The API is up. Build the renderer (<code>pnpm -C renderer build</code>) to see the UI.</p>
 </body></html>`;
