@@ -133,7 +133,7 @@ Timeline (live)
 | 대시보드 헤더/이슈/타임라인 | ✓ | ✓ **PhaseBar(단계 진행 바)+phase 색 배지+i18n 적용** | 완료 |
 | 승인 카드 | ✓ | ✓ (i18n) | 완료 |
 | 앱 셸 좌측 내비(Dashboard/Logs/Settings/About) | ✓ | ✓ **구현** (해시 라우팅·active 강조·i18n) | 완료 (Issues는 Dashboard 통합) |
-| Toast 알림 | ✓ | ✗ (현재 alert) | 미구현 |
+| Toast 알림 | ✓ | ✓ **구현** (자동 사라짐·클릭 닫기·kind별 색) | 완료 |
 | a11y(label 연결) | ✓ | ✓ | 완료 (svelte-check 0 warnings) |
 
 → 이 갭이 "보여준 UI와 다르다"의 실체입니다. 다음 작업에서 위 표를 위→아래로 좁힙니다.

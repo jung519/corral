@@ -4,6 +4,7 @@
   import Dashboard from './Dashboard.svelte';
   import Logs from './Logs.svelte';
   import Settings from './Settings.svelte';
+  import Toast from './Toast.svelte';
   import Wizard from './Wizard.svelte';
   import { t } from './lib/i18n.svelte';
 
@@ -34,6 +35,8 @@
     return route.startsWith(hash);
   }
 </script>
+
+<Toast />
 
 {#if isSetup}
   <Wizard />

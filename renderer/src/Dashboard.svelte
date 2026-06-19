@@ -5,6 +5,7 @@
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import { phaseColor, phaseLabelKey } from './lib/phase';
+  import { toast } from './lib/toast.svelte';
   import type { Candidate, CorralEvent, StateResponse } from './lib/types';
 
   let view: StateResponse = $state({ issues: [], pending: [], events: [] });
@@ -39,13 +40,14 @@
   }
   async function start(id: string) {
     const r = await api.startIssue(id);
-    if (!r.ok && r.message) alert(r.message);
+    if (!r.ok && r.message) toast(r.message, 'error');
     showCandidates = false;
     void refresh();
   }
   async function complete(id: string) {
     const r = await api.completeIssue(id);
-    if (!r.ok && r.message) alert(r.message);
+    if (r.ok) toast(`${id} — done`, 'success');
+    else if (r.message) toast(r.message, 'error');
     void refresh();
   }
   async function retry(id: string) {
