@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
+  import * as api from './lib/api';
   import {
     buildConfigYaml,
     initialState,
@@ -26,13 +27,12 @@
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
-  // Already configured? Then this is a re-run from Settings → allow closing back.
+  // Already configured? Then this is a re-run → allow closing back to the dashboard.
+  // Electron: ask the bridge (IPC, reliable under file://). Browser: ask the server.
   let canExit = $state(false);
   onMount(() => {
-    fetch('/api/status')
-      .then((r) => r.json())
-      .then((s: { configured: boolean }) => (canExit = s.configured))
-      .catch(() => {});
+    if (window.corral) window.corral.config.exists().then((e) => (canExit = e)).catch(() => {});
+    else api.getStatus().then((s) => (canExit = s.configured)).catch(() => {});
   });
 
   function next() {
@@ -93,12 +93,7 @@
         await window.corral.config.write(buildConfigYaml(s));
         await window.corral.startOrchestrator();
       } else {
-        const res = await fetch('/api/setup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ config: buildConfigYaml(s), secrets: secretsFor(s) }),
-        });
-        const out = (await res.json()) as { ok: boolean; message?: string };
+        const out = await api.setup({ config: buildConfigYaml(s), secrets: secretsFor(s) });
         if (!out.ok) {
           error = out.message ?? 'Setup failed.';
           saving = false;

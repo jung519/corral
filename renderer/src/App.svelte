@@ -6,6 +6,7 @@
   import Settings from './Settings.svelte';
   import Toast from './Toast.svelte';
   import Wizard from './Wizard.svelte';
+  import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
 
   let route = $state(location.hash);
@@ -15,9 +16,9 @@
   onMount(() => {
     const onHash = () => (route = location.hash);
     window.addEventListener('hashchange', onHash);
-    fetch('/api/status')
-      .then((r) => r.json())
-      .then((s: { configured: boolean }) => (configured = s.configured))
+    api
+      .getStatus()
+      .then((s) => (configured = s.configured))
       .catch(() => (configured = undefined));
     return () => window.removeEventListener('hashchange', onHash);
   });

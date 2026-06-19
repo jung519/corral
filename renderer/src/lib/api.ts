@@ -1,7 +1,13 @@
 import type { Candidate, CommandResult, CorralEvent, StateResponse } from './types';
 
-async function post(url: string, body: unknown): Promise<CommandResult> {
-  const res = await fetch(url, {
+/** When the renderer is loaded from file:// (Electron), relative URLs don't reach
+ * the control plane — point them at the localhost server (CORS is enabled there). */
+export function apiBase(): string {
+  return typeof location !== 'undefined' && location.protocol === 'file:' ? 'http://localhost:4400' : '';
+}
+
+async function post(path: string, body: unknown): Promise<CommandResult> {
+  const res = await fetch(apiBase() + path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
@@ -10,15 +16,15 @@ async function post(url: string, body: unknown): Promise<CommandResult> {
 }
 
 export async function getState(): Promise<StateResponse> {
-  return (await fetch('/api/state')).json() as Promise<StateResponse>;
+  return (await fetch(apiBase() + '/api/state')).json() as Promise<StateResponse>;
 }
 
 export async function getStatus(): Promise<{ configured: boolean }> {
-  return (await fetch('/api/status')).json() as Promise<{ configured: boolean }>;
+  return (await fetch(apiBase() + '/api/status')).json() as Promise<{ configured: boolean }>;
 }
 
 export async function getCandidates(): Promise<Candidate[]> {
-  const data = (await (await fetch('/api/candidates')).json()) as { candidates: Candidate[] };
+  const data = (await (await fetch(apiBase() + '/api/candidates')).json()) as { candidates: Candidate[] };
   return data.candidates;
 }
 
@@ -33,9 +39,14 @@ export const approve = (id: string, selection?: string, text?: string): Promise<
 export const feedback = (id: string, text: string): Promise<CommandResult> =>
   post('/api/action', { id, type: 'feedback', text });
 
+export const setup = (input: {
+  config: string;
+  secrets: Array<{ service: string; account: string; value: string }>;
+}): Promise<CommandResult> => post('/api/setup', input);
+
 /** Subscribe to the SSE event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {
-  const es = new EventSource('/events');
+  const es = new EventSource(apiBase() + '/events');
   es.onmessage = (m) => {
     try {
       onEvent(JSON.parse(m.data) as CorralEvent);
