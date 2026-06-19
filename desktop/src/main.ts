@@ -14,7 +14,7 @@ import { orchestratorRunning, startOrchestrator, stopOrchestrator } from './orch
 import { validateAgent, validateGithub, validateNotion } from './validators.js';
 
 /** Control-plane port the renderer talks to (kept in sync with the config default). */
-const CONTROL_PLANE_PORT = 4100;
+const CONTROL_PLANE_PORT = 4400;
 
 /** Renderer location: a Vite dev server in development, built files in production. */
 function rendererUrl(hash: string): string {

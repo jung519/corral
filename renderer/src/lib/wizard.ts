@@ -51,7 +51,7 @@ export function initialState(): WizardState {
     scopeProp: '',
     states: { planning: '', plan_review: '', in_progress: '', in_review: '', done: '' },
     backend: 'local',
-    port: 4100,
+    port: 4400,
     maxActive: 3,
     language: 'en',
     stack: 'generic',

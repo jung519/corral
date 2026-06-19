@@ -151,9 +151,9 @@ export const WorkspaceSchema = z
 export const ChannelSchema = z
   .object({
     kind: z.enum(['web', 'slack']).default('web'),
-    port: z.number().int().positive().default(4100),
+    port: z.number().int().positive().default(4400),
   })
-  .default({ kind: 'web', port: 4100 });
+  .default({ kind: 'web', port: 4400 });
 
 // ─────────────────────────────────────────────────────── review / plan-review
 

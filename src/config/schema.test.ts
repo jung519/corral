@@ -37,7 +37,7 @@ describe('ConfigSchema', () => {
     expect(cfg.profile.stack).toBe('generic');
     expect(cfg.workspace.backend).toBe('local');
     expect(cfg.channel.kind).toBe('web');
-    expect(cfg.channel.port).toBe(4100);
+    expect(cfg.channel.port).toBe(4400);
     expect(cfg.repositories[0]?.branch_strategy.production).toBe('main');
     expect(cfg.tracker.credential.account).toBe('default');
   });

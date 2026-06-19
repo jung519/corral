@@ -43,7 +43,7 @@ export CORRAL_ANTHROPIC_DEFAULT=sk-ant-xxx     # API key (omit if using a logged
 pnpm start corral.yaml
 ```
 
-Open `http://localhost:4100`. Click **Import issues**, start one, and drive it:
+Open `http://localhost:4400`. Click **Import issues**, start one, and drive it:
 
 1. **Plan** — the agent drafts a plan; independent critics vet it. Approve or give feedback.
 2. **Implement** — the agent writes code on a work branch and commits.

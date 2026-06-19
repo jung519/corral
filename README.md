@@ -57,7 +57,7 @@ cp corral.example.yaml corral.yaml      # edit it
 export CORRAL_NOTION_DEFAULT=...        # BYOK secrets (see corral.example.yaml)
 export CORRAL_GITHUB_DEFAULT=...
 export CORRAL_ANTHROPIC_DEFAULT=...
-pnpm build && pnpm start corral.yaml    # control plane on http://localhost:4100
+pnpm build && pnpm start corral.yaml    # control plane on http://localhost:4400
 ```
 
 ### Run the desktop app (dev)

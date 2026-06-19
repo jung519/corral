@@ -48,7 +48,7 @@ async function setup(input: SetupInput): Promise<{ ok: boolean; message?: string
 }
 
 async function main(): Promise<void> {
-  let port = Number(process.env.CORRAL_PORT) || 4100;
+  let port = Number(process.env.CORRAL_PORT) || 4400;
   if (existsSync(configPath)) {
     try {
       port = (await loadConfig(configPath)).channel.port;
