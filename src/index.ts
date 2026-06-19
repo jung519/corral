@@ -28,6 +28,11 @@ export {
   type WorkflowContext,
 } from './agent/prompt-builder.js';
 export { SCRATCH, SCRATCH_DIR, WORKFLOW_FILE } from './core/paths.js';
+export { ReviewOrchestrator, type ReviewResult, type RoundCostFn } from './review/orchestrator.js';
+export { PlanCritiqueOrchestrator } from './review/plan-critique.js';
+export { runStaticQa, type StaticQaReport } from './review/static-qa-runner.js';
+export { runSemgrep, type SemgrepConfig } from './review/semgrep-runner.js';
+export { reviewRoundPrompt, planCritiquePrompt } from './review/prompt.js';
 export * from './credentials/types.js';
 export { EnvCredentialStore } from './credentials/env-store.js';
 export * from './config/schema.js';

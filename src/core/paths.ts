@@ -10,6 +10,8 @@ export const SCRATCH = {
   pendingPlan: `${SCRATCH_DIR}/pending_plan.md`,
   /** Consolidated self-review for human approval. */
   pendingReview: `${SCRATCH_DIR}/pending_review.md`,
+  /** Previous cycle's consolidated review — input for incremental re-review. */
+  prevReview: `${SCRATCH_DIR}/prev_review.md`,
   /** Deterministic static-gate result (lint/typecheck). */
   staticQa: `${SCRATCH_DIR}/static_qa.json`,
   /** Semgrep findings. */

@@ -155,6 +155,58 @@ export const ChannelSchema = z
   })
   .default({ kind: 'web', port: 4100 });
 
+// ─────────────────────────────────────────────────────── review / plan-review
+
+const SemgrepSchema = z
+  .object({
+    config: z.array(z.string()).default(['p/default']),
+    paths: z.array(z.string()).default(['.']),
+  })
+  .optional();
+
+const AdaptiveSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    heavy: z
+      .object({
+        min_diff_lines: z.number().int().positive().default(300),
+        labels: z.array(z.string()).default([]),
+        rounds: z.number().int().positive().default(3),
+      })
+      .default({}),
+    light: z
+      .object({
+        max_diff_lines: z.number().int().positive().default(50),
+        max_files: z.number().int().positive().default(3),
+        rounds: z.number().int().positive().default(1),
+      })
+      .default({}),
+  })
+  .default({});
+
+export const ReviewSchema = z
+  .object({
+    /** Independent review rounds (fresh sessions) per cycle. */
+    rounds: z.number().int().positive().default(1),
+    /** Max auto-fix → re-review cycles before handing to a human. */
+    max_fix_rounds: z.number().int().nonnegative().default(2),
+    /** Open the PR automatically when self-review is clean (no blocker/suggestion). */
+    auto_pr_when_clean: z.boolean().default(false),
+    adaptive: AdaptiveSchema,
+    /** Optional semgrep static analysis (omit to skip). */
+    semgrep: SemgrepSchema,
+  })
+  .default({});
+
+export const PlanReviewSchema = z
+  .object({
+    enabled: z.boolean().default(true),
+    rounds: z.number().int().positive().default(1),
+    heavy_labels: z.array(z.string()).default([]),
+    heavy_rounds: z.number().int().positive().default(2),
+  })
+  .default({});
+
 // ─────────────────────────────────────────────────────────────────── top-level
 
 export const ConfigSchema = z.object({
@@ -164,6 +216,10 @@ export const ConfigSchema = z.object({
   agent: AgentSchema,
   workspace: WorkspaceSchema,
   channel: ChannelSchema,
+  review: ReviewSchema,
+  plan_review: PlanReviewSchema,
+  /** Max issues active (workspaces) at once. */
+  max_active_issues: z.number().int().positive().default(3),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -174,3 +230,5 @@ export type WorkspaceConfig = z.infer<typeof WorkspaceSchema>;
 export type ChannelConfig = z.infer<typeof ChannelSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type CredentialRefConfig = z.infer<typeof CredentialRefSchema>;
+export type ReviewConfig = z.infer<typeof ReviewSchema>;
+export type PlanReviewConfig = z.infer<typeof PlanReviewSchema>;
