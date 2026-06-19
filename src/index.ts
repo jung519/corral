@@ -9,6 +9,13 @@
 export * from './core/types.js';
 export * from './core/registry.js';
 export * from './agent/types.js';
+export { createAgent, agentTransports, type AgentTransportCtx } from './agent/index.js';
 export * from './credentials/types.js';
 export { EnvCredentialStore } from './credentials/env-store.js';
 export * from './config/schema.js';
+export { loadConfig, parseConfig } from './config/loader.js';
+export { bootstrap, bootstrapFromFile, type App, type BootstrapDeps } from './bootstrap.js';
+export { trackers } from './tracker/index.js';
+export { repositories } from './repository/index.js';
+export { workspaces } from './workspace/index.js';
+export { channels } from './channel/index.js';

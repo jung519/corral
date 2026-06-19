@@ -1,0 +1,56 @@
+# Corral configuration example. Copy to corral.yaml and edit.
+# Secrets are NOT stored here — set them as environment variables (BYOK):
+#   CORRAL_NOTION_DEFAULT     — Notion integration token
+#   CORRAL_GITHUB_DEFAULT     — GitHub access token
+#   CORRAL_ANTHROPIC_DEFAULT  — Anthropic API key
+# (the var name is CORRAL_<SERVICE>_<ACCOUNT>, uppercased.)
+
+profile:
+  language: en          # output language for agent-authored plans/reviews
+  stack: generic        # review calibration profile
+  # reference_repo: acme/conventions
+
+tracker:
+  kind: notion
+  database_id: "your_notion_database_id"
+  credential: { service: notion, account: default }
+  properties:
+    status: "Status"
+    identifier: "ID"
+    repo: "Repo"
+  states:
+    planning: "Backlog"
+    plan_review: "Plan review"
+    in_progress: "In progress"
+    in_review: "In review"
+    done: "Done"
+  scope:
+    property: "Corral"   # only issues with this checkbox are picked up
+
+repositories:
+  - kind: github
+    key: main
+    repo: acme/widgets
+    credential: { service: github, account: default }
+    branch_strategy:
+      production: main
+      development: develop
+    verify:
+      - "npm run lint"
+      - "npm run typecheck"
+    after_clone: "npm ci"
+
+agent:
+  provider: claude        # claude | gemini | gpt
+  transport: api          # api (BYOK) | cli
+  credential: { service: anthropic, account: default }
+  models:
+    planning: opus
+    implementation: sonnet
+
+workspace:
+  backend: local          # local | docker
+
+channel:
+  kind: web               # web | slack
+  port: 4100
