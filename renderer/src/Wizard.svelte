@@ -1,5 +1,12 @@
 <script lang="ts">
-  import { buildConfigYaml, initialState, secretsFor, validateStep, type WizardState } from './lib/wizard';
+  import {
+    buildConfigYaml,
+    initialState,
+    secretsFor,
+    type TrackerKind,
+    validateStep,
+    type WizardState,
+  } from './lib/wizard';
 
   const steps = ['AI provider', 'Repository', 'Tracker', 'Workspace', 'Channel & budget'];
 
@@ -148,23 +155,40 @@
       <label>Development branch</label>
       <input bind:value={s.development} />
     {:else if step === 2}
-      <label>Notion database id</label>
-      <input bind:value={s.notionDb} />
-      <label>Notion token (keychain)</label>
-      <input type="password" bind:value={s.notionToken} />
-      <div class="testrow">
-        <button onclick={testNotion} disabled={!hasBridge || !s.notionToken}>Test token</button>
-        {@render result(test.notion)}
+      <label>Tracker (where issues come from — not limited to Notion)</label>
+      <div class="row">
+        <button class:sel={s.trackerKind === 'notion'} onclick={() => (s.trackerKind = 'notion' as TrackerKind)}>Notion</button>
+        <button class:sel={s.trackerKind === 'github_issues'} onclick={() => (s.trackerKind = 'github_issues' as TrackerKind)}>GitHub Issues</button>
       </div>
-      <div class="two">
-        <div><label>Status property</label><input bind:value={s.statusProp} /></div>
-        <div><label>ID property</label><input bind:value={s.idProp} /></div>
-      </div>
-      <div class="two">
-        <div><label>Repo property (optional)</label><input bind:value={s.repoProp} /></div>
-        <div><label>Scope checkbox (optional)</label><input bind:value={s.scopeProp} /></div>
-      </div>
-      <label>State → Notion status mapping</label>
+
+      {#if s.trackerKind === 'notion'}
+        <label>Notion database id</label>
+        <input bind:value={s.notionDb} />
+        <label>Notion token (keychain)</label>
+        <input type="password" bind:value={s.notionToken} />
+        <div class="testrow">
+          <button onclick={testNotion} disabled={!hasBridge || !s.notionToken}>Test token</button>
+          {@render result(test.notion)}
+        </div>
+        <div class="two">
+          <div><label>Status property</label><input bind:value={s.statusProp} /></div>
+          <div><label>ID property</label><input bind:value={s.idProp} /></div>
+        </div>
+        <div class="two">
+          <div><label>Repo property (optional)</label><input bind:value={s.repoProp} /></div>
+          <div><label>Scope checkbox (optional)</label><input bind:value={s.scopeProp} /></div>
+        </div>
+      {:else}
+        <label>Issues repo (blank = work repo{s.repo ? ` ${s.repo}` : ''})</label>
+        <input bind:value={s.issuesRepo} placeholder={s.repo || 'owner/name'} />
+        <div class="two">
+          <div><label>Scope label (optional gate)</label><input bind:value={s.scopeLabel} /></div>
+          <div><label>Identifier prefix</label><input bind:value={s.identifierPrefix} /></div>
+        </div>
+        <p class="hint">Uses your GitHub token. Semantic states map to issue labels below.</p>
+      {/if}
+
+      <label>{s.trackerKind === 'notion' ? 'State → Notion status' : 'State → GitHub label'}</label>
       <div class="states">
         {#each Object.keys(s.states) as k}
           <div><span>{k}</span><input bind:value={s.states[k as keyof WizardState['states']]} /></div>
