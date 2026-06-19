@@ -33,7 +33,10 @@ export {
   type StackProfile,
 } from './profile/index.js';
 export { trackers } from './tracker/index.js';
+export { TrackerPoller, type IssuesHandler } from './tracker/poller.js';
 export { repositories } from './repository/index.js';
+export { RepositoryRouter } from './repository/router.js';
+export { RepositoryPoller, type TrackedPr, type RepoEvents } from './repository/poller.js';
 export { workspaces, dockerOptionsFromConfig, type WorkspaceCtx } from './workspace/index.js';
 export { run, runOrThrow, type ExecResult, type ExecOptions } from './util/exec.js';
 export { channels } from './channel/index.js';

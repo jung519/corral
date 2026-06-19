@@ -16,6 +16,7 @@ import type {
 } from './core/types.js';
 import { type ResolvedProfile, resolveProfile } from './profile/index.js';
 import { repositories as repositoryRegistry } from './repository/index.js';
+import { RepositoryRouter } from './repository/router.js';
 import { trackers } from './tracker/index.js';
 import { workspaces } from './workspace/index.js';
 
@@ -24,6 +25,8 @@ export interface App {
   profile: ResolvedProfile;
   tracker: TrackerAdapter;
   repositories: RepositoryAdapter[];
+  /** Routes an issue's repoKey → repository. */
+  repositoryRouter: RepositoryRouter;
   agent: AgentAdapter;
   workspace: WorkspaceAdapter;
   channel: ChannelAdapter;
@@ -75,6 +78,7 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     profile: resolveProfile(config.profile),
     tracker,
     repositories: repositoryList,
+    repositoryRouter: new RepositoryRouter(repositoryList),
     agent,
     workspace,
     channel,
