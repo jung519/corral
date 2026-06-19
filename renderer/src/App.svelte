@@ -10,20 +10,22 @@
   import { t } from './lib/i18n.svelte';
 
   let route = $state(location.hash);
-  // undefined = unknown yet; false = not configured (force the wizard).
-  let configured = $state<boolean | undefined>(undefined);
 
   onMount(() => {
     const onHash = () => (route = location.hash);
     window.addEventListener('hashchange', onHash);
+    // First run lands on the wizard ONCE — but never traps: the user can close it
+    // (→ dashboard, which shows a "set up" banner). We don't force the wizard.
     api
       .getStatus()
-      .then((s) => (configured = s.configured))
-      .catch(() => (configured = undefined));
+      .then((s) => {
+        if (!s.configured && !location.hash.startsWith('#/setup')) location.hash = '#/setup';
+      })
+      .catch(() => {});
     return () => window.removeEventListener('hashchange', onHash);
   });
 
-  const isSetup = $derived(route.startsWith('#/setup') || configured === false);
+  const isSetup = $derived(route.startsWith('#/setup'));
 
   const nav = [
     { hash: '#/', key: 'nav.dashboard' },

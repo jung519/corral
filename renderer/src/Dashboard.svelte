@@ -13,6 +13,7 @@
   let candidates: Candidate[] = $state([]);
   let showCandidates = $state(false);
   let online = $state(false);
+  let configured = $state<boolean | undefined>(undefined);
 
   async function refresh() {
     try {
@@ -26,6 +27,10 @@
 
   onMount(() => {
     void refresh();
+    void api
+      .getStatus()
+      .then((s) => (configured = s.configured))
+      .catch(() => {});
     const unsub = api.subscribeEvents(() => void refresh());
     const poll = setInterval(() => void refresh(), 15000);
     return () => {
@@ -70,6 +75,13 @@
 </header>
 
 <main>
+  {#if configured === false}
+    <div class="setup-banner">
+      <span>{t('dash.setupNeeded')}</span>
+      <button class="primary" onclick={() => (location.hash = '#/setup')}>{t('dash.setupBtn')}</button>
+    </div>
+  {/if}
+
   {#if view.pending.length > 0}
     <section>
       <h2>{t('dash.actionNeeded')}</h2>
@@ -170,6 +182,18 @@
   }
   main {
     padding: 20px 28px;
+  }
+  .setup-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    background: var(--surface);
+    border: 1px solid var(--amber);
+    border-radius: var(--radius);
+    padding: 12px 16px;
+    margin-top: 4px;
+    color: var(--amber);
   }
   h2 {
     font-size: 14px;

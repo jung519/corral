@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import {
@@ -26,14 +25,6 @@
   let docker = $state<{ available: boolean; version?: string } | null>(null);
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
-
-  // Already configured? Then this is a re-run → allow closing back to the dashboard.
-  // Electron: ask the bridge (IPC, reliable under file://). Browser: ask the server.
-  let canExit = $state(false);
-  onMount(() => {
-    if (window.corral) window.corral.config.exists().then((e) => (canExit = e)).catch(() => {});
-    else api.getStatus().then((s) => (canExit = s.configured)).catch(() => {});
-  });
 
   function next() {
     const e = validateStep(step, s);
@@ -138,9 +129,7 @@
   </aside>
 
   <section>
-    {#if canExit}
-      <button class="close" onclick={() => (location.hash = '#/')}>✕ {t('wizard.exit')}</button>
-    {/if}
+    <button class="close" onclick={() => (location.hash = '#/')}>✕ {t('wizard.exit')}</button>
     {#if step === 0}
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
