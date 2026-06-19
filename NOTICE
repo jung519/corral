@@ -1,0 +1,26 @@
+Corral
+Copyright 2026 Corral contributors
+
+This product is the open-source release of an internal agent development
+orchestrator ("Symphony").
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not
+use this software except in compliance with the License. A copy of the
+License is provided in the LICENSE file and at:
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+---
+
+Third-party software:
+
+This product depends on software distributed under separate, compatible
+open-source licenses. Each dependency retains its own license; see the
+respective package metadata under node_modules/ for details. A consolidated
+attribution list is generated for distributed builds (see the application's
+"Open source licenses" screen).
+
+Corral integrates with third-party AI providers, trackers, and repositories
+using credentials supplied by the user (BYOK). Corral does not bundle any
+proprietary provider binary, and does not embed any provider credentials.
+Compliance with each provider's terms of service is the user's responsibility.
