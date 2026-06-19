@@ -9,7 +9,9 @@ export type MessageKey =
   | 'review.resolved'
   | 'review.unresolved'
   | 'signal.approved'
+  | 'signal.feedback'
   | 'signal.requestMoreReview'
+  | 'signal.resume'
   | 'cost.summaryHeading'
   | 'cost.total'
   | 'cost.dispatches'
@@ -23,7 +25,10 @@ const en: Messages = {
   'review.resolved': 'resolved',
   'review.unresolved': 'unresolved',
   'signal.approved': 'APPROVED',
+  'signal.feedback': 'FEEDBACK',
   'signal.requestMoreReview': 'REQUEST FURTHER REVIEW',
+  'signal.resume':
+    'The previous run was interrupted by a restart. Per the workflow guide, resume and finish the interrupted work (implementation, or applying review findings).',
   'cost.summaryHeading': 'Cost summary',
   'cost.total': 'Total cost',
   'cost.dispatches': 'Dispatches',
@@ -36,7 +41,9 @@ const ko: Messages = {
   'review.resolved': '해결됨',
   'review.unresolved': '미해결',
   'signal.approved': '승인됨',
+  'signal.feedback': '피드백',
   'signal.requestMoreReview': '더 검토 요청',
+  'signal.resume': '이전 작업이 재시작으로 중단되었습니다. 워크플로우 가이드에 따라 중단된 작업(구현 또는 리뷰 지적 수정)을 이어서 완료하세요.',
   'cost.summaryHeading': '비용 요약',
   'cost.total': '총 비용',
   'cost.dispatches': '디스패치 횟수',

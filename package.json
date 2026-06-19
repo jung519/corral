@@ -17,6 +17,7 @@
     "preinstall": "npx only-allow pnpm"
   },
   "dependencies": {
+    "liquidjs": "^10.19.0",
     "yaml": "^2.6.1",
     "zod": "^3.24.1"
   },

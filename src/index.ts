@@ -16,6 +16,16 @@ export { IssueStateStore, type IssueRuntime, DEFAULT_STATE_DIR } from './core/is
 export { CostTracker, type CostEntry } from './core/cost-tracker.js';
 export * from './agent/types.js';
 export { createAgent, agentTransports, type AgentTransportCtx } from './agent/index.js';
+export {
+  renderWorkflow,
+  kickoffPrompt,
+  turnPrompt,
+  buildSignals,
+  PROMPTS,
+  type Signals,
+  type WorkflowContext,
+} from './agent/prompt-builder.js';
+export { SCRATCH, SCRATCH_DIR, WORKFLOW_FILE } from './core/paths.js';
 export * from './credentials/types.js';
 export { EnvCredentialStore } from './credentials/env-store.js';
 export * from './config/schema.js';
