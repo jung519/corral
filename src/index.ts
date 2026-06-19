@@ -59,3 +59,5 @@ export { RepositoryPoller, type TrackedPr, type RepoEvents } from './repository/
 export { workspaces, dockerOptionsFromConfig, type WorkspaceCtx } from './workspace/index.js';
 export { run, runOrThrow, type ExecResult, type ExecOptions } from './util/exec.js';
 export { channels } from './channel/index.js';
+export { WebChannel, type PendingAction, type IssueDiff } from './channel/web.js';
+export { DashboardServer, type DashboardDeps } from './server/dashboard.js';

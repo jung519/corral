@@ -10,5 +10,5 @@ interface ChannelRegistryConfig {
 
 export const channels = new Registry<ChannelRegistryConfig, ChannelAdapter>('channel');
 
-channels.register('web', (config) => new WebChannel({ port: config.port }));
-// slack adapter is lifted in S2.
+channels.register('web', () => new WebChannel());
+// slack adapter is lifted in a later milestone.

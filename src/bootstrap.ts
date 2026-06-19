@@ -3,6 +3,8 @@
  * user-supplied config values (S1 DoD). The orchestrator loop is lifted in S2. */
 import { createAgent } from './agent/index.js';
 import { channels } from './channel/index.js';
+import { WebChannel } from './channel/web.js';
+import { DashboardServer } from './server/dashboard.js';
 import { loadConfig } from './config/loader.js';
 import type { Config } from './config/schema.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
@@ -33,6 +35,8 @@ export interface App {
   channel: ChannelAdapter;
   /** The wired state machine (control-plane-driven). */
   orchestrator: Orchestrator;
+  /** HTTP control-plane server (present when channel.kind === 'web'). */
+  server?: DashboardServer;
 }
 
 export interface BootstrapDeps {
@@ -80,6 +84,21 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
   const repositoryRouter = new RepositoryRouter(repositoryList);
   const orchestrator = new Orchestrator(config, tracker, repositoryRouter, workspace, agent, channel, profile);
 
+  // The web channel exposes a concrete control-plane surface; bind an HTTP server
+  // to the orchestrator's commands so the core is drivable headless (and by the UI).
+  const server =
+    channel instanceof WebChannel
+      ? new DashboardServer(config.channel.port, {
+          snapshot: () => orchestrator.snapshot(),
+          channel,
+          listCandidates: () => orchestrator.listCandidates(),
+          startIssue: (id) => orchestrator.startIssue(id),
+          completeIssue: (id, force) => orchestrator.completeByUser(id, force),
+          retryIssue: (id) => orchestrator.retry(id),
+          refineIssue: (id, focus) => orchestrator.refinePlan(id, focus),
+        })
+      : undefined;
+
   return {
     config,
     profile,
@@ -90,6 +109,7 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     workspace,
     channel,
     orchestrator,
+    server,
   };
 }
 

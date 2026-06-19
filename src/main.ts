@@ -11,6 +11,7 @@ async function main(): Promise<void> {
 
   await app.channel.start();
   await app.orchestrator.start(); // recovers any in-flight issues; no polling
+  await app.server?.start();
 
   const lines = [
     `corral — config loaded from ${configPath}`,
@@ -20,9 +21,10 @@ async function main(): Promise<void> {
     `  agent        ${app.agent.kind} (${app.config.agent.transport})`,
     `  workspace    ${app.workspace.kind}`,
     `  channel      ${app.channel.kind}`,
+    app.server ? `  control plane http://localhost:${app.server.boundPort}` : '',
     '',
-    'Orchestrator ready. Drive it via the control plane (dashboard lands in S3).',
-  ];
+    app.server ? 'Control plane up. Open the URL above (UI lands next).' : 'Orchestrator ready.',
+  ].filter(Boolean);
   console.log(lines.join('\n'));
 }
 
