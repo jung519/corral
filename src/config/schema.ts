@@ -65,7 +65,24 @@ const NotionTrackerSchema = z.object({
   poll_interval_ms: z.number().int().positive().default(30_000),
 });
 
-export const TrackerSchema = z.discriminatedUnion('kind', [NotionTrackerSchema]);
+/** GitHub Issues tracker — semantic states map to issue labels; closing = done.
+ * Proves the tracker axis is not Notion-bound (anything with an API can be added). */
+const GithubIssuesTrackerSchema = z.object({
+  kind: z.literal('github_issues'),
+  /** "owner/name" the issues live in. */
+  repo: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/name"'),
+  credential: CredentialRefSchema,
+  /** Map semantic IssueState → a GitHub label name. */
+  states: SemanticStatesSchema,
+  /** Only issues carrying this label are candidates (optional gate). */
+  scope_label: z.string().optional(),
+  /** Routing key → repository adapter; defaults to the first repository. */
+  repo_key: z.string().optional(),
+  /** Prefix for branch/container/log identifiers (e.g. "issue-" → issue-123). */
+  identifier_prefix: z.string().default('issue-'),
+});
+
+export const TrackerSchema = z.discriminatedUnion('kind', [NotionTrackerSchema, GithubIssuesTrackerSchema]);
 
 // ────────────────────────────────────────────────────────── axis 2: repository
 

@@ -54,6 +54,7 @@ export {
   type StackProfile,
 } from './profile/index.js';
 export { trackers } from './tracker/index.js';
+export { GithubIssuesTracker } from './tracker/github-issues.js';
 export { TrackerPoller, type IssuesHandler } from './tracker/poller.js';
 export { repositories } from './repository/index.js';
 export { RepositoryRouter } from './repository/router.js';
