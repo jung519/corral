@@ -1,0 +1,43 @@
+import type { Candidate, CommandResult, CorralEvent, StateResponse } from './types';
+
+async function post(url: string, body: unknown): Promise<CommandResult> {
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return (await res.json()) as CommandResult;
+}
+
+export async function getState(): Promise<StateResponse> {
+  return (await fetch('/api/state')).json() as Promise<StateResponse>;
+}
+
+export async function getCandidates(): Promise<Candidate[]> {
+  const data = (await (await fetch('/api/candidates')).json()) as { candidates: Candidate[] };
+  return data.candidates;
+}
+
+export const startIssue = (identifier: string): Promise<CommandResult> => post('/api/start', { identifier });
+export const completeIssue = (identifier: string, force = false): Promise<CommandResult> =>
+  post('/api/complete', { identifier, force });
+export const retryIssue = (identifier: string): Promise<CommandResult> => post('/api/retry', { identifier });
+export const refineIssue = (identifier: string, focus: string): Promise<CommandResult> =>
+  post('/api/refine', { identifier, focus });
+export const approve = (id: string, selection?: string, text?: string): Promise<CommandResult> =>
+  post('/api/action', { id, type: 'approve', selection, text });
+export const feedback = (id: string, text: string): Promise<CommandResult> =>
+  post('/api/action', { id, type: 'feedback', text });
+
+/** Subscribe to the SSE event stream; returns an unsubscribe fn. */
+export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {
+  const es = new EventSource('/events');
+  es.onmessage = (m) => {
+    try {
+      onEvent(JSON.parse(m.data) as CorralEvent);
+    } catch {
+      /* ignore keep-alive / non-JSON */
+    }
+  };
+  return () => es.close();
+}
