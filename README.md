@@ -22,8 +22,8 @@ Every external integration sits behind an adapter interface, selected by a
 
 | Axis | Interface | Reference impl |
 |------|-----------|----------------|
-| Tracker | `TrackerAdapter` | Notion |
-| Repository | `RepositoryAdapter` | GitHub |
+| Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira |
+| Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket |
 | Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) |
 | Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local |
 | Channel | `ChannelAdapter` | Web (Slack optional) |

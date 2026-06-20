@@ -5,6 +5,7 @@ import type { TrackerConfig } from '../config/schema.js';
 import { Registry } from '../core/registry.js';
 import type { TrackerAdapter } from '../core/types.js';
 import { GithubIssuesTracker } from './github-issues.js';
+import { JiraTracker } from './jira.js';
 import { NotionTracker, type TrackerCtx } from './notion.js';
 
 export const trackers = new Registry<TrackerConfig, TrackerAdapter, TrackerCtx>('tracker');
@@ -14,6 +15,9 @@ trackers.register('notion', (config, ctx) =>
 );
 trackers.register('github_issues', (config, ctx) =>
   new GithubIssuesTracker(config as Extract<TrackerConfig, { kind: 'github_issues' }>, ctx),
+);
+trackers.register('jira', (config, ctx) =>
+  new JiraTracker(config as Extract<TrackerConfig, { kind: 'jira' }>, ctx),
 );
 
 export type { TrackerCtx };

@@ -4,6 +4,7 @@
   import {
     buildConfigYaml,
     initialState,
+    type RepoProvider,
     secretsFor,
     type TrackerKind,
     validateStep,
@@ -57,9 +58,9 @@
     test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
   }
   async function testGithub() {
-    if (!window.corral || !s.githubToken) return;
+    if (!window.corral || !s.repoToken) return;
     test.github = 'pending';
-    test.github = await window.corral.validate.github(s.githubToken);
+    test.github = await window.corral.validate.github(s.repoToken);
   }
   async function testNotion() {
     if (!window.corral || !s.notionToken) return;
@@ -173,12 +174,28 @@
       </div>
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
-      <label class="field"><span>{t('field.repo')}</span><input bind:value={s.repo} placeholder="acme/widgets" /></label>
+      <span class="lbl">{t('repo.provider')}</span>
+      <div class="transports tri">
+        {#each ['github', 'gitlab', 'bitbucket'] as p}
+          <button class="transport" class:sel={s.repoProvider === p} onclick={() => (s.repoProvider = p as RepoProvider)}>
+            <span class="radio" class:on={s.repoProvider === p}></span>{p}
+          </button>
+        {/each}
+      </div>
+      {#if s.repoProvider === 'gitlab'}
+        <label class="field"><span>{t('field.gitlabHost')}</span><input bind:value={s.gitlabHost} /></label>
+      {:else if s.repoProvider === 'bitbucket'}
+        <label class="field"><span>{t('field.bitbucketUser')}</span><input bind:value={s.bitbucketUser} /></label>
+      {/if}
       <label class="field"
-        ><span>{t('field.githubToken')}</span>
+        ><span>{t('field.repo')}</span>
+        <input bind:value={s.repo} placeholder={s.repoProvider === 'bitbucket' ? 'workspace/slug' : 'acme/widgets'} /></label
+      >
+      <label class="field"
+        ><span>{t('field.repoToken')}</span>
         <div class="keyrow">
-          <input type="password" bind:value={s.githubToken} onblur={testGithub} />
-          {@render badge(test.github)}
+          <input type="password" bind:value={s.repoToken} onblur={s.repoProvider === 'github' ? testGithub : undefined} />
+          {#if s.repoProvider === 'github'}{@render badge(test.github)}{/if}
         </div></label
       >
       <div class="two">
@@ -189,7 +206,7 @@
     {:else if step === 2}
       <h1>{t('step.tracker')}</h1>
       <span class="lbl">{t('tracker.label')}</span>
-      <div class="transports">
+      <div class="transports tri">
         <button class="transport" class:sel={s.trackerKind === 'notion'} onclick={() => (s.trackerKind = 'notion' as TrackerKind)}>
           <span class="radio" class:on={s.trackerKind === 'notion'}></span>Notion
         </button>
@@ -199,6 +216,9 @@
           onclick={() => (s.trackerKind = 'github_issues' as TrackerKind)}
         >
           <span class="radio" class:on={s.trackerKind === 'github_issues'}></span>GitHub Issues
+        </button>
+        <button class="transport" class:sel={s.trackerKind === 'jira'} onclick={() => (s.trackerKind = 'jira' as TrackerKind)}>
+          <span class="radio" class:on={s.trackerKind === 'jira'}></span>Jira
         </button>
       </div>
 
@@ -219,16 +239,25 @@
           <label class="field"><span>{t('field.repoProp')}</span><input bind:value={s.repoProp} /></label>
           <label class="field"><span>{t('field.scopeProp')}</span><input bind:value={s.scopeProp} /></label>
         </div>
-      {:else}
+      {:else if s.trackerKind === 'github_issues'}
         <label class="field"><span>{t('field.issuesRepo')}</span><input bind:value={s.issuesRepo} placeholder={s.repo || 'owner/name'} /></label>
         <div class="two">
           <label class="field"><span>{t('field.scopeLabel')}</span><input bind:value={s.scopeLabel} /></label>
           <label class="field"><span>{t('field.idPrefix')}</span><input bind:value={s.identifierPrefix} /></label>
         </div>
         <p class="helper">{t('tracker.ghHint')}</p>
+      {:else}
+        <label class="field"><span>{t('field.jiraHost')}</span><input bind:value={s.jiraHost} placeholder="https://team.atlassian.net" /></label>
+        <div class="two">
+          <label class="field"><span>{t('field.jiraProject')}</span><input bind:value={s.jiraProject} /></label>
+          <label class="field"><span>{t('field.jiraEmail')}</span><input bind:value={s.jiraEmail} /></label>
+        </div>
+        <label class="field"><span>{t('field.jiraToken')}</span><input type="password" bind:value={s.jiraToken} /></label>
       {/if}
 
-      <span class="lbl">{s.trackerKind === 'notion' ? t('states.notion') : t('states.github')}</span>
+      <span class="lbl"
+        >{s.trackerKind === 'notion' ? t('states.notion') : s.trackerKind === 'jira' ? t('states.jira') : t('states.github')}</span
+      >
       <div class="states">
         {#each Object.keys(s.states) as k}
           <label><span>{k}</span><input bind:value={s.states[k as keyof WizardState['states']]} /></label>
@@ -430,6 +459,9 @@
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     margin-bottom: 18px;
+  }
+  .transports.tri {
+    grid-template-columns: 1fr 1fr 1fr;
   }
   .transport {
     display: flex;

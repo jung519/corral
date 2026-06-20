@@ -55,6 +55,9 @@ export {
 } from './profile/index.js';
 export { trackers } from './tracker/index.js';
 export { GithubIssuesTracker } from './tracker/github-issues.js';
+export { JiraTracker } from './tracker/jira.js';
+export { GitlabRepository } from './repository/gitlab.js';
+export { BitbucketRepository } from './repository/bitbucket.js';
 export { TrackerPoller, type IssuesHandler } from './tracker/poller.js';
 export { repositories } from './repository/index.js';
 export { RepositoryRouter } from './repository/router.js';

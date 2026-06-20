@@ -82,15 +82,36 @@ const GithubIssuesTrackerSchema = z.object({
   identifier_prefix: z.string().default('issue-'),
 });
 
-export const TrackerSchema = z.discriminatedUnion('kind', [NotionTrackerSchema, GithubIssuesTrackerSchema]);
+/** Jira Cloud tracker — semantic states map to Jira workflow status names; auth is
+ * email + API token (Basic). */
+const JiraTrackerSchema = z.object({
+  kind: z.literal('jira'),
+  /** Site base URL, e.g. https://your-team.atlassian.net */
+  host: z.string().min(1),
+  /** Project key, e.g. "ISS". */
+  project: z.string().min(1),
+  /** Account email (paired with the API token credential for Basic auth). */
+  email: z.string().min(1),
+  credential: CredentialRefSchema,
+  /** Map semantic IssueState → a Jira status name. */
+  states: SemanticStatesSchema,
+  /** Routing key → repository adapter; defaults to the first repository. */
+  repo_key: z.string().optional(),
+});
+
+export const TrackerSchema = z.discriminatedUnion('kind', [
+  NotionTrackerSchema,
+  GithubIssuesTrackerSchema,
+  JiraTrackerSchema,
+]);
 
 // ────────────────────────────────────────────────────────── axis 2: repository
 
-const GithubRepositorySchema = z.object({
-  kind: z.literal('github'),
+/** Fields shared by every repository provider. */
+const repoCommon = {
   /** Routing key matched against the tracker's repo property / Issue.repoKey. */
   key: z.string().min(1),
-  /** "owner/name". */
+  /** "owner/name" (GitHub/GitLab) or "workspace/slug" (Bitbucket). */
   repo: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/name"'),
   credential: CredentialRefSchema,
   branch_strategy: z
@@ -108,9 +129,29 @@ const GithubRepositorySchema = z.object({
   after_clone: z.string().optional(),
   /** Per-repo worker image override. */
   image: z.string().optional(),
+};
+
+const GithubRepositorySchema = z.object({ kind: z.literal('github'), ...repoCommon });
+
+const GitlabRepositorySchema = z.object({
+  kind: z.literal('gitlab'),
+  /** Self-hosted GitLab base URL; defaults to gitlab.com. */
+  host: z.string().default('https://gitlab.com'),
+  ...repoCommon,
 });
 
-export const RepositorySchema = z.discriminatedUnion('kind', [GithubRepositorySchema]);
+const BitbucketRepositorySchema = z.object({
+  kind: z.literal('bitbucket'),
+  /** Bitbucket username (paired with an app password for Basic auth + clone). */
+  username: z.string().min(1),
+  ...repoCommon,
+});
+
+export const RepositorySchema = z.discriminatedUnion('kind', [
+  GithubRepositorySchema,
+  GitlabRepositorySchema,
+  BitbucketRepositorySchema,
+]);
 
 // ─────────────────────────────────────────────────────────────── axis 3: agent
 
