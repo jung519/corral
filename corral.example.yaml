@@ -21,11 +21,13 @@ tracker:
     identifier: "ID"
     repo: "Repo"
   states:
+    # Only these 3 are required (entry / working / terminal). On a coarse board,
+    # drop plan_review + in_review and they collapse onto planning / in_progress.
     planning: "Backlog"
-    plan_review: "Plan review"
     in_progress: "In progress"
-    in_review: "In review"
     done: "Done"
+    # plan_review: "Plan review"   # optional refinement
+    # in_review: "In review"       # optional refinement
   scope:
     type: checkbox       # only issues with this checkbox are picked up
     property: "Corral"

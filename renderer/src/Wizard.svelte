@@ -3,10 +3,12 @@
   import * as api from './lib/api';
   import {
     buildConfigYaml,
+    CORE_STATE_KEYS,
     defaultModels,
     initialState,
     MODELS,
     newRepo,
+    OPTIONAL_STATE_KEYS,
     type RepoProvider,
     secretsFor,
     type TrackerKind,
@@ -311,10 +313,20 @@
         >{s.trackerKind === 'notion' ? t('states.notion') : s.trackerKind === 'jira' ? t('states.jira') : t('states.github')}</span
       >
       <div class="states">
-        {#each Object.keys(s.states) as k}
-          <label><span>{k}</span><input bind:value={s.states[k as keyof WizardState['states']]} /></label>
+        {#each CORE_STATE_KEYS as k}
+          <label><span>{t(`state.${k}`)}</span><input bind:value={s.states[k]} /></label>
         {/each}
+        {#if s.detailedStates}
+          {#each OPTIONAL_STATE_KEYS as k}
+            <label><span>{t(`state.${k}`)}</span><input bind:value={s.states[k]} /></label>
+          {/each}
+        {/if}
       </div>
+      <label class="check">
+        <input type="checkbox" bind:checked={s.detailedStates} />
+        <span>{t('states.detailToggle')}</span>
+      </label>
+      <p class="hint">{t('states.detailHint')}</p>
     {:else if step === 3}
       <h1>{t('step.workspace')}</h1>
       <p class="subtitle">{t('workspace.desc')}</p>
@@ -604,6 +616,18 @@
   .states span {
     font-size: 13px;
     color: var(--text-dim);
+  }
+  .check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  .check input {
+    width: auto;
+    margin: 0;
   }
   .testrow {
     display: flex;

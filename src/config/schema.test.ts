@@ -60,4 +60,28 @@ describe('ConfigSchema', () => {
     const bad = { ...baseConfig, repositories: [] };
     expect(ConfigSchema.safeParse(bad).success).toBe(false);
   });
+
+  it('accepts a 3-state board and collapses the optional stages onto it', () => {
+    const coarse = {
+      ...baseConfig,
+      tracker: {
+        ...baseConfig.tracker,
+        states: { planning: '시작 전', in_progress: '개발 중', done: '완료' },
+      },
+    };
+    const cfg = ConfigSchema.parse(coarse);
+    expect(cfg.tracker.states.planning).toBe('시작 전');
+    expect(cfg.tracker.states.plan_review).toBe('시작 전'); // → entry column
+    expect(cfg.tracker.states.in_progress).toBe('개발 중');
+    expect(cfg.tracker.states.in_review).toBe('개발 중'); // → working column
+    expect(cfg.tracker.states.done).toBe('완료');
+  });
+
+  it('still requires the three core states', () => {
+    const bad = {
+      ...baseConfig,
+      tracker: { ...baseConfig.tracker, states: { planning: '시작 전', done: '완료' } },
+    };
+    expect(ConfigSchema.safeParse(bad).success).toBe(false);
+  });
 });

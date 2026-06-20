@@ -5,6 +5,11 @@
 export type RepoProvider = 'github' | 'gitlab' | 'bitbucket';
 export type TrackerKind = 'notion' | 'github_issues' | 'jira';
 
+/** Functionally required tracker stages (entry / working / terminal). */
+export const CORE_STATE_KEYS = ['planning', 'in_progress', 'done'] as const;
+/** Optional refinements; omitted → they collapse onto a core column (see schema). */
+export const OPTIONAL_STATE_KEYS = ['plan_review', 'in_review'] as const;
+
 export interface RepoEntry {
   provider: RepoProvider;
   repo: string; // owner/name (github/gitlab) or workspace/slug (bitbucket)
@@ -54,6 +59,9 @@ export interface WizardState {
   jiraEmail: string;
   jiraToken: string;
   states: { planning: string; plan_review: string; in_progress: string; in_review: string; done: string };
+  /** When false, only the 3 core stages are collected (coarse board); the optional
+   * two collapse onto a core column server-side. */
+  detailedStates: boolean;
   backend: 'local' | 'docker';
   port: number;
   maxActive: number;
@@ -85,6 +93,7 @@ export function initialState(): WizardState {
     jiraEmail: '',
     jiraToken: '',
     states: { planning: '', plan_review: '', in_progress: '', in_review: '', done: '' },
+    detailedStates: false,
     backend: 'local',
     port: 4400,
     maxActive: 3,
@@ -139,7 +148,10 @@ export function validateStep(step: number, s: WizardState): string {
       return '';
     }
     case 2:
-      for (const [k, v] of Object.entries(s.states)) if (!v.trim()) return `State mapping "${k}" is required.`;
+      for (const k of CORE_STATE_KEYS) if (!s.states[k].trim()) return `State mapping "${k}" is required.`;
+      if (s.detailedStates) {
+        for (const k of OPTIONAL_STATE_KEYS) if (!s.states[k].trim()) return `State mapping "${k}" is required.`;
+      }
       if (s.trackerKind === 'notion') {
         if (!s.notionDb.trim()) return 'Notion database id is required.';
         if (!s.notionToken.trim()) return 'A Notion token is required.';
@@ -183,7 +195,12 @@ function repoYaml(s: WizardState): string[] {
 }
 
 function trackerYaml(s: WizardState): string[] {
-  const states = Object.entries(s.states).map(([k, v]) => `    ${k}: ${yamlStr(v)}`);
+  // Emit the 3 core stages; the optional two only when "detailed" is on (else the
+  // schema collapses them onto a core column).
+  const order = s.detailedStates
+    ? (['planning', 'plan_review', 'in_progress', 'in_review', 'done'] as const)
+    : CORE_STATE_KEYS;
+  const states = order.map((k) => `    ${k}: ${yamlStr(s.states[k])}`);
   if (s.trackerKind === 'github_issues') {
     const gh = firstGithub(s);
     const lines = [

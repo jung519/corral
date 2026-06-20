@@ -29,14 +29,32 @@ export const ProfileSchema = z.object({
 
 // ───────────────────────────────────────────────────────────── axis 1: tracker
 
-const SemanticStatesSchema = z.object({
-  planning: z.string(),
-  plan_review: z.string(),
-  in_progress: z.string(),
-  in_review: z.string(),
-  done: z.string(),
-  canceled: z.string().optional(),
-});
+/**
+ * Semantic states map Corral's pipeline stages onto the tracker's own columns.
+ * Only three are functionally required — an entry column to pick work up
+ * (`planning`), a working column (`in_progress`), and a terminal column (`done`).
+ * `plan_review` (plan-approval gate) and `in_review` (PR open) are board-display
+ * refinements: omit them on a coarse board and they collapse onto an existing
+ * column (plan_review→planning, in_review→in_progress). Several stages mapping to
+ * one column is fine — the reverse map keeps the first (entry) semantic.
+ */
+const SemanticStatesSchema = z
+  .object({
+    planning: z.string(),
+    plan_review: z.string().optional(),
+    in_progress: z.string(),
+    in_review: z.string().optional(),
+    done: z.string(),
+    canceled: z.string().optional(),
+  })
+  .transform((s) => ({
+    planning: s.planning,
+    plan_review: s.plan_review ?? s.planning,
+    in_progress: s.in_progress,
+    in_review: s.in_review ?? s.in_progress,
+    done: s.done,
+    canceled: s.canceled,
+  }));
 
 /** Optional gate restricting which issues Corral picks up (a checkbox, or a
  * select/status property matching given values). */
