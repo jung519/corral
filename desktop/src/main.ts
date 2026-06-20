@@ -11,7 +11,7 @@ import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
 import { orchestratorRunning, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
-import { validateAgent, validateGithub, validateNotion } from './validators.js';
+import { fetchNotionSchema, validateAgent, validateGithub, validateNotion } from './validators.js';
 
 /** Control-plane port the renderer talks to (kept in sync with the config default). */
 const CONTROL_PLANE_PORT = 4400;
@@ -59,6 +59,7 @@ function registerIpc(): void {
   ipcMain.handle('docker:detect', () => detectDocker());
 
   ipcMain.handle('validate:notion', (_e, token: string) => validateNotion(token));
+  ipcMain.handle('notion:schema', (_e, token: string, dbId: string) => fetchNotionSchema(token, dbId));
   ipcMain.handle('validate:github', (_e, token: string) => validateGithub(token));
   ipcMain.handle('validate:agent', (_e, provider: string, key: string) => validateAgent(provider, key));
 

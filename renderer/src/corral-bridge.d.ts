@@ -21,6 +21,12 @@ declare global {
         github(token: string): Promise<{ ok: boolean; detail?: string }>;
         agent(provider: string, key: string): Promise<{ ok: boolean; detail?: string }>;
       };
+      notion: {
+        schema(
+          token: string,
+          dbId: string,
+        ): Promise<{ ok: boolean; properties?: Array<{ name: string; type: string; options: string[] }>; detail?: string }>;
+      };
       startOrchestrator(): Promise<{ ok: boolean; port: number }>;
     };
   }

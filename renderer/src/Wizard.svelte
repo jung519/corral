@@ -136,6 +136,41 @@
 
   const agentPinged = $derived(typeof test.agent === 'object' && test.agent?.ok === true);
 
+  // Notion schema → property/option dropdowns (no manual name typing).
+  type NotionProp = { name: string; type: string; options: string[] };
+  let notionProps = $state<NotionProp[] | null>(null);
+  let loadingSchema = $state(false);
+  let schemaError = $state('');
+
+  const notionPropsByType = (types: string[]): NotionProp[] => (notionProps ?? []).filter((p) => types.includes(p.type));
+  const statusOptions = $derived((notionProps ?? []).find((p) => p.name === s.statusProp)?.options ?? []);
+
+  async function loadNotionSchema() {
+    if (!window.corral || !s.notionDb.trim() || !s.notionToken.trim()) {
+      schemaError = t('notion.loadNeedsToken');
+      return;
+    }
+    loadingSchema = true;
+    schemaError = '';
+    try {
+      const res = await window.corral.notion.schema(s.notionToken.trim(), s.notionDb.trim());
+      if (res.ok && res.properties) {
+        notionProps = res.properties;
+        // Auto-pick a sensible property if the current value isn't a real one.
+        const status = res.properties.filter((p) => p.type === 'status' || p.type === 'select');
+        if (status.length && !status.some((p) => p.name === s.statusProp)) s.statusProp = status[0]!.name;
+        const ids = res.properties.filter((p) => p.type === 'unique_id');
+        if (ids.length && !ids.some((p) => p.name === s.idProp)) s.idProp = ids[0]!.name;
+      } else {
+        schemaError = res.detail ?? t('notion.loadFailed');
+      }
+    } catch (err) {
+      schemaError = err instanceof Error ? err.message : String(err);
+    } finally {
+      loadingSchema = false;
+    }
+  }
+
   async function finish() {
     for (let i = 0; i < stepKeys.length; i++) {
       const e = validateStep(i, s);
@@ -346,13 +381,53 @@
             {@render badge(test.notion)}
           </div></label
         >
+        {#if hasBridge}
+          <div class="testrow">
+            <button onclick={loadNotionSchema} disabled={loadingSchema || !s.notionDb.trim() || !s.notionToken.trim()}>
+              {loadingSchema ? t('notion.loading') : t('notion.load')}
+            </button>
+            {#if notionProps}<span class="badge">✓ {notionProps.length} {t('notion.propsLoaded')}</span>{/if}
+            {#if schemaError}<span class="badge bad">{schemaError}</span>{/if}
+          </div>
+          <p class="hint">{t('notion.loadHint')}</p>
+        {/if}
         <div class="two">
-          <label class="field"><span>{t('field.statusProp')}</span><input bind:value={s.statusProp} /></label>
-          <label class="field"><span>{t('field.idProp')}</span><input bind:value={s.idProp} /></label>
+          <label class="field"
+            ><span>{t('field.statusProp')}</span>
+            {#if notionProps}
+              <select bind:value={s.statusProp}>
+                {#each notionPropsByType(['status', 'select']) as p}<option value={p.name}>{p.name}</option>{/each}
+              </select>
+            {:else}<input bind:value={s.statusProp} />{/if}
+          </label>
+          <label class="field"
+            ><span>{t('field.idProp')}</span>
+            {#if notionProps}
+              <select bind:value={s.idProp}>
+                {#each notionPropsByType(['unique_id']) as p}<option value={p.name}>{p.name}</option>{/each}
+              </select>
+            {:else}<input bind:value={s.idProp} />{/if}
+          </label>
         </div>
         <div class="two">
-          <label class="field"><span>{t('field.repoProp')}</span><input bind:value={s.repoProp} /></label>
-          <label class="field"><span>{t('field.scopeProp')}</span><input bind:value={s.scopeProp} /></label>
+          <label class="field"
+            ><span>{t('field.repoProp')}</span>
+            {#if notionProps}
+              <select bind:value={s.repoProp}>
+                <option value="">{t('notion.none')}</option>
+                {#each notionPropsByType(['select', 'multi_select']) as p}<option value={p.name}>{p.name}</option>{/each}
+              </select>
+            {:else}<input bind:value={s.repoProp} />{/if}
+          </label>
+          <label class="field"
+            ><span>{t('field.scopeProp')}</span>
+            {#if notionProps}
+              <select bind:value={s.scopeProp}>
+                <option value="">{t('notion.none')}</option>
+                {#each notionPropsByType(['checkbox']) as p}<option value={p.name}>{p.name}</option>{/each}
+              </select>
+            {:else}<input bind:value={s.scopeProp} />{/if}
+          </label>
         </div>
       {:else if s.trackerKind === 'github_issues'}
         <label class="field"><span>{t('field.issuesRepo')}</span><input bind:value={s.issuesRepo} placeholder={s.repos[0]?.repo || 'owner/name'} /></label>
@@ -381,11 +456,27 @@
       >
       <div class="states">
         {#each CORE_STATE_KEYS as k}
-          <label><span>{t(`state.${k}`)}</span><input bind:value={s.states[k]} /></label>
+          <label
+            ><span>{t(`state.${k}`)}</span>
+            {#if s.trackerKind === 'notion' && statusOptions.length}
+              <select bind:value={s.states[k]}>
+                <option value="">{t('notion.none')}</option>
+                {#each statusOptions as o}<option value={o}>{o}</option>{/each}
+              </select>
+            {:else}<input bind:value={s.states[k]} />{/if}
+          </label>
         {/each}
         {#if s.detailedStates}
           {#each OPTIONAL_STATE_KEYS as k}
-            <label><span>{t(`state.${k}`)}</span><input bind:value={s.states[k]} /></label>
+            <label
+              ><span>{t(`state.${k}`)}</span>
+              {#if s.trackerKind === 'notion' && statusOptions.length}
+                <select bind:value={s.states[k]}>
+                  <option value="">{t('notion.none')}</option>
+                  {#each statusOptions as o}<option value={o}>{o}</option>{/each}
+                </select>
+              {:else}<input bind:value={s.states[k]} />{/if}
+            </label>
           {/each}
         {/if}
       </div>
