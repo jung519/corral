@@ -11,6 +11,7 @@ export interface WizardState {
   agentKey: string;
   planningModel: string;
   implementationModel: string;
+  reviewModel: string;
   // Repository (work repo)
   repo: string;
   repoKey: string;
@@ -48,6 +49,7 @@ export function initialState(): WizardState {
     agentKey: '',
     planningModel: 'opus',
     implementationModel: 'sonnet',
+    reviewModel: 'opus',
     repo: '',
     repoKey: 'main',
     production: 'main',
@@ -170,6 +172,7 @@ export function buildConfigYaml(s: WizardState): string {
     '  models:',
     `    planning: ${yamlStr(s.planningModel)}`,
     `    implementation: ${yamlStr(s.implementationModel)}`,
+    `    review: ${yamlStr(s.reviewModel)}`,
     '',
     'workspace:',
     `  backend: ${s.backend}`,

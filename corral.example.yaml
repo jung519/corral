@@ -48,6 +48,7 @@ agent:
   models:
     planning: opus
     implementation: sonnet
+    review: opus
 
 workspace:
   backend: local          # local | docker

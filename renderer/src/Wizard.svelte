@@ -68,9 +68,6 @@
   }
 
   const agentPinged = $derived(typeof test.agent === 'object' && test.agent?.ok === true);
-  const helper = $derived(
-    `${agentPinged ? `${t('agent.pingOk')} · ` : ''}${t('agent.modelsLabel')}: planning=${s.planningModel}, implementation=${s.implementationModel}`,
-  );
 
   async function finish() {
     for (let i = 0; i < stepKeys.length; i++) {
@@ -165,7 +162,15 @@
           {@render badge(test.agent)}
         </div></label
       >
-      <p class="helper">{helper}</p>
+      {#if s.transport === 'cli'}<p class="hint">{t('cli.hint')}</p>{/if}
+      {#if agentPinged}<p class="helper">{t('agent.pingOk')}</p>{/if}
+
+      <span class="lbl">{t('agent.modelsLabel')}</span>
+      <div class="three">
+        <label class="field"><span>{t('field.planningModel')}</span><input bind:value={s.planningModel} /></label>
+        <label class="field"><span>{t('field.implModel')}</span><input bind:value={s.implementationModel} /></label>
+        <label class="field"><span>{t('field.reviewModel')}</span><input bind:value={s.reviewModel} /></label>
+      </div>
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
       <label class="field"><span>{t('field.repo')}</span><input bind:value={s.repo} placeholder="acme/widgets" /></label>
@@ -231,13 +236,15 @@
       </div>
     {:else if step === 3}
       <h1>{t('step.workspace')}</h1>
+      <p class="subtitle">{t('workspace.desc')}</p>
       <span class="lbl">{t('workspace.backend')}</span>
       <div class="transports">
-        {#each ['local', 'docker'] as b}
-          <button class="transport" class:sel={s.backend === b} onclick={() => (s.backend = b as WizardState['backend'])}>
-            <span class="radio" class:on={s.backend === b}></span>{b}
-          </button>
-        {/each}
+        <button class="transport" class:sel={s.backend === 'local'} onclick={() => (s.backend = 'local')}>
+          <span class="radio" class:on={s.backend === 'local'}></span>{t('workspace.local')}
+        </button>
+        <button class="transport" class:sel={s.backend === 'docker'} onclick={() => (s.backend = 'docker')}>
+          <span class="radio" class:on={s.backend === 'docker'}></span>{t('workspace.docker')}
+        </button>
       </div>
       <div class="testrow">
         <button onclick={detectDocker} disabled={!hasBridge}>{t('workspace.detect')}</button>
@@ -246,13 +253,29 @@
     {:else if step === 4}
       <h1>{t('step.channel')}</h1>
       <div class="two">
-        <label class="field"><span>{t('field.port')}</span><input type="number" bind:value={s.port} /></label>
+        {#if !hasBridge}
+          <label class="field"><span>{t('field.port')}</span><input type="number" bind:value={s.port} /></label>
+        {/if}
         <label class="field"><span>{t('field.maxActive')}</span><input type="number" bind:value={s.maxActive} /></label>
       </div>
       <div class="two">
-        <label class="field"><span>{t('field.language')}</span><input bind:value={s.language} /></label>
-        <label class="field"><span>{t('field.stack')}</span><input bind:value={s.stack} /></label>
+        <label class="field"
+          ><span>{t('field.language')}</span>
+          <select bind:value={s.language}>
+            <option value="en">English</option>
+            <option value="ko">한국어</option>
+          </select></label
+        >
+        <label class="field"
+          ><span>{t('field.stack')}</span>
+          <select bind:value={s.stack}>
+            <option value="generic">generic</option>
+            <option value="nestjs">nestjs</option>
+            <option value="flutter">flutter</option>
+          </select></label
+        >
       </div>
+      <p class="hint">{t('field.stackDesc')}</p>
     {/if}
 
     {#if error}<p class="error">{error}</p>{/if}
@@ -472,6 +495,11 @@
   .two {
     display: grid;
     grid-template-columns: 1fr 1fr;
+    gap: 14px;
+  }
+  .three {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
     gap: 14px;
   }
   .states {

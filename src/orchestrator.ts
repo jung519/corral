@@ -682,7 +682,7 @@ export class Orchestrator {
         handle,
         issue,
         base,
-        this.planningModel(),
+        this.reviewModel(),
         this.referencePath(),
         (r) => this.cost.add(rt.identifier, r),
         reviewRepo.verifyCommands,
@@ -925,6 +925,11 @@ export class Orchestrator {
 
   private planningModel(): string | undefined {
     return this.config.agent.models.planning;
+  }
+
+  /** Review pipeline model — falls back to the planning model when unset. */
+  private reviewModel(): string | undefined {
+    return this.config.agent.models.review ?? this.config.agent.models.planning;
   }
 }
 
