@@ -275,6 +275,58 @@ export function buildConfigYaml(s: WizardState): string {
   ].join('\n');
 }
 
+// ─────────────────────────────────────────────────── per-step draft persistence
+
+const DRAFT_KEY = 'corral.wizard.draft';
+
+/** Secret-bearing fields, blanked before a draft ever touches disk (BYOK: tokens
+ * live only in the OS keychain, never in localStorage). */
+function withoutSecrets(s: WizardState): WizardState {
+  const clone: WizardState = JSON.parse(JSON.stringify(s));
+  clone.agentKey = '';
+  clone.notionToken = '';
+  clone.jiraToken = '';
+  for (const r of clone.repos) r.token = '';
+  return clone;
+}
+
+/** Persist the non-secret wizard state so a restart mid-setup keeps your inputs. */
+export function saveDraft(s: WizardState): void {
+  try {
+    localStorage.setItem(DRAFT_KEY, JSON.stringify(withoutSecrets(s)));
+  } catch {
+    /* storage unavailable — non-fatal */
+  }
+}
+
+export function loadDraft(): WizardState | null {
+  try {
+    const raw = localStorage.getItem(DRAFT_KEY);
+    if (!raw) return null;
+    return { ...initialState(), ...(JSON.parse(raw) as Partial<WizardState>) };
+  } catch {
+    return null;
+  }
+}
+
+export function clearDraft(): void {
+  try {
+    localStorage.removeItem(DRAFT_KEY);
+  } catch {
+    /* non-fatal */
+  }
+}
+
+/** Secret refs (service/account) the wizard manages — to check keychain.has on load. */
+export function secretRefs(s: WizardState): Array<{ service: string; account: string }> {
+  const refs: Array<{ service: string; account: string }> = [];
+  for (const r of s.repos) if (r.key.trim()) refs.push({ service: r.provider, account: r.key });
+  if (s.trackerKind === 'notion') refs.push({ service: 'notion', account: 'default' });
+  else if (s.trackerKind === 'jira') refs.push({ service: 'jira', account: 'default' });
+  refs.push({ service: serviceFor(s.provider), account: 'default' });
+  return refs;
+}
+
 /** Secrets to persist (service, account, value). Per-repo creds use account = key. */
 export function secretsFor(s: WizardState): Array<{ service: string; account: string; value: string }> {
   const out: Array<{ service: string; account: string; value: string }> = [];

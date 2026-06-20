@@ -1,16 +1,22 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import {
     buildConfigYaml,
+    clearDraft,
     CORE_STATE_KEYS,
     defaultModels,
     initialState,
+    loadDraft,
     MODELS,
     newRepo,
     OPTIONAL_STATE_KEYS,
     type RepoProvider,
+    saveDraft,
+    secretRefs,
     secretsFor,
+    serviceFor,
     type TrackerKind,
     validateStep,
     type WizardState,
@@ -32,6 +38,41 @@
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
+  // Secrets already persisted to the keychain (shown as "saved" so you needn't retype
+  // a token after a restart). Keyed "service:account".
+  let savedSecrets = $state(new Set<string>());
+  const secretKey = (service: string, account: string) => `${service}:${account}`;
+  const secretSaved = (service: string, account: string) => savedSecrets.has(secretKey(service, account));
+
+  // Restore the in-progress draft (non-secret fields) + mark which tokens are saved.
+  onMount(async () => {
+    const draft = loadDraft();
+    if (draft) s = draft;
+    if (!window.corral) return;
+    const found = new Set<string>();
+    for (const ref of secretRefs(s)) {
+      if (await window.corral.secret.has(ref.service, ref.account)) found.add(secretKey(ref.service, ref.account));
+    }
+    savedSecrets = found;
+  });
+
+  // "Save & next": persist the non-secret draft (localStorage) and any entered tokens
+  // (encrypted into the keychain) before moving. Tokens never touch the draft file.
+  async function persistStep() {
+    saveDraft(s);
+    if (!window.corral) return;
+    const found = new Set(savedSecrets);
+    for (const sec of secretsFor(s)) {
+      try {
+        await window.corral.secret.set(sec.service, sec.account, sec.value);
+        found.add(secretKey(sec.service, sec.account));
+      } catch {
+        /* surfaced at finish */
+      }
+    }
+    savedSecrets = found;
+  }
+
   // Selecting a provider resets the per-stage models to that provider's defaults
   // (so the model selects always offer valid options for the chosen agent).
   function setProvider(p: WizardState['provider']) {
@@ -46,14 +87,17 @@
   // a full check at Finish (which jumps to the first invalid step).
   function goTo(i: number) {
     error = '';
+    void persistStep();
     step = i;
   }
   function next() {
     error = '';
+    void persistStep();
     if (step < stepKeys.length - 1) step += 1;
   }
   function back() {
     error = '';
+    void persistStep();
     if (step > 0) step -= 1;
   }
   function valid(i: number): boolean {
@@ -104,8 +148,9 @@
     saving = true;
     try {
       if (window.corral) {
-        for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
+        // Write the config first so it always lands, even if a later step throws.
         await window.corral.config.write(buildConfigYaml(s));
+        for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
         await window.corral.startOrchestrator();
       } else {
         const out = await api.setup({ config: buildConfigYaml(s), secrets: secretsFor(s) });
@@ -115,6 +160,7 @@
           return;
         }
       }
+      clearDraft();
       location.hash = '#/';
       location.reload();
     } catch (err) {
@@ -181,7 +227,12 @@
       <label class="field"
         ><span>{t('field.apiKey')}{s.transport === 'cli' ? t('field.apiKey.optionalCli') : ''}</span>
         <div class="keyrow">
-          <input type="password" bind:value={s.agentKey} placeholder="sk-ant-..." onblur={testAgent} />
+          <input
+            type="password"
+            bind:value={s.agentKey}
+            placeholder={!s.agentKey && secretSaved(serviceFor(s.provider), 'default') ? t('field.secretSaved') : 'sk-ant-...'}
+            onblur={testAgent}
+          />
           {@render badge(test.agent)}
         </div></label
       >
@@ -246,7 +297,12 @@
           <label class="field"
             ><span>{t('field.repoToken')}</span>
             <div class="keyrow">
-              <input type="password" bind:value={r.token} onblur={() => (r.provider === 'github' ? testGithub(i, r.token) : undefined)} />
+              <input
+                type="password"
+                bind:value={r.token}
+                placeholder={!r.token && secretSaved(r.provider, r.key) ? t('field.secretSaved') : ''}
+                onblur={() => (r.provider === 'github' ? testGithub(i, r.token) : undefined)}
+              />
               {#if r.provider === 'github'}{@render badge(test[`gh-${i}`])}{/if}
             </div></label
           >
@@ -281,7 +337,12 @@
         <label class="field"
           ><span>{t('field.notionToken')}</span>
           <div class="keyrow">
-            <input type="password" bind:value={s.notionToken} onblur={testNotion} />
+            <input
+              type="password"
+              bind:value={s.notionToken}
+              placeholder={!s.notionToken && secretSaved('notion', 'default') ? t('field.secretSaved') : ''}
+              onblur={testNotion}
+            />
             {@render badge(test.notion)}
           </div></label
         >
@@ -306,7 +367,13 @@
           <label class="field"><span>{t('field.jiraProject')}</span><input bind:value={s.jiraProject} /></label>
           <label class="field"><span>{t('field.jiraEmail')}</span><input bind:value={s.jiraEmail} /></label>
         </div>
-        <label class="field"><span>{t('field.jiraToken')}</span><input type="password" bind:value={s.jiraToken} /></label>
+        <label class="field"
+          ><span>{t('field.jiraToken')}</span><input
+            type="password"
+            bind:value={s.jiraToken}
+            placeholder={!s.jiraToken && secretSaved('jira', 'default') ? t('field.secretSaved') : ''}
+          /></label
+        >
       {/if}
 
       <span class="lbl"
