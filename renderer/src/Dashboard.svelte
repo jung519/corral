@@ -40,6 +40,11 @@
   });
 
   async function openCandidates() {
+    if (configured === false) {
+      toast(t('dash.setupNeeded'), 'error');
+      location.hash = '#/setup';
+      return;
+    }
     candidates = await api.getCandidates();
     showCandidates = true;
   }

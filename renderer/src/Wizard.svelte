@@ -26,18 +26,22 @@
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
+  // Non-sequential: jump to any step freely; validation is per-item (sidebar ✓) and
+  // a full check at Finish (which jumps to the first invalid step).
+  function goTo(i: number) {
+    error = '';
+    step = i;
+  }
   function next() {
-    const e = validateStep(step, s);
-    if (e) {
-      error = e;
-      return;
-    }
     error = '';
     if (step < stepKeys.length - 1) step += 1;
   }
   function back() {
     error = '';
     if (step > 0) step -= 1;
+  }
+  function valid(i: number): boolean {
+    return validateStep(i, s) === '';
   }
 
   async function detectDocker() {
@@ -113,8 +117,10 @@
     <p class="brand">{t('wizard.sidebar')}</p>
     <ol>
       {#each stepKeys as key, i}
-        <li class:active={i === step} class:done={i < step}>
-          <span class="ico">{i < step ? '✓' : '▢'}</span>{t(key)}
+        <li>
+          <button class="step" class:active={i === step} class:done={valid(i)} onclick={() => goTo(i)}>
+            <span class="ico">{valid(i) ? '✓' : '▢'}</span>{t(key)}
+          </button>
         </li>
       {/each}
     </ol>
@@ -290,25 +296,33 @@
     flex-direction: column;
     gap: 2px;
   }
-  li {
+  .step {
+    width: 100%;
     display: flex;
     align-items: center;
     gap: 10px;
     padding: 10px 12px;
     border-radius: 8px;
+    border: none;
+    background: transparent;
     color: var(--text-dim);
     font-size: 14px;
+    text-align: left;
+    cursor: pointer;
   }
-  li .ico {
+  .step:hover {
+    background: var(--surface-2);
+  }
+  .step .ico {
     font-size: 13px;
     opacity: 0.8;
   }
-  li.active {
+  .step.done {
+    color: var(--green);
+  }
+  .step.active {
     background: var(--accent);
     color: var(--accent-text);
-  }
-  li.done {
-    color: var(--green);
   }
   .progress {
     margin-top: 20px;
