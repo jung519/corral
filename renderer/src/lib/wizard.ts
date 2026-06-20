@@ -94,6 +94,24 @@ export function serviceFor(provider: WizardState['provider']): string {
   return { claude: 'anthropic', gemini: 'google', gpt: 'openai' }[provider];
 }
 
+/** Selectable models per provider (strongest first). Edit here to add/adjust. */
+export const MODELS: Record<WizardState['provider'], string[]> = {
+  claude: ['opus', 'sonnet', 'haiku'],
+  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  gpt: ['gpt-5', 'gpt-5-mini', 'o4-mini'],
+};
+
+/** Default per-stage models for a provider (planning/review = strongest, impl = next). */
+export function defaultModels(provider: WizardState['provider']): {
+  planning: string;
+  implementation: string;
+  review: string;
+} {
+  const m = MODELS[provider];
+  const first = m[0] ?? '';
+  return { planning: first, implementation: m[1] ?? first, review: first };
+}
+
 const OWNER_NAME = /^[^/\s]+\/[^/\s]+$/;
 
 export function validateStep(step: number, s: WizardState): string {

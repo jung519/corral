@@ -3,7 +3,9 @@
   import * as api from './lib/api';
   import {
     buildConfigYaml,
+    defaultModels,
     initialState,
+    MODELS,
     type RepoProvider,
     secretsFor,
     type TrackerKind,
@@ -26,6 +28,16 @@
   let docker = $state<{ available: boolean; version?: string } | null>(null);
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
+
+  // Selecting a provider resets the per-stage models to that provider's defaults
+  // (so the model selects always offer valid options for the chosen agent).
+  function setProvider(p: WizardState['provider']) {
+    s.provider = p;
+    const d = defaultModels(p);
+    s.planningModel = d.planning;
+    s.implementationModel = d.implementation;
+    s.reviewModel = d.review;
+  }
 
   // Non-sequential: jump to any step freely; validation is per-item (sidebar ✓) and
   // a full check at Finish (which jumps to the first invalid step).
@@ -140,7 +152,7 @@
 
       <div class="providers">
         {#each providers as p}
-          <button class="provider" class:sel={s.provider === p.id} onclick={() => (s.provider = p.id)}>
+          <button class="provider" class:sel={s.provider === p.id} onclick={() => setProvider(p.id)}>
             <svg class="picon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
             <span class="pname">{p.name}</span>
           </button>
@@ -168,9 +180,24 @@
 
       <span class="lbl">{t('agent.modelsLabel')}</span>
       <div class="three">
-        <label class="field"><span>{t('field.planningModel')}</span><input bind:value={s.planningModel} /></label>
-        <label class="field"><span>{t('field.implModel')}</span><input bind:value={s.implementationModel} /></label>
-        <label class="field"><span>{t('field.reviewModel')}</span><input bind:value={s.reviewModel} /></label>
+        <label class="field"
+          ><span>{t('field.planningModel')}</span>
+          <select bind:value={s.planningModel}>
+            {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
+          </select></label
+        >
+        <label class="field"
+          ><span>{t('field.implModel')}</span>
+          <select bind:value={s.implementationModel}>
+            {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
+          </select></label
+        >
+        <label class="field"
+          ><span>{t('field.reviewModel')}</span>
+          <select bind:value={s.reviewModel}>
+            {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
+          </select></label
+        >
       </div>
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
@@ -285,7 +312,12 @@
         {#if !hasBridge}
           <label class="field"><span>{t('field.port')}</span><input type="number" bind:value={s.port} /></label>
         {/if}
-        <label class="field"><span>{t('field.maxActive')}</span><input type="number" bind:value={s.maxActive} /></label>
+        <label class="field"
+          ><span>{t('field.maxActive')}</span>
+          <select bind:value={s.maxActive}>
+            {#each [1, 2, 3, 4, 5, 6, 8, 10] as n}<option value={n}>{n}</option>{/each}
+          </select></label
+        >
       </div>
       <div class="two">
         <label class="field"
