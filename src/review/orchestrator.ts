@@ -15,7 +15,7 @@ import { logger } from '../core/logger.js';
 import type { AgentAdapter, AgentRunResult, Issue, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 import type { ResolvedProfile } from '../profile/index.js';
 import type { ReviewConfig } from '../config/schema.js';
-import { reviewRoundPrompt } from './prompt.js';
+import { reviewRoundPrompt, type ReviewTarget } from './prompt.js';
 import { runSemgrep } from './semgrep-runner.js';
 import { runStaticQa } from './static-qa-runner.js';
 
@@ -40,7 +40,7 @@ export class ReviewOrchestrator {
   async run(
     handle: WorkspaceHandle,
     issue: Issue,
-    baseCommit: string,
+    targets: ReviewTarget[],
     model: string | undefined,
     referencePath?: string,
     onRoundCost?: RoundCostFn,
@@ -61,7 +61,7 @@ export class ReviewOrchestrator {
 
     const tasks: Array<Promise<string | null>> = [];
     for (let r = 1; r <= rounds; r++) {
-      tasks.push(this.runRound(handle, issue, r, baseCommit, model, referencePath, onRoundCost));
+      tasks.push(this.runRound(handle, issue, r, targets, model, referencePath, onRoundCost));
     }
 
     const semgrepTask = this.cfg.semgrep
@@ -91,7 +91,7 @@ export class ReviewOrchestrator {
     handle: WorkspaceHandle,
     issue: Issue,
     round: number,
-    baseCommit: string,
+    targets: ReviewTarget[],
     model: string | undefined,
     referencePath?: string,
     onRoundCost?: RoundCostFn,
@@ -101,7 +101,7 @@ export class ReviewOrchestrator {
       const result = await this.agent.run(handle, issue, {
         stage: 'planning',
         workflow: '', // self-contained; must not clobber the main workflow guide
-        prompt: reviewRoundPrompt(issue, round, baseCommit, this.profile, referencePath),
+        prompt: reviewRoundPrompt(issue, round, targets, this.profile, referencePath),
         continueSession: false, // fresh, independent perspective
         model,
       });

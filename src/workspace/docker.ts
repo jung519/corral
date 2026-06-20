@@ -55,14 +55,19 @@ export class DockerWorkspace implements WorkspaceAdapter {
     await runOrThrow('docker', args);
 
     const handle = this.handle(input.identifier);
-    log.info(`cloning ${redact(input.cloneUrl)}`);
-    const clone = await this.io.exec(
-      handle,
-      `git clone --branch ${shq(input.baseBranch)} ${shq(input.cloneUrl)} ${WORKDIR}`,
-    );
-    if (clone.code !== 0) {
-      await this.cleanup(handle);
-      throw new Error(`clone failed: ${clone.stderr}`);
+    // Clone every repo side by side into /workspace/<key>; the agent runs at the
+    // workspace root and decides which repo(s) an issue touches.
+    for (const repo of input.repos) {
+      const dest = `${WORKDIR}/${repo.key}`;
+      log.info(`cloning ${redact(repo.cloneUrl)} → ${dest}`);
+      const clone = await this.io.exec(
+        handle,
+        `git clone --branch ${shq(repo.baseBranch)} ${shq(repo.cloneUrl)} ${shq(dest)}`,
+      );
+      if (clone.code !== 0) {
+        await this.cleanup(handle);
+        throw new Error(`clone failed (${repo.key}): ${clone.stderr}`);
+      }
     }
 
     // Reference repos (e.g. a conventions repo) cloned read-only alongside the work tree.

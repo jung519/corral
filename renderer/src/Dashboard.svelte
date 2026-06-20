@@ -112,8 +112,10 @@
         <div class="bar-row"><PhaseBar phase={issue.phase} /></div>
         <div class="issue-actions">
           {#if issue.url}<a href={issue.url} target="_blank" rel="noreferrer">{t('dash.tracker')} ↗</a>{/if}
-          {#if issue.pr?.url}<a href={issue.pr.url} target="_blank" rel="noreferrer">PR #{issue.pr.number} ↗</a>{/if}
-          {#if issue.pr}<button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</button>{/if}
+          {#each issue.prs ?? [] as pr}
+            {#if pr.url}<a href={pr.url} target="_blank" rel="noreferrer">PR #{pr.number} ({pr.repoKey}) ↗</a>{/if}
+          {/each}
+          {#if issue.prs?.length}<button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</button>{/if}
           {#if issue.stuck}<button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</button>{/if}
         </div>
       </div>

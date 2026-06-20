@@ -3,7 +3,7 @@
  * `<root>/<identifier>`. Convenient for development; no isolation.
  * Lifted from upstream.
  */
-import { access, mkdir, rm } from 'node:fs/promises';
+import { access, mkdir, readdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { logger } from '../core/logger.js';
 import type { CreateWorkspaceInput, WorkspaceAdapter, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
@@ -22,11 +22,18 @@ export class LocalWorkspace implements WorkspaceAdapter {
 
   async create(input: CreateWorkspaceInput): Promise<WorkspaceHandle> {
     const workdir = this.dirFor(input.identifier);
+    const log = logger.child(input.identifier);
     await mkdir(this.root, { recursive: true });
     await rm(workdir, { recursive: true, force: true });
+    await mkdir(workdir, { recursive: true });
 
-    logger.child(input.identifier).info(`cloning ${redact(input.cloneUrl)} → ${workdir}`);
-    await runOrThrow('git', ['clone', '--branch', input.baseBranch, input.cloneUrl, workdir]);
+    // Clone every repo side by side into <workspace>/<key>; the agent runs at the
+    // workspace root and decides which repo(s) an issue touches.
+    for (const repo of input.repos) {
+      const dest = join(workdir, repo.key);
+      log.info(`cloning ${redact(repo.cloneUrl)} → ${dest}`);
+      await runOrThrow('git', ['clone', '--branch', repo.baseBranch, repo.cloneUrl, dest]);
+    }
 
     return { id: input.identifier, workdir, backend: 'local' };
   }
@@ -34,8 +41,16 @@ export class LocalWorkspace implements WorkspaceAdapter {
   async reattach(identifier: string): Promise<WorkspaceHandle | null> {
     const workdir = this.dirFor(identifier);
     try {
-      await access(join(workdir, '.git'));
-      return { id: identifier, workdir, backend: 'local' };
+      // Present if at least one repo subdir still has a .git.
+      for (const e of await readdir(workdir)) {
+        try {
+          await access(join(workdir, e, '.git'));
+          return { id: identifier, workdir, backend: 'local' };
+        } catch {
+          /* not a repo dir */
+        }
+      }
+      return null;
     } catch {
       return null;
     }

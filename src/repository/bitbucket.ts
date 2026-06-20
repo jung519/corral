@@ -46,6 +46,7 @@ const Page = <T extends z.ZodTypeAny>(item: T) => z.object({ values: z.array(ite
 export class BitbucketRepository implements RepositoryAdapter {
   readonly kind = 'bitbucket';
   readonly key: string;
+  readonly description: string;
   readonly workerImage?: string;
   readonly verifyCommands: string[];
   readonly afterClone?: string;
@@ -56,6 +57,7 @@ export class BitbucketRepository implements RepositoryAdapter {
     private readonly ctx: RepositoryCtx,
   ) {
     this.key = cfg.key;
+    this.description = cfg.description;
     this.workerImage = cfg.image;
     this.verifyCommands = cfg.verify;
     this.afterClone = cfg.after_clone;

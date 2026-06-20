@@ -122,6 +122,9 @@ export interface RepositoryAdapter {
   readonly kind: string;
   /** Stable key used to route issues → repository (matches Issue.repoKey / config). */
   readonly key: string;
+  /** Human description of this repo's role — surfaced to the agent so it can decide
+   * which repo(s) an issue touches when several are cloned side by side. */
+  readonly description: string;
   readonly baseBranchFor: (issue: Issue) => string;
   /** Work branch the agent creates for an issue (e.g. "feature/ISS-131"). */
   branchNameFor(issue: Issue): string;
@@ -204,17 +207,26 @@ export interface WorkspaceIO {
   writeFile(handle: WorkspaceHandle, path: string, content: string): Promise<void>;
   exists(handle: WorkspaceHandle, path: string): Promise<boolean>;
   list(handle: WorkspaceHandle, dir: string): Promise<string[]>;
-  /** Unified diff from `baseCommit` to HEAD. */
-  getDiff(handle: WorkspaceHandle, baseCommit: string): Promise<string>;
+  /** Unified diff from `baseCommit` to HEAD. `subdir` scopes it to one repo clone
+   * (relative to the workspace root); omit/'.' for the root itself. */
+  getDiff(handle: WorkspaceHandle, baseCommit: string, subdir?: string): Promise<string>;
   /** Run a shell command inside the workspace (hooks, git). */
   exec(handle: WorkspaceHandle, command: string): Promise<{ stdout: string; stderr: string; code: number }>;
 }
 
-export interface CreateWorkspaceInput {
-  identifier: string;
+/** One repository to clone into the workspace, under its own `<key>` subdirectory. */
+export interface WorkspaceRepoSpec {
+  key: string;
+  /** Authenticated clone URL (embeds a token — never log verbatim). */
   cloneUrl: string;
   baseBranch: string;
-  /** Per-repo image override. */
+}
+
+export interface CreateWorkspaceInput {
+  identifier: string;
+  /** Repos cloned side by side, each into `<workspace>/<key>`. */
+  repos: WorkspaceRepoSpec[];
+  /** Worker image override (docker backend). */
   image?: string;
   /** Extra read-only repos to clone alongside (e.g. a conventions/skills repo). */
   extraRepos?: Array<{ cloneUrl: string; path: string }>;

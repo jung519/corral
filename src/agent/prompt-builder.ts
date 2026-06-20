@@ -16,13 +16,22 @@ import type { Translator } from '../profile/i18n.js';
 
 const engine = new Liquid({ cache: true });
 
+/** One repo cloned in the workspace, described to the agent so it can decide which
+ * repo(s) the issue touches. `dir` is the subdirectory under the workspace root. */
+export interface WorkflowRepo {
+  key: string;
+  dir: string;
+  description: string;
+  base_branch: string;
+  /** The work branch the agent must create in this repo if it changes it. */
+  branch: string;
+}
+
 export interface WorkflowContext {
   issue: Issue;
   tracker_kind: string;
-  repo: string;
-  base_branch: string;
-  /** The work branch the agent must create. */
-  branch: string;
+  /** All repos cloned side by side; the agent commits in whichever it changes. */
+  repos: WorkflowRepo[];
   /** Path of the reference/conventions repo cloned in the workspace; undefined to skip. */
   reference_path?: string;
 }

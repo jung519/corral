@@ -1,9 +1,11 @@
 # Corral configuration example. Copy to corral.yaml and edit.
 # Secrets are NOT stored here — set them as environment variables (BYOK):
 #   CORRAL_NOTION_DEFAULT     — Notion integration token
-#   CORRAL_GITHUB_DEFAULT     — GitHub access token
+#   CORRAL_GITHUB_SERVER      — GitHub token for the repo whose key is "server"
+#   CORRAL_GITHUB_APP         — GitHub token for the repo whose key is "app"
 #   CORRAL_ANTHROPIC_DEFAULT  — Anthropic API key
-# (the var name is CORRAL_<SERVICE>_<ACCOUNT>, uppercased.)
+# (the var name is CORRAL_<SERVICE>_<ACCOUNT>, uppercased; per-repo creds use the
+#  repo's key as the account, so each repo can carry its own token.)
 
 profile:
   language: en          # output language for agent-authored plans/reviews
@@ -28,11 +30,15 @@ tracker:
     type: checkbox       # only issues with this checkbox are picked up
     property: "Corral"
 
+# All repos are cloned side by side into the workspace (each under its <key>/).
+# The agent reads `description` to decide which repo(s) an issue touches, changes
+# only those, and the orchestrator opens one PR per changed repo.
 repositories:
   - kind: github
-    key: main
-    repo: acme/widgets
-    credential: { service: github, account: default }
+    key: server
+    repo: acme/widgets-server
+    description: "NestJS backend API (auth, REST, MongoDB)"
+    credential: { service: github, account: server }   # → CORRAL_GITHUB_SERVER
     branch_strategy:
       production: main
       development: develop
@@ -40,6 +46,15 @@ repositories:
       - "npm run lint"
       - "npm run typecheck"
     after_clone: "npm ci"
+  - kind: github
+    key: app
+    repo: acme/widgets-app
+    description: "Flutter mobile app (iOS + Android)"
+    credential: { service: github, account: app }       # → CORRAL_GITHUB_APP
+    branch_strategy:
+      production: main
+      development: develop
+    after_clone: "flutter pub get"
 
 agent:
   provider: claude        # claude | gemini | gpt

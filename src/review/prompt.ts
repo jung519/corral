@@ -26,7 +26,7 @@ export function planCritiquePrompt(
   const lines = [
     `You are an independent, SKEPTICAL plan reviewer for issue ${issue.identifier} (round ${round}).`,
     `Read the DRAFT plan at \`${SCRATCH.pendingPlan}\` and the issue. Critique it BEFORE any code is written.`,
-    `Inspect the ACTUAL repository to verify the plan's assumptions — do not trust the plan's claims.`,
+    `Inspect the ACTUAL repositories (each subdirectory of the workspace is a repo) to verify the plan's assumptions — do not trust the plan's claims.`,
     `Hunt for:`,
     `- Underspecified / ambiguous steps; missing edge cases, failure modes, concurrency, data migration.`,
     `- WRONG assumptions about the schema / API / existing code (cite the real file:line that contradicts the plan).`,
@@ -49,10 +49,26 @@ export function planCritiquePrompt(
   return lines.join(' ');
 }
 
+/** A changed repo clone to scope a review diff to: subdirectory + its base commit. */
+export interface ReviewTarget {
+  dir: string;
+  base: string;
+}
+
+/** Per-repo diff commands for the review prompt (multi-repo aware). */
+function diffInstruction(targets: ReviewTarget[]): string {
+  const cmds = targets.map((t) => `\`git -C ${t.dir} diff ${t.base}..HEAD\``);
+  if (cmds.length === 1) return `Review ONLY the changes in this branch: run ${cmds[0]}.`;
+  return (
+    `Review ONLY this issue's changes, which span ${targets.length} repos ` +
+    `(${targets.map((t) => `\`${t.dir}/\``).join(', ')}). Inspect each repo's diff: ${cmds.join(' ; ')}.`
+  );
+}
+
 export function reviewRoundPrompt(
   issue: Issue,
   round: number,
-  baseCommit: string,
+  targets: ReviewTarget[],
   profile: ResolvedProfile,
   referencePath?: string,
 ): string {
@@ -60,7 +76,7 @@ export function reviewRoundPrompt(
   const examples = profile.stack.calibrationExamples.map((e) => `  - ${e}`).join('\n');
   const lines = [
     `You are an independent, SKEPTICAL code reviewer for issue ${issue.identifier} (round ${round}).`,
-    `Review ONLY the changes in this branch: run \`git diff ${baseCommit}..HEAD\`.`,
+    diffInstruction(targets),
     `Look for correctness bugs, security issues, missing edge cases, and error handling gaps.`,
     `Mindset: a default reviewer is a POOR QA — it finds a real problem and waves it through as "minor", and never probes edge cases. Do the opposite:`,
     `- Do NOT be lenient. Do NOT shrink or rationalize a problem you found.`,

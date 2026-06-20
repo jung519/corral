@@ -22,7 +22,7 @@ import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 import { CostTracker } from './core/cost-tracker.js';
 import { bus } from './core/events.js';
-import { IssueStateStore, type IssueRuntime } from './core/issue-state.js';
+import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
 import { SCRATCH } from './core/paths.js';
 import {
@@ -43,6 +43,7 @@ import type { ResolvedProfile } from './profile/index.js';
 import type { RepositoryRouter } from './repository/router.js';
 import { PlanCritiqueOrchestrator } from './review/plan-critique.js';
 import { ReviewOrchestrator } from './review/orchestrator.js';
+import type { ReviewTarget } from './review/prompt.js';
 
 export class Orchestrator {
   private readonly review: ReviewOrchestrator;
@@ -189,15 +190,15 @@ export class Orchestrator {
     if (!issue) return { ok: false, message: 'Issue not found.' };
     if (!this.limiter.tryAcquire(identifier)) return { ok: false, message: 'Concurrency limit reached.' };
 
-    const repo = this.router.resolve(issue);
+    // Clone every configured repo side by side; the agent decides which to change.
+    const repos = this.router.all();
     let handle;
     try {
-      logger.child(identifier).info('creating workspace');
+      logger.child(identifier).info(`creating workspace (${repos.length} repo(s))`);
       handle = await this.workspace.create({
         identifier,
-        cloneUrl: repo.cloneUrl(),
-        baseBranch: repo.baseBranchFor(issue),
-        image: repo.workerImage,
+        repos: repos.map((r) => ({ key: r.key, cloneUrl: r.cloneUrl(), baseBranch: r.baseBranchFor(issue) })),
+        image: repos.length === 1 ? repos[0]!.workerImage : undefined,
       });
     } catch (err) {
       this.limiter.release(identifier);
@@ -206,21 +207,31 @@ export class Orchestrator {
     }
     this.handles.set(identifier, handle);
 
-    const rt: IssueRuntime = { identifier, repoKey: repo.key, phase: 'initial', title: issue.title, url: issue.url };
+    // Capture each repo's base commit now (the review diff scope), so we don't rely
+    // on the agent to record it.
+    const baseCommits: Record<string, string> = {};
+    for (const r of repos) {
+      const res = await this.workspace.io.exec(handle, `git -C ${r.key} rev-parse HEAD`);
+      if (res.code === 0) baseCommits[r.key] = res.stdout.trim();
+    }
+
+    const repoKey = (issue.repoKey && repos.some((r) => r.key === issue.repoKey) ? issue.repoKey : repos[0]?.key) ?? '';
+    const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url, baseCommits };
     this.store.upsert(rt);
     bus.emitEvent({ identifier, kind: 'phase', phase: 'planning', label: `📋 Planning started — ${issue.title}` });
 
     void this.serialize(identifier, async () => {
-      if (repo.afterClone) {
-        bus.emitEvent({ identifier, kind: 'notice', label: `📦 Installing dependencies — ${repo.afterClone}` });
-        const res = await this.workspace.io.exec(handle, repo.afterClone);
+      for (const r of repos) {
+        if (!r.afterClone) continue;
+        bus.emitEvent({ identifier, kind: 'notice', label: `📦 Installing dependencies (${r.key}) — ${r.afterClone}` });
+        const res = await this.workspace.io.exec(handle, `cd ${r.key} && ${r.afterClone}`);
         if (res.code !== 0) {
           bus.emitEvent({
             identifier,
             kind: 'notice',
-            label: `⚠️ Dependency install failed (${repo.afterClone}, code ${res.code}) — static gate/build may break`,
+            label: `⚠️ Dependency install failed (${r.key}: ${r.afterClone}, code ${res.code}) — static gate/build may break`,
           });
-          logger.child(identifier).warn('after_clone failed', res.stderr.slice(-400));
+          logger.child(identifier).warn(`after_clone failed (${r.key})`, res.stderr.slice(-400));
         }
       }
       try {
@@ -284,11 +295,13 @@ export class Orchestrator {
     const rt = this.store.get(identifier);
     if (!rt) return { ok: false, message: 'Not tracked.' };
 
-    if (!force && rt.pr) {
-      const repo = this.router.byKey(rt.repoKey);
-      const pr = repo ? await repo.refreshPullRequest(rt.pr.number).catch(() => null) : null;
-      if (!pr?.merged) {
-        return { ok: false, merged: false, message: `PR #${rt.pr.number} is not merged yet.` };
+    if (!force && rt.prs?.length) {
+      for (const p of rt.prs) {
+        const repo = this.router.byKey(p.repoKey);
+        const pr = repo ? await repo.refreshPullRequest(p.number).catch(() => null) : null;
+        if (!pr?.merged) {
+          return { ok: false, merged: false, message: `PR #${p.number} (${p.repoKey}) is not merged yet.` };
+        }
       }
     }
     await this.serialize(identifier, () => this.completeIssue(identifier));
@@ -393,7 +406,6 @@ export class Orchestrator {
   ): Promise<AgentRunResult> {
     const handle = this.handles.get(rt.identifier);
     if (!handle) throw new Error(`no workspace handle for ${rt.identifier}`);
-    const repo = this.router.resolve(issue);
 
     if (this.busy.has(rt.identifier)) {
       logger.child(rt.identifier).warn('dispatch requested while busy; skipping');
@@ -404,9 +416,13 @@ export class Orchestrator {
       const workflow = await renderWorkflow({
         issue,
         tracker_kind: this.tracker.kind,
-        repo: repo.key,
-        base_branch: repo.baseBranchFor(issue),
-        branch: repo.branchNameFor(issue),
+        repos: this.router.all().map((r) => ({
+          key: r.key,
+          dir: r.key,
+          description: r.description,
+          base_branch: r.baseBranchFor(issue),
+          branch: r.branchNameFor(issue),
+        })),
         reference_path: this.referencePath(),
       });
       await this.wipeOutputs(handle);
@@ -621,26 +637,19 @@ export class Orchestrator {
 
     if (await this.handleQuestion(rt, handle)) return;
 
-    const base = (await this.readOutput(handle, SCRATCH.baseCommit))?.trim();
-    if (!base) {
-      await this.surfaceStuck(rt, 'No base_commit.txt after implementation — cannot scope the review diff. Please retry.');
-      return;
-    }
-    rt.baseCommit = base;
-    this.store.upsert(rt);
-
-    const diff = await this.workspace.io.getDiff(handle, base);
-    if (!diff.trim()) {
-      log.error('workspace diff is empty after implementation — no changes committed here');
+    const changed = await this.changedRepoKeys(handle, rt);
+    if (changed.length === 0) {
+      log.error('workspace diff is empty after implementation — no changes committed in any repo');
       await this.channel.notify(
         rt.identifier,
-        '❌ No changes in the workspace. The agent did not commit to this repo (check repo config/isolation). Aborting.',
+        '❌ No changes in any repo. The agent did not commit (check repo config/isolation). Aborting.',
       );
       bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: '❌ No changes — aborted (empty workspace diff)' });
       return;
     }
+    bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `🗂 Changed repos: ${changed.join(', ')}` });
 
-    const review = await this.selfReviewLoop(rt, issue, handle, base);
+    const review = await this.selfReviewLoop(rt, issue, handle);
     if (!review) {
       log.warn('self-review produced no review');
       await this.surfaceStuck(rt, 'Self-review produced no result — please retry the review.', true);
@@ -661,9 +670,8 @@ export class Orchestrator {
   }
 
   /** Self-review with an auto-fix loop. Returns the final review (fixes applied), or null. */
-  private async selfReviewLoop(rt: IssueRuntime, issue: Issue, handle: WorkspaceHandle, base: string): Promise<string | null> {
+  private async selfReviewLoop(rt: IssueRuntime, issue: Issue, handle: WorkspaceHandle): Promise<string | null> {
     const log = logger.child(rt.identifier);
-    const reviewRepo = this.router.resolve(issue);
     const maxFixRounds = this.config.review.max_fix_rounds;
     for (let round = 0; ; round++) {
       bus.emitEvent({
@@ -672,23 +680,29 @@ export class Orchestrator {
         phase: 'reviewing',
         label: round === 0 ? '🔍 Self-reviewing' : `🔍 Re-reviewing (after ${round} auto-fix round(s))`,
       });
-      const diff = await this.workspace.io.getDiff(handle, base);
+      // Re-scope each round: an auto-fix may touch additional repos.
+      const changed = await this.changedRepoKeys(handle, rt);
+      const targets = this.reviewTargets(rt, changed);
+      const diff = await this.combinedDiff(handle, rt, changed);
       const diffStats = { lines: 0, files: 0 };
       for (const l of diff.split('\n')) {
         if (l.startsWith('diff --git ')) diffStats.files++;
         else if ((l[0] === '+' && !l.startsWith('+++')) || (l[0] === '-' && !l.startsWith('---'))) diffStats.lines++;
       }
+      const verifyCommands = changed.flatMap((k) =>
+        (this.router.byKey(k)?.verifyCommands ?? []).map((c) => `cd ${k} && ${c}`),
+      );
       await this.review.run(
         handle,
         issue,
-        base,
+        targets,
         this.reviewModel(),
         this.referencePath(),
         (r) => this.cost.add(rt.identifier, r),
-        reviewRepo.verifyCommands,
+        verifyCommands,
         diffStats,
       );
-      await this.uploadDiff(rt, issue, base);
+      await this.uploadDiff(rt, issue, changed);
       const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'planning');
       if (!consolidate.ok) return null;
       const review = await this.readOutput(handle, SCRATCH.pendingReview);
@@ -764,35 +778,49 @@ export class Orchestrator {
     if (meta && typeof meta.title === 'string') await this.pushAndCreatePr(rt, issue, meta);
   }
 
-  /** Orchestrator-owned push + PR creation (push via the workspace, PR via the adapter). */
+  /** Orchestrator-owned push + PR creation — one PR per repo the agent changed. */
   private async pushAndCreatePr(rt: IssueRuntime, issue: Issue, meta: Record<string, unknown>): Promise<void> {
     const log = logger.child(rt.identifier);
     const handle = this.handles.get(rt.identifier)!;
-    const repo = this.router.resolve(issue);
-    const branch = repo.branchNameFor(issue);
-    const base = repo.baseBranchFor(issue);
-
-    bus.emitEvent({ identifier: rt.identifier, kind: 'activity', label: `🔧 git push origin ${branch}` });
-    const push = await this.workspace.io.exec(handle, `git push -u origin ${branch} 2>&1`);
-    if (push.code !== 0) {
-      log.error('git push failed', push.stdout || push.stderr);
-      await this.channel.notify(rt.identifier, `❌ Branch push failed: ${(push.stdout || push.stderr).slice(-300)}`);
-      bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: '❌ git push failed' });
+    const changed = await this.changedRepoKeys(handle, rt);
+    if (changed.length === 0) {
+      await this.surfaceStuck(rt, 'No changes to open a PR for (empty diff in every repo).');
       return;
     }
-
-    let pr = await repo.findPullRequestByBranch(branch);
-    const isNew = !pr;
-    if (!pr) {
-      pr = await repo.createPullRequest({
-        title: String(meta.title),
-        body: typeof meta.body === 'string' ? meta.body : '',
-        head: branch,
-        base,
-      });
+    const title = String(meta.title);
+    const body = typeof meta.body === 'string' ? meta.body : '';
+    const prs: IssuePr[] = [];
+    for (const key of changed) {
+      const repo = this.router.byKey(key);
+      if (!repo) continue;
+      const branch = repo.branchNameFor(issue);
+      const base = repo.baseBranchFor(issue);
+      bus.emitEvent({ identifier: rt.identifier, kind: 'activity', label: `🔧 git -C ${key} push origin ${branch}` });
+      const push = await this.workspace.io.exec(handle, `git -C ${key} push -u origin ${branch} 2>&1`);
+      if (push.code !== 0) {
+        log.error(`git push failed (${key})`, push.stdout || push.stderr);
+        await this.channel.notify(rt.identifier, `❌ Branch push failed (${key}): ${(push.stdout || push.stderr).slice(-300)}`);
+        bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: `❌ git push failed (${key})` });
+        continue;
+      }
+      let pr = await repo.findPullRequestByBranch(branch);
+      const isNew = !pr;
+      if (!pr) {
+        pr = await repo.createPullRequest({
+          title: changed.length > 1 ? `${title} (${key})` : title,
+          body,
+          head: branch,
+          base,
+        });
+      }
+      if (isNew) await this.postReviewToPr(rt, issue, repo, pr);
+      prs.push({ repoKey: key, number: pr.number, branch, url: pr.url });
     }
-    if (isNew) await this.postReviewToPr(rt, issue, repo, pr);
-    await this.onPrCreated(rt, issue, { pr_number: pr.number, pr_url: pr.url });
+    if (prs.length === 0) {
+      await this.surfaceStuck(rt, 'Failed to open any PR (all pushes failed). Check tokens/permissions and retry.', true);
+      return;
+    }
+    await this.onPrCreated(rt, issue, prs);
   }
 
   /** Post the final self-review as a PR comment (history) — non-fatal. */
@@ -810,16 +838,16 @@ export class Orchestrator {
     }
   }
 
-  private async onPrCreated(rt: IssueRuntime, issue: Issue, pr: Record<string, unknown>): Promise<void> {
-    const prUrl = typeof pr.pr_url === 'string' ? pr.pr_url : undefined;
-    rt.pr = { number: pr.pr_number as number, branch: this.router.resolve(issue).branchNameFor(issue), url: prUrl };
+  private async onPrCreated(rt: IssueRuntime, issue: Issue, prs: IssuePr[]): Promise<void> {
+    rt.prs = prs;
     rt.phase = 'pr_open';
     rt.prSince = new Date().toISOString();
     this.store.upsert(rt);
     await this.tracker.transitionIssue(issue, 'in_review');
-    await this.channel.notify(rt.identifier, `🔗 PR #${rt.pr.number} opened. After merging, press "Complete".`);
-    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'pr_open', label: `🔗 PR #${rt.pr.number} opened — awaiting merge` });
-    logger.child(rt.identifier).info(`PR #${rt.pr.number} open; awaiting user completion`);
+    const list = prs.map((p) => `#${p.number} (${p.repoKey})`).join(', ');
+    await this.channel.notify(rt.identifier, `🔗 PR(s) opened: ${list}. After merging all, press "Complete".`);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'pr_open', label: `🔗 ${prs.length} PR(s) opened — awaiting merge` });
+    logger.child(rt.identifier).info(`${prs.length} PR(s) open; awaiting user completion`);
   }
 
   // ─────────────────────────────────── completion (user-confirmed merge)
@@ -840,8 +868,10 @@ export class Orchestrator {
       await this.workspace.cleanup(handle).catch(() => {});
       this.handles.delete(identifier);
     }
-    const repo = this.router.byKey(rt.repoKey);
-    if (repo && rt.pr) await repo.deleteBranch(rt.pr.branch).catch(() => {});
+    for (const p of rt.prs ?? []) {
+      const repo = this.router.byKey(p.repoKey);
+      if (repo) await repo.deleteBranch(p.branch).catch(() => {});
+    }
     if ('clearIssue' in this.channel) (this.channel as { clearIssue(id: string): void }).clearIssue(identifier);
     bus.emitEvent({ identifier, kind: 'phase', phase: 'done', label: '🎉 Done (cleaned up)' });
     this.cost.clear(identifier);
@@ -875,10 +905,41 @@ export class Orchestrator {
     this.store.upsert(rt);
   }
 
-  private async uploadDiff(rt: IssueRuntime, issue: Issue, base: string): Promise<void> {
+  private async uploadDiff(rt: IssueRuntime, issue: Issue, keys: string[]): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
-    const diff = await this.workspace.io.getDiff(handle, base);
+    const diff = await this.combinedDiff(handle, rt, keys);
     if (diff.trim()) await this.channel.uploadDiff(rt.identifier, `${issue.identifier}.diff`, diff);
+  }
+
+  // ───────────────────────────────────────────────── multi-repo diff helpers
+
+  /** Repo keys whose clone has a non-empty diff vs its captured base commit. */
+  private async changedRepoKeys(handle: WorkspaceHandle, rt: IssueRuntime): Promise<string[]> {
+    const keys: string[] = [];
+    for (const repo of this.router.all()) {
+      const base = rt.baseCommits?.[repo.key];
+      if (!base) continue;
+      const diff = await this.workspace.io.getDiff(handle, base, repo.key);
+      if (diff.trim()) keys.push(repo.key);
+    }
+    return keys;
+  }
+
+  /** Review diff targets (subdir + base) for the given changed repo keys. */
+  private reviewTargets(rt: IssueRuntime, keys: string[]): ReviewTarget[] {
+    return keys.filter((k) => rt.baseCommits?.[k]).map((k) => ({ dir: k, base: rt.baseCommits![k]! }));
+  }
+
+  /** Combined diff across the given repos, each section headed by its subdir. */
+  private async combinedDiff(handle: WorkspaceHandle, rt: IssueRuntime, keys: string[]): Promise<string> {
+    let out = '';
+    for (const k of keys) {
+      const base = rt.baseCommits?.[k];
+      if (!base) continue;
+      const diff = await this.workspace.io.getDiff(handle, base, k);
+      if (diff.trim()) out += `\n# ===== ${k}/ =====\n${diff}`;
+    }
+    return out;
   }
 
   /** Surface a dead-end instead of sitting mutely in a WAITING phase. */

@@ -50,6 +50,7 @@ const CommentSchema = z
 export class GithubRepository implements RepositoryAdapter {
   readonly kind = 'github';
   readonly key: string;
+  readonly description: string;
   readonly workerImage?: string;
   readonly verifyCommands: string[];
   readonly afterClone?: string;
@@ -63,6 +64,7 @@ export class GithubRepository implements RepositoryAdapter {
     ctx: RepositoryCtx,
   ) {
     this.key = cfg.key;
+    this.description = cfg.description;
     this.workerImage = cfg.image;
     this.verifyCommands = cfg.verify;
     this.afterClone = cfg.after_clone;

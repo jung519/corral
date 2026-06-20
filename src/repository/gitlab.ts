@@ -44,6 +44,7 @@ const NoteSchema = z
 export class GitlabRepository implements RepositoryAdapter {
   readonly kind = 'gitlab';
   readonly key: string;
+  readonly description: string;
   readonly workerImage?: string;
   readonly verifyCommands: string[];
   readonly afterClone?: string;
@@ -56,6 +57,7 @@ export class GitlabRepository implements RepositoryAdapter {
     private readonly ctx: RepositoryCtx,
   ) {
     this.key = cfg.key;
+    this.description = cfg.description;
     this.workerImage = cfg.image;
     this.verifyCommands = cfg.verify;
     this.afterClone = cfg.after_clone;

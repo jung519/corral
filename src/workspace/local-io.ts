@@ -39,8 +39,8 @@ export const localIO: WorkspaceIO = {
     }
   },
 
-  async getDiff(handle, baseCommit) {
-    const result = await run('git', ['diff', `${baseCommit}..HEAD`], { cwd: handle.workdir });
+  async getDiff(handle, baseCommit, subdir = '.') {
+    const result = await run('git', ['-C', subdir, 'diff', `${baseCommit}..HEAD`], { cwd: handle.workdir });
     return result.stdout;
   },
 

@@ -62,8 +62,8 @@ export const dockerIO: WorkspaceIO = {
     return res.stdout.split('\n').filter(Boolean);
   },
 
-  async getDiff(handle, baseCommit) {
-    const res = await dexec(handle, `git diff ${shq(baseCommit)}..HEAD`);
+  async getDiff(handle, baseCommit, subdir = '.') {
+    const res = await dexec(handle, `git -C ${shq(subdir)} diff ${shq(baseCommit)}..HEAD`);
     return res.stdout;
   },
 

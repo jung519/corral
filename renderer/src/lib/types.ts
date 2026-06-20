@@ -1,12 +1,20 @@
 /** Shapes mirrored from the control-plane API (src/server/dashboard.ts). */
 
+export interface IssuePr {
+  repoKey: string;
+  number: number;
+  branch: string;
+  url?: string;
+}
+
 export interface IssueRuntime {
   identifier: string;
   repoKey: string;
   phase: string;
   title?: string;
   url?: string;
-  pr?: { number: number; branch: string; url?: string };
+  /** One PR per repo the issue changed. */
+  prs?: IssuePr[];
   stuck?: boolean;
   cost: number;
 }

@@ -14,15 +14,26 @@ import type { IssuePhase } from './types.js';
 
 export const DEFAULT_STATE_DIR = process.env.CORRAL_STATE_DIR ?? '.corral-state';
 
+/** A pull request opened for one repo touched by the issue. */
+export interface IssuePr {
+  repoKey: string;
+  number: number;
+  branch: string;
+  url?: string;
+}
+
 export interface IssueRuntime {
   identifier: string;
+  /** Primary/hint repo key (display + routing hint); work may span several repos. */
   repoKey: string;
   phase: IssuePhase;
   /** For dashboard display. */
   title?: string;
   url?: string;
-  baseCommit?: string;
-  pr?: { number: number; branch: string; url?: string };
+  /** Base commit per repo key, captured at clone — defines each repo's review diff. */
+  baseCommits?: Record<string, string>;
+  /** PRs opened for this issue, one per repo that changed. */
+  prs?: IssuePr[];
   /** Last handled PR comment timestamp (ISO). */
   prSince?: string;
   /** Current pending approval id. */
