@@ -6,6 +6,7 @@
     defaultModels,
     initialState,
     MODELS,
+    newRepo,
     type RepoProvider,
     secretsFor,
     type TrackerKind,
@@ -69,10 +70,17 @@
     test.agent = 'pending';
     test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
   }
-  async function testGithub() {
-    if (!window.corral || !s.repoToken) return;
-    test.github = 'pending';
-    test.github = await window.corral.validate.github(s.repoToken);
+  async function testGithub(i: number, token: string) {
+    if (!window.corral || !token) return;
+    test[`gh-${i}`] = 'pending';
+    test[`gh-${i}`] = await window.corral.validate.github(token);
+  }
+
+  function addRepo() {
+    s.repos = [...s.repos, newRepo()];
+  }
+  function removeRepo(i: number) {
+    s.repos = s.repos.filter((_, j) => j !== i);
   }
   async function testNotion() {
     if (!window.corral || !s.notionToken) return;
@@ -201,35 +209,52 @@
       </div>
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
-      <span class="lbl">{t('repo.provider')}</span>
-      <div class="transports tri">
-        {#each ['github', 'gitlab', 'bitbucket'] as p}
-          <button class="transport" class:sel={s.repoProvider === p} onclick={() => (s.repoProvider = p as RepoProvider)}>
-            <span class="radio" class:on={s.repoProvider === p}></span>{p}
-          </button>
-        {/each}
-      </div>
-      {#if s.repoProvider === 'gitlab'}
-        <label class="field"><span>{t('field.gitlabHost')}</span><input bind:value={s.gitlabHost} /></label>
-      {:else if s.repoProvider === 'bitbucket'}
-        <label class="field"><span>{t('field.bitbucketUser')}</span><input bind:value={s.bitbucketUser} /></label>
-      {/if}
-      <label class="field"
-        ><span>{t('field.repo')}</span>
-        <input bind:value={s.repo} placeholder={s.repoProvider === 'bitbucket' ? 'workspace/slug' : 'acme/widgets'} /></label
-      >
-      <label class="field"
-        ><span>{t('field.repoToken')}</span>
-        <div class="keyrow">
-          <input type="password" bind:value={s.repoToken} onblur={s.repoProvider === 'github' ? testGithub : undefined} />
-          {#if s.repoProvider === 'github'}{@render badge(test.github)}{/if}
-        </div></label
-      >
-      <div class="two">
-        <label class="field"><span>{t('field.routingKey')}</span><input bind:value={s.repoKey} /></label>
-        <label class="field"><span>{t('field.prodBranch')}</span><input bind:value={s.production} /></label>
-      </div>
-      <label class="field"><span>{t('field.devBranch')}</span><input bind:value={s.development} /></label>
+      <p class="subtitle">{t('repo.multiHint')}</p>
+      {#each s.repos as r, i (i)}
+        <div class="repo-card">
+          <div class="repo-head">
+            <span class="repo-num">{r.key || `#${i + 1}`}</span>
+            {#if s.repos.length > 1}
+              <button class="ghost-x" onclick={() => removeRepo(i)} title={t('repo.remove')}>✕</button>
+            {/if}
+          </div>
+          <div class="transports tri">
+            {#each ['github', 'gitlab', 'bitbucket'] as p}
+              <button class="transport" class:sel={r.provider === p} onclick={() => (r.provider = p as RepoProvider)}>
+                <span class="radio" class:on={r.provider === p}></span>{p}
+              </button>
+            {/each}
+          </div>
+          {#if r.provider === 'gitlab'}
+            <label class="field"><span>{t('field.gitlabHost')}</span><input bind:value={r.gitlabHost} /></label>
+          {:else if r.provider === 'bitbucket'}
+            <label class="field"><span>{t('field.bitbucketUser')}</span><input bind:value={r.bitbucketUser} /></label>
+          {/if}
+          <div class="two">
+            <label class="field"
+              ><span>{t('field.repo')}</span>
+              <input bind:value={r.repo} placeholder={r.provider === 'bitbucket' ? 'workspace/slug' : 'acme/widgets'} /></label
+            >
+            <label class="field"><span>{t('field.repoKey')}</span><input bind:value={r.key} placeholder="server" /></label>
+          </div>
+          <label class="field"
+            ><span>{t('field.repoDesc')}</span>
+            <input bind:value={r.description} placeholder={t('field.repoDescPlaceholder')} /></label
+          >
+          <label class="field"
+            ><span>{t('field.repoToken')}</span>
+            <div class="keyrow">
+              <input type="password" bind:value={r.token} onblur={() => (r.provider === 'github' ? testGithub(i, r.token) : undefined)} />
+              {#if r.provider === 'github'}{@render badge(test[`gh-${i}`])}{/if}
+            </div></label
+          >
+          <div class="two">
+            <label class="field"><span>{t('field.prodBranch')}</span><input bind:value={r.production} /></label>
+            <label class="field"><span>{t('field.devBranch')}</span><input bind:value={r.development} /></label>
+          </div>
+        </div>
+      {/each}
+      <button class="add-repo" onclick={addRepo}>{t('repo.add')}</button>
     {:else if step === 2}
       <h1>{t('step.tracker')}</h1>
       <span class="lbl">{t('tracker.label')}</span>
@@ -267,7 +292,7 @@
           <label class="field"><span>{t('field.scopeProp')}</span><input bind:value={s.scopeProp} /></label>
         </div>
       {:else if s.trackerKind === 'github_issues'}
-        <label class="field"><span>{t('field.issuesRepo')}</span><input bind:value={s.issuesRepo} placeholder={s.repo || 'owner/name'} /></label>
+        <label class="field"><span>{t('field.issuesRepo')}</span><input bind:value={s.issuesRepo} placeholder={s.repos[0]?.repo || 'owner/name'} /></label>
         <div class="two">
           <label class="field"><span>{t('field.scopeLabel')}</span><input bind:value={s.scopeLabel} /></label>
           <label class="field"><span>{t('field.idPrefix')}</span><input bind:value={s.identifierPrefix} /></label>
@@ -585,6 +610,51 @@
     align-items: center;
     gap: 12px;
     margin-top: 12px;
+  }
+  .repo-card {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 8px 16px 18px;
+    margin-bottom: 14px;
+    background: var(--surface);
+  }
+  .repo-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 8px 0 12px;
+  }
+  .repo-num {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .ghost-x {
+    border: none;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 6px;
+  }
+  .ghost-x:hover {
+    color: var(--red);
+  }
+  .add-repo {
+    width: 100%;
+    padding: 11px 0;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius);
+    color: var(--text-dim);
+    background: transparent;
+    cursor: pointer;
+  }
+  .add-repo:hover {
+    border-color: var(--accent);
+    color: var(--text);
+  }
+  .repo-card .transports {
+    margin-bottom: 0;
   }
   .error {
     color: var(--red);

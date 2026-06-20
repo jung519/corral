@@ -109,10 +109,12 @@ export const TrackerSchema = z.discriminatedUnion('kind', [
 
 /** Fields shared by every repository provider. */
 const repoCommon = {
-  /** Routing key matched against the tracker's repo property / Issue.repoKey. */
+  /** Stable id for this repo (workspace subdir, routing, per-repo PR tracking). */
   key: z.string().min(1),
   /** "owner/name" (GitHub/GitLab) or "workspace/slug" (Bitbucket). */
   repo: z.string().regex(/^[^/\s]+\/[^/\s]+$/, 'expected "owner/name"'),
+  /** What this repo is — the agent uses this to decide which repo an issue touches. */
+  description: z.string().default(''),
   credential: CredentialRefSchema,
   branch_strategy: z
     .object({

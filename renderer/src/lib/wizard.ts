@@ -1,48 +1,59 @@
 /** Setup-wizard state → corral.yaml + the secret writes. Secrets never go into the
- * config — only CredentialRef pointers do. Repository (github/gitlab/bitbucket) and
- * tracker (notion/github_issues/jira) are each provider-selectable. */
+ * config — only CredentialRef pointers do. Repositories are a list (multi-repo);
+ * each repo has its own key + description + credential (account = key). */
 
 export type RepoProvider = 'github' | 'gitlab' | 'bitbucket';
 export type TrackerKind = 'notion' | 'github_issues' | 'jira';
 
+export interface RepoEntry {
+  provider: RepoProvider;
+  repo: string; // owner/name (github/gitlab) or workspace/slug (bitbucket)
+  key: string; // stable id (workspace subdir, per-repo PR tracking)
+  description: string; // role — the agent uses this to pick which repo an issue touches
+  production: string;
+  development: string;
+  token: string;
+  gitlabHost: string;
+  bitbucketUser: string;
+}
+
+export function newRepo(): RepoEntry {
+  return {
+    provider: 'github',
+    repo: '',
+    key: '',
+    description: '',
+    production: 'main',
+    development: 'develop',
+    token: '',
+    gitlabHost: 'https://gitlab.com',
+    bitbucketUser: '',
+  };
+}
+
 export interface WizardState {
-  // AI
   provider: 'claude' | 'gemini' | 'gpt';
   transport: 'api' | 'cli';
   agentKey: string;
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
-  // Repository
-  repoProvider: RepoProvider;
-  repo: string; // owner/name (github/gitlab) or workspace/slug (bitbucket)
-  repoKey: string;
-  production: string;
-  development: string;
-  repoToken: string;
-  gitlabHost: string; // gitlab only
-  bitbucketUser: string; // bitbucket only
-  // Tracker
+  repos: RepoEntry[];
   trackerKind: TrackerKind;
-  // Notion
   notionDb: string;
   notionToken: string;
   statusProp: string;
   idProp: string;
   repoProp: string;
   scopeProp: string;
-  // GitHub Issues
   issuesRepo: string;
   scopeLabel: string;
   identifierPrefix: string;
-  // Jira
   jiraHost: string;
   jiraProject: string;
   jiraEmail: string;
   jiraToken: string;
-  // shared semantic state → tracker value
   states: { planning: string; plan_review: string; in_progress: string; in_review: string; done: string };
-  // Workspace / channel / profile
   backend: 'local' | 'docker';
   port: number;
   maxActive: number;
@@ -58,14 +69,7 @@ export function initialState(): WizardState {
     planningModel: 'opus',
     implementationModel: 'sonnet',
     reviewModel: 'opus',
-    repoProvider: 'github',
-    repo: '',
-    repoKey: 'main',
-    production: 'main',
-    development: 'develop',
-    repoToken: '',
-    gitlabHost: 'https://gitlab.com',
-    bitbucketUser: '',
+    repos: [{ ...newRepo(), key: 'main' }],
     trackerKind: 'notion',
     notionDb: '',
     notionToken: '',
@@ -89,19 +93,16 @@ export function initialState(): WizardState {
   };
 }
 
-/** Keychain service name for the chosen AI provider. */
 export function serviceFor(provider: WizardState['provider']): string {
   return { claude: 'anthropic', gemini: 'google', gpt: 'openai' }[provider];
 }
 
-/** Selectable models per provider (strongest first). Edit here to add/adjust. */
 export const MODELS: Record<WizardState['provider'], string[]> = {
   claude: ['opus', 'sonnet', 'haiku'],
   gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
   gpt: ['gpt-5', 'gpt-5-mini', 'o4-mini'],
 };
 
-/** Default per-stage models for a provider (planning/review = strongest, impl = next). */
 export function defaultModels(provider: WizardState['provider']): {
   planning: string;
   implementation: string;
@@ -114,18 +115,29 @@ export function defaultModels(provider: WizardState['provider']): {
 
 const OWNER_NAME = /^[^/\s]+\/[^/\s]+$/;
 
+function firstGithub(s: WizardState): RepoEntry | undefined {
+  return s.repos.find((r) => r.provider === 'github');
+}
+
 export function validateStep(step: number, s: WizardState): string {
   switch (step) {
     case 0:
       if (s.transport === 'api' && !s.agentKey.trim()) return 'API key is required for the api transport.';
       return '';
-    case 1:
-      if (!OWNER_NAME.test(s.repo)) return 'Repository must be "owner/name".';
-      if (!s.repoToken.trim()) return 'A repository token is required.';
-      if (!s.repoKey.trim()) return 'A routing key is required.';
-      if (s.repoProvider === 'gitlab' && !s.gitlabHost.trim()) return 'A GitLab host is required.';
-      if (s.repoProvider === 'bitbucket' && !s.bitbucketUser.trim()) return 'A Bitbucket username is required.';
+    case 1: {
+      if (s.repos.length === 0) return 'Add at least one repository.';
+      const keys = new Set<string>();
+      for (const r of s.repos) {
+        if (!r.key.trim()) return 'Every repository needs a key.';
+        if (keys.has(r.key)) return `Duplicate repository key "${r.key}".`;
+        keys.add(r.key);
+        if (!OWNER_NAME.test(r.repo)) return `Repository "${r.key}" must be "owner/name".`;
+        if (!r.token.trim()) return `A token is required for "${r.key}".`;
+        if (r.provider === 'gitlab' && !r.gitlabHost.trim()) return `A GitLab host is required for "${r.key}".`;
+        if (r.provider === 'bitbucket' && !r.bitbucketUser.trim()) return `A Bitbucket username is required for "${r.key}".`;
+      }
       return '';
+    }
     case 2:
       for (const [k, v] of Object.entries(s.states)) if (!v.trim()) return `State mapping "${k}" is required.`;
       if (s.trackerKind === 'notion') {
@@ -133,7 +145,7 @@ export function validateStep(step: number, s: WizardState): string {
         if (!s.notionToken.trim()) return 'A Notion token is required.';
         if (!s.statusProp.trim() || !s.idProp.trim()) return 'Status and ID property names are required.';
       } else if (s.trackerKind === 'github_issues') {
-        if (!OWNER_NAME.test(s.issuesRepo.trim() || s.repo.trim())) return 'Issues repo must be "owner/name".';
+        if (!OWNER_NAME.test(s.issuesRepo.trim() || firstGithub(s)?.repo || '')) return 'Issues repo must be "owner/name".';
       } else {
         if (!s.jiraHost.trim()) return 'A Jira host is required.';
         if (!s.jiraProject.trim()) return 'A Jira project key is required.';
@@ -154,27 +166,32 @@ function yamlStr(v: string): string {
 }
 
 function repoYaml(s: WizardState): string[] {
-  const lines = ['repositories:', `  - kind: ${s.repoProvider}`, `    key: ${yamlStr(s.repoKey)}`, `    repo: ${yamlStr(s.repo)}`];
-  if (s.repoProvider === 'gitlab') lines.push(`    host: ${yamlStr(s.gitlabHost)}`);
-  if (s.repoProvider === 'bitbucket') lines.push(`    username: ${yamlStr(s.bitbucketUser)}`);
-  lines.push(
-    `    credential: { service: ${s.repoProvider}, account: default }`,
-    '    branch_strategy:',
-    `      production: ${yamlStr(s.production)}`,
-    `      development: ${yamlStr(s.development)}`,
-  );
+  const lines = ['repositories:'];
+  for (const r of s.repos) {
+    lines.push(`  - kind: ${r.provider}`, `    key: ${yamlStr(r.key)}`, `    repo: ${yamlStr(r.repo)}`);
+    if (r.description.trim()) lines.push(`    description: ${yamlStr(r.description)}`);
+    if (r.provider === 'gitlab') lines.push(`    host: ${yamlStr(r.gitlabHost)}`);
+    if (r.provider === 'bitbucket') lines.push(`    username: ${yamlStr(r.bitbucketUser)}`);
+    lines.push(
+      `    credential: { service: ${r.provider}, account: ${yamlStr(r.key)} }`,
+      '    branch_strategy:',
+      `      production: ${yamlStr(r.production)}`,
+      `      development: ${yamlStr(r.development)}`,
+    );
+  }
   return lines;
 }
 
 function trackerYaml(s: WizardState): string[] {
   const states = Object.entries(s.states).map(([k, v]) => `    ${k}: ${yamlStr(v)}`);
   if (s.trackerKind === 'github_issues') {
+    const gh = firstGithub(s);
     const lines = [
       'tracker:',
       '  kind: github_issues',
-      `  repo: ${yamlStr(s.issuesRepo.trim() || s.repo)}`,
-      '  credential: { service: github, account: default }',
-      `  repo_key: ${yamlStr(s.repoKey)}`,
+      `  repo: ${yamlStr(s.issuesRepo.trim() || gh?.repo || '')}`,
+      `  credential: { service: github, account: ${yamlStr(gh?.key ?? 'main')} }`,
+      `  repo_key: ${yamlStr(gh?.key ?? s.repos[0]?.key ?? 'main')}`,
       `  identifier_prefix: ${yamlStr(s.identifierPrefix)}`,
     ];
     if (s.scopeLabel.trim()) lines.push(`  scope_label: ${yamlStr(s.scopeLabel)}`);
@@ -189,7 +206,7 @@ function trackerYaml(s: WizardState): string[] {
       `  project: ${yamlStr(s.jiraProject)}`,
       `  email: ${yamlStr(s.jiraEmail)}`,
       '  credential: { service: jira, account: default }',
-      `  repo_key: ${yamlStr(s.repoKey)}`,
+      `  repo_key: ${yamlStr(s.repos[0]?.key ?? 'main')}`,
       '  states:',
       ...states,
     ];
@@ -241,14 +258,13 @@ export function buildConfigYaml(s: WizardState): string {
   ].join('\n');
 }
 
-/** Secrets to persist (service, account, value). Empty values skipped. */
+/** Secrets to persist (service, account, value). Per-repo creds use account = key. */
 export function secretsFor(s: WizardState): Array<{ service: string; account: string; value: string }> {
-  const out: Array<{ service: string; account: string; value: string }> = [
-    { service: s.repoProvider, account: 'default', value: s.repoToken },
-  ];
+  const out: Array<{ service: string; account: string; value: string }> = [];
+  for (const r of s.repos) out.push({ service: r.provider, account: r.key, value: r.token });
   if (s.trackerKind === 'notion') out.push({ service: 'notion', account: 'default', value: s.notionToken });
   else if (s.trackerKind === 'jira') out.push({ service: 'jira', account: 'default', value: s.jiraToken });
-  // github_issues reuses the GitHub repo token (service "github").
+  // github_issues reuses a GitHub repo's token (its account = key) — already added above.
   if (s.agentKey.trim()) out.push({ service: serviceFor(s.provider), account: 'default', value: s.agentKey });
   return out.filter((x) => x.value.trim());
 }
