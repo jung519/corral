@@ -10,6 +10,11 @@ declare global {
         read(): Promise<string | null>;
         write(yaml: string): Promise<void>;
       };
+      draft: {
+        read(): Promise<string | null>;
+        write(json: string): Promise<void>;
+        clear(): Promise<void>;
+      };
       secret: {
         set(service: string, account: string, value: string): Promise<void>;
         has(service: string, account: string): Promise<boolean>;

@@ -12,6 +12,12 @@ const api = {
     read: (): Promise<string | null> => ipcRenderer.invoke('config:read'),
     write: (yaml: string): Promise<void> => ipcRenderer.invoke('config:write', yaml),
   },
+  /** In-progress wizard draft (non-secret fields) persisted to userData. */
+  draft: {
+    read: (): Promise<string | null> => ipcRenderer.invoke('draft:read'),
+    write: (json: string): Promise<void> => ipcRenderer.invoke('draft:write', json),
+    clear: (): Promise<void> => ipcRenderer.invoke('draft:clear'),
+  },
   secret: {
     set: (service: string, account: string, value: string): Promise<void> =>
       ipcRenderer.invoke('secret:set', service, account, value),

@@ -46,7 +46,7 @@
 
   // Restore the in-progress draft (non-secret fields) + mark which tokens are saved.
   onMount(async () => {
-    const draft = loadDraft();
+    const draft = await loadDraft();
     if (draft) s = draft;
     if (!window.corral) return;
     const found = new Set<string>();
@@ -59,7 +59,7 @@
   // "Save & next": persist the non-secret draft (localStorage) and any entered tokens
   // (encrypted into the keychain) before moving. Tokens never touch the draft file.
   async function persistStep() {
-    saveDraft(s);
+    await saveDraft(s);
     if (!window.corral) return;
     const found = new Set(savedSecrets);
     for (const sec of secretsFor(s)) {
@@ -195,7 +195,7 @@
           return;
         }
       }
-      clearDraft();
+      await clearDraft();
       location.hash = '#/';
       location.reload();
     } catch (err) {

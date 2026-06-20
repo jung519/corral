@@ -290,18 +290,28 @@ function withoutSecrets(s: WizardState): WizardState {
   return clone;
 }
 
-/** Persist the non-secret wizard state so a restart mid-setup keeps your inputs. */
-export function saveDraft(s: WizardState): void {
+/** The Electron draft store (userData file) when present; else null (browser). */
+function draftBridge(): { read(): Promise<string | null>; write(j: string): Promise<void>; clear(): Promise<void> } | null {
+  return typeof window !== 'undefined' && window.corral?.draft ? window.corral.draft : null;
+}
+
+/** Persist the non-secret wizard state so a restart mid-setup keeps your inputs.
+ * Prefers the userData file (origin-independent) over localStorage. */
+export async function saveDraft(s: WizardState): Promise<void> {
+  const json = JSON.stringify(withoutSecrets(s));
   try {
-    localStorage.setItem(DRAFT_KEY, JSON.stringify(withoutSecrets(s)));
+    const bridge = draftBridge();
+    if (bridge) await bridge.write(json);
+    else localStorage.setItem(DRAFT_KEY, json);
   } catch {
     /* storage unavailable — non-fatal */
   }
 }
 
-export function loadDraft(): WizardState | null {
+export async function loadDraft(): Promise<WizardState | null> {
   try {
-    const raw = localStorage.getItem(DRAFT_KEY);
+    const bridge = draftBridge();
+    const raw = bridge ? await bridge.read() : localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
     return { ...initialState(), ...(JSON.parse(raw) as Partial<WizardState>) };
   } catch {
@@ -309,9 +319,11 @@ export function loadDraft(): WizardState | null {
   }
 }
 
-export function clearDraft(): void {
+export async function clearDraft(): Promise<void> {
   try {
-    localStorage.removeItem(DRAFT_KEY);
+    const bridge = draftBridge();
+    if (bridge) await bridge.clear();
+    else localStorage.removeItem(DRAFT_KEY);
   } catch {
     /* non-fatal */
   }
