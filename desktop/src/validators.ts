@@ -73,6 +73,123 @@ export async function fetchNotionSchema(token: string, databaseId: string): Prom
   }
 }
 
+function pickStr(j: unknown, key: string): string | undefined {
+  if (j && typeof j === 'object' && key in j) {
+    const v = (j as Record<string, unknown>)[key];
+    return typeof v === 'string' ? v : undefined;
+  }
+  return undefined;
+}
+
+function notionDbTitle(j: unknown): string | undefined {
+  const title = (j as { title?: Array<{ plain_text?: string }> })?.title;
+  if (!Array.isArray(title)) return undefined;
+  return title.map((x) => x.plain_text ?? '').join('').trim() || undefined;
+}
+
+/** GET that confirms a resource is reachable; on success returns a friendly name. */
+async function reach(
+  url: string,
+  headers: Record<string, string>,
+  pick?: (j: unknown) => string | undefined,
+): Promise<ValidationResult> {
+  try {
+    const res = await fetch(url, { headers });
+    if (!res.ok) {
+      let detail = `HTTP ${res.status}`;
+      try {
+        const j = (await res.json()) as { message?: string };
+        if (j?.message) detail += `: ${String(j.message).slice(0, 140)}`;
+      } catch {
+        /* no body */
+      }
+      return { ok: false, detail };
+    }
+    let detail: string | undefined;
+    if (pick) {
+      try {
+        detail = pick(await res.json());
+      } catch {
+        /* ignore */
+      }
+    }
+    return { ok: true, detail };
+  } catch (err) {
+    return { ok: false, detail: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+export interface RepoTestInput {
+  kind: 'github' | 'gitlab' | 'bitbucket';
+  repo: string;
+  token: string;
+  host?: string;
+  username?: string;
+}
+
+/** Confirm the specific repository (not just the token) is reachable with the token. */
+export async function testRepoConnection(input: RepoTestInput): Promise<ValidationResult> {
+  const { kind, repo, token } = input;
+  if (!repo.trim() || !token.trim()) return { ok: false, detail: 'repo and token are required' };
+  if (kind === 'github') {
+    return reach(
+      `https://api.github.com/repos/${repo}`,
+      { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'corral' },
+      (j) => pickStr(j, 'full_name'),
+    );
+  }
+  if (kind === 'gitlab') {
+    const host = (input.host || 'https://gitlab.com').replace(/\/+$/, '');
+    return reach(`${host}/api/v4/projects/${encodeURIComponent(repo)}`, { 'PRIVATE-TOKEN': token }, (j) =>
+      pickStr(j, 'path_with_namespace'),
+    );
+  }
+  const basic = Buffer.from(`${input.username ?? ''}:${token}`).toString('base64');
+  return reach(`https://api.bitbucket.org/2.0/repositories/${repo}`, { Authorization: `Basic ${basic}` }, (j) =>
+    pickStr(j, 'full_name'),
+  );
+}
+
+export interface TrackerTestInput {
+  kind: 'notion' | 'github_issues' | 'jira';
+  token: string;
+  databaseId?: string;
+  repo?: string;
+  host?: string;
+  email?: string;
+  project?: string;
+}
+
+/** Confirm the tracker source (DB / issues repo / Jira project) is reachable. */
+export async function testTrackerConnection(input: TrackerTestInput): Promise<ValidationResult> {
+  if (input.kind === 'notion') {
+    if (!input.databaseId?.trim() || !input.token.trim()) return { ok: false, detail: 'database id and token are required' };
+    return reach(
+      `https://api.notion.com/v1/databases/${encodeURIComponent(input.databaseId)}`,
+      { Authorization: `Bearer ${input.token}`, 'Notion-Version': '2022-06-28' },
+      (j) => notionDbTitle(j),
+    );
+  }
+  if (input.kind === 'github_issues') {
+    if (!input.repo?.trim() || !input.token.trim()) return { ok: false, detail: 'issues repo and a GitHub token are required' };
+    return reach(
+      `https://api.github.com/repos/${input.repo}`,
+      { Authorization: `Bearer ${input.token}`, Accept: 'application/vnd.github+json', 'User-Agent': 'corral' },
+      (j) => pickStr(j, 'full_name'),
+    );
+  }
+  const host = (input.host ?? '').replace(/\/+$/, '');
+  if (!host || !input.email?.trim() || !input.token.trim() || !input.project?.trim()) {
+    return { ok: false, detail: 'host, email, token and project are required' };
+  }
+  const basic = Buffer.from(`${input.email}:${input.token}`).toString('base64');
+  return reach(
+    `${host}/rest/api/3/project/${encodeURIComponent(input.project)}`,
+    { Authorization: `Basic ${basic}`, Accept: 'application/json' },
+    (j) => pickStr(j, 'name'),
+  );
+}
+
 export function validateAgent(provider: string, key: string): Promise<ValidationResult> {
   if (provider === 'claude') {
     return check('https://api.anthropic.com/v1/models', { 'x-api-key': key, 'anthropic-version': '2023-06-01' });

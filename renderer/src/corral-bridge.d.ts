@@ -32,6 +32,24 @@ declare global {
           dbId: string,
         ): Promise<{ ok: boolean; properties?: Array<{ name: string; type: string; options: string[] }>; detail?: string }>;
       };
+      test: {
+        repo(input: {
+          kind: 'github' | 'gitlab' | 'bitbucket';
+          repo: string;
+          token: string;
+          host?: string;
+          username?: string;
+        }): Promise<{ ok: boolean; detail?: string }>;
+        tracker(input: {
+          kind: 'notion' | 'github_issues' | 'jira';
+          token: string;
+          databaseId?: string;
+          repo?: string;
+          host?: string;
+          email?: string;
+          project?: string;
+        }): Promise<{ ok: boolean; detail?: string }>;
+      };
       startOrchestrator(): Promise<{ ok: boolean; port: number }>;
     };
   }

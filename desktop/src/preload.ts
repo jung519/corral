@@ -35,6 +35,25 @@ const api = {
     agent: (provider: string, key: string): Promise<{ ok: boolean; detail?: string }> =>
       ipcRenderer.invoke('validate:agent', provider, key),
   },
+  /** Confirm a repo/tracker is actually reachable with the entered settings. */
+  test: {
+    repo: (input: {
+      kind: 'github' | 'gitlab' | 'bitbucket';
+      repo: string;
+      token: string;
+      host?: string;
+      username?: string;
+    }): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('test:repo', input),
+    tracker: (input: {
+      kind: 'notion' | 'github_issues' | 'jira';
+      token: string;
+      databaseId?: string;
+      repo?: string;
+      host?: string;
+      email?: string;
+      project?: string;
+    }): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('test:tracker', input),
+  },
   /** Read a Notion DB's property schema for the wizard's property/option dropdowns. */
   notion: {
     schema: (

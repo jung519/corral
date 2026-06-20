@@ -12,7 +12,16 @@ import { configExists, readConfig, writeConfig } from './config-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
 import { orchestratorRunning, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
-import { fetchNotionSchema, validateAgent, validateGithub, validateNotion } from './validators.js';
+import {
+  fetchNotionSchema,
+  type RepoTestInput,
+  testRepoConnection,
+  testTrackerConnection,
+  type TrackerTestInput,
+  validateAgent,
+  validateGithub,
+  validateNotion,
+} from './validators.js';
 
 /** Control-plane port the renderer talks to (kept in sync with the config default). */
 const CONTROL_PLANE_PORT = 4400;
@@ -65,6 +74,8 @@ function registerIpc(): void {
 
   ipcMain.handle('validate:notion', (_e, token: string) => validateNotion(token));
   ipcMain.handle('notion:schema', (_e, token: string, dbId: string) => fetchNotionSchema(token, dbId));
+  ipcMain.handle('test:repo', (_e, input: RepoTestInput) => testRepoConnection(input));
+  ipcMain.handle('test:tracker', (_e, input: TrackerTestInput) => testTrackerConnection(input));
   ipcMain.handle('validate:github', (_e, token: string) => validateGithub(token));
   ipcMain.handle('validate:agent', (_e, provider: string, key: string) => validateAgent(provider, key));
 

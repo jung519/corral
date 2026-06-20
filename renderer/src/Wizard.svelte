@@ -116,10 +116,34 @@
     test.agent = 'pending';
     test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
   }
-  async function testGithub(i: number, token: string) {
-    if (!window.corral || !token) return;
-    test[`gh-${i}`] = 'pending';
-    test[`gh-${i}`] = await window.corral.validate.github(token);
+  // Full connection test for one repo (checks the actual repo is reachable, not just the token).
+  async function testRepo(i: number) {
+    const r = s.repos[i];
+    if (!window.corral || !r) return;
+    test[`repo-${i}`] = 'pending';
+    test[`repo-${i}`] = await window.corral.test.repo({
+      kind: r.provider,
+      repo: r.repo.trim(),
+      token: r.token,
+      host: r.gitlabHost,
+      username: r.bitbucketUser,
+    });
+  }
+
+  // Full connection test for the tracker (DB / issues repo / Jira project reachable).
+  async function testTracker() {
+    if (!window.corral) return;
+    const githubRepo = s.repos.find((r) => r.provider === 'github');
+    test.tracker = 'pending';
+    test.tracker = await window.corral.test.tracker({
+      kind: s.trackerKind,
+      token: s.trackerKind === 'notion' ? s.notionToken : s.trackerKind === 'jira' ? s.jiraToken : (githubRepo?.token ?? ''),
+      databaseId: s.notionDb.trim(),
+      repo: (s.issuesRepo.trim() || githubRepo?.repo || '').trim(),
+      host: s.jiraHost.trim(),
+      email: s.jiraEmail.trim(),
+      project: s.jiraProject.trim(),
+    });
   }
 
   function addRepo() {
@@ -209,7 +233,7 @@
   {#if state === 'pending'}
     <span class="badge">{t('status.testing')}</span>
   {:else if state}
-    <span class="badge" class:bad={!state.ok}>{state.ok ? `✓ ${t('status.validated')}` : `✗ ${state.detail ?? t('status.failed')}`}</span>
+    <span class="badge" class:bad={!state.ok}>{state.ok ? `✓ ${state.detail ?? t('status.validated')}` : `✗ ${state.detail ?? t('status.failed')}`}</span>
   {/if}
 {/snippet}
 
@@ -331,20 +355,22 @@
           >
           <label class="field"
             ><span>{t('field.repoToken')}</span>
-            <div class="keyrow">
-              <input
-                type="password"
-                bind:value={r.token}
-                placeholder={!r.token && secretSaved(r.provider, r.key) ? t('field.secretSaved') : ''}
-                onblur={() => (r.provider === 'github' ? testGithub(i, r.token) : undefined)}
-              />
-              {#if r.provider === 'github'}{@render badge(test[`gh-${i}`])}{/if}
-            </div></label
+            <input
+              type="password"
+              bind:value={r.token}
+              placeholder={!r.token && secretSaved(r.provider, r.key) ? t('field.secretSaved') : ''}
+            /></label
           >
           <div class="two">
             <label class="field"><span>{t('field.prodBranch')}</span><input bind:value={r.production} /></label>
             <label class="field"><span>{t('field.devBranch')}</span><input bind:value={r.development} /></label>
           </div>
+          {#if hasBridge}
+            <div class="testrow">
+              <button onclick={() => testRepo(i)} disabled={!r.repo.trim() || !r.token.trim()}>{t('test.connection')}</button>
+              {@render badge(test[`repo-${i}`])}
+            </div>
+          {/if}
         </div>
       {/each}
       <button class="add-repo" onclick={addRepo}>{t('repo.add')}</button>
@@ -449,6 +475,13 @@
             placeholder={!s.jiraToken && secretSaved('jira', 'default') ? t('field.secretSaved') : ''}
           /></label
         >
+      {/if}
+
+      {#if hasBridge}
+        <div class="testrow">
+          <button onclick={testTracker}>{t('test.connection')}</button>
+          {@render badge(test.tracker)}
+        </div>
       {/if}
 
       <span class="lbl"
