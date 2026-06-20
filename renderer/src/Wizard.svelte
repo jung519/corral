@@ -4,7 +4,6 @@
   import * as api from './lib/api';
   import {
     buildConfigYaml,
-    clearDraft,
     CORE_STATE_KEYS,
     defaultModels,
     initialState,
@@ -219,7 +218,9 @@
           return;
         }
       }
-      await clearDraft();
+      // Keep the (non-secret) draft as the last-applied state so "Re-run setup"
+      // re-opens the wizard pre-filled instead of blank. Captures the final step too.
+      await saveDraft(s);
       location.hash = '#/';
       location.reload();
     } catch (err) {
