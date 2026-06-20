@@ -124,9 +124,9 @@
     test[`repo-${i}`] = await window.corral.test.repo({
       kind: r.provider,
       repo: r.repo.trim(),
-      token: r.token,
-      host: r.gitlabHost,
-      username: r.bitbucketUser,
+      token: r.token.trim(),
+      host: r.gitlabHost.trim(),
+      username: r.bitbucketUser.trim(),
     });
   }
 
@@ -137,7 +137,7 @@
     test.tracker = 'pending';
     test.tracker = await window.corral.test.tracker({
       kind: s.trackerKind,
-      token: s.trackerKind === 'notion' ? s.notionToken : s.trackerKind === 'jira' ? s.jiraToken : (githubRepo?.token ?? ''),
+      token: (s.trackerKind === 'notion' ? s.notionToken : s.trackerKind === 'jira' ? s.jiraToken : (githubRepo?.token ?? '')).trim(),
       databaseId: s.notionDb.trim(),
       repo: (s.issuesRepo.trim() || githubRepo?.repo || '').trim(),
       host: s.jiraHost.trim(),

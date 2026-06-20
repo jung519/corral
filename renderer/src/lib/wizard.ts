@@ -347,5 +347,6 @@ export function secretsFor(s: WizardState): Array<{ service: string; account: st
   else if (s.trackerKind === 'jira') out.push({ service: 'jira', account: 'default', value: s.jiraToken });
   // github_issues reuses a GitHub repo's token (its account = key) — already added above.
   if (s.agentKey.trim()) out.push({ service: serviceFor(s.provider), account: 'default', value: s.agentKey });
-  return out.filter((x) => x.value.trim());
+  // Trim so a stray trailing space/newline from a paste never reaches the API.
+  return out.map((x) => ({ ...x, value: x.value.trim() })).filter((x) => x.value);
 }
