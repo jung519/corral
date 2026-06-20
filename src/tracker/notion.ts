@@ -2,7 +2,8 @@
  * Notion tracker — implements TrackerAdapter over the Notion REST API.
  *
  * Mapping of Corral semantics onto a Notion database:
- *   kanban column   ← a `status`-type property        (config properties.status)
+ *   kanban column   ← a `status`- OR `select`-type property (config properties.status;
+ *                      the type is auto-detected from the DB schema)
  *   identifier       ← a `unique_id`-type property      (config properties.identifier → "ISS-131")
  *   repo routing     ← a `select`-type property         (config properties.repo → repository.key)
  *   description      ← the page's child blocks, flattened to text
@@ -88,6 +89,11 @@ const CommentsResponse = z.object({
 
 const MeResponse = z.object({ id: z.string(), name: z.string().nullable().optional() });
 
+/** Minimal DB schema read — just the property types, to detect status vs select. */
+const DatabaseSchema = z
+  .object({ properties: z.record(z.object({ type: z.string() }).passthrough()) })
+  .passthrough();
+
 type NotionPage = z.infer<typeof Page>;
 
 // ───────────────────────────────────────────────────────────── the adapter
@@ -99,6 +105,9 @@ export class NotionTracker implements TrackerAdapter {
   private readonly nameToState = new Map<string, IssueState>();
   /** semantic state → tracker status name */
   private readonly stateToName = new Map<IssueState, string>();
+  /** Kanban property type — Notion 'status' and 'select' need different filter/read/
+   * write syntax. Detected once from the DB schema (cached). */
+  private statusKind: 'status' | 'select' | null = null;
 
   constructor(
     private readonly cfg: NotionConfig,
@@ -129,6 +138,25 @@ export class NotionTracker implements TrackerAdapter {
     return [...new Set(names)];
   }
 
+  /** Detect whether the kanban property is a Notion `status` or `select` type
+   * (their filter/read/write syntax differ). Read once from the DB schema, cached. */
+  private async resolveStatusKind(): Promise<'status' | 'select'> {
+    if (this.statusKind) return this.statusKind;
+    const json = await fetchJson<unknown>(
+      `${API}/databases/${this.cfg.database_id}`,
+      { headers: this.headers },
+      { label: 'notion.database' },
+    );
+    const prop = DatabaseSchema.parse(json).properties[this.cfg.properties.status];
+    if (!prop) throw new Error(`Notion property "${this.cfg.properties.status}" not found in the database`);
+    if (prop.type !== 'status' && prop.type !== 'select') {
+      throw new Error(`Notion property "${this.cfg.properties.status}" is type "${prop.type}" — expected status or select`);
+    }
+    this.statusKind = prop.type;
+    logger.info(`notion status property "${this.cfg.properties.status}" detected as ${prop.type}`);
+    return prop.type;
+  }
+
   /** Notion query filter restricting candidates to the configured scope. */
   private scopeFilter(): Record<string, unknown> | null {
     const scope = this.cfg.scope;
@@ -144,8 +172,9 @@ export class NotionTracker implements TrackerAdapter {
 
   async fetchCandidateIssues(): Promise<Issue[]> {
     const statusProp = this.cfg.properties.status;
+    const kind = await this.resolveStatusKind();
     const statusFilter = {
-      or: this.activeStateNames().map((name) => ({ property: statusProp, status: { equals: name } })),
+      or: this.activeStateNames().map((name) => ({ property: statusProp, [kind]: { equals: name } })),
     };
     const scope = this.scopeFilter();
     const filter = scope ? { and: [statusFilter, scope] } : statusFilter;
@@ -207,12 +236,13 @@ export class NotionTracker implements TrackerAdapter {
   async transitionIssue(issue: Issue, to: IssueState): Promise<void> {
     const name = this.stateToName.get(to);
     if (!name) throw new Error(`No Notion status name mapped for semantic state "${to}"`);
+    const kind = await this.resolveStatusKind();
     await fetchRetry(
       `${API}/pages/${issue.internalId}`,
       {
         method: 'PATCH',
         headers: this.headers,
-        body: JSON.stringify({ properties: { [this.cfg.properties.status]: { status: { name } } } }),
+        body: JSON.stringify({ properties: { [this.cfg.properties.status]: { [kind]: { name } } } }),
       },
       { label: 'notion.transition' },
     );
@@ -271,7 +301,9 @@ export class NotionTracker implements TrackerAdapter {
       logger.warn(`Notion page ${page.id} has no "${this.cfg.properties.identifier}" unique_id; skipped`);
       return null;
     }
-    const statusName = page.properties[this.cfg.properties.status]?.status?.name;
+    // Read works for both kinds — only one of status/select is present on the page.
+    const sp = page.properties[this.cfg.properties.status];
+    const statusName = sp?.status?.name ?? sp?.select?.name;
     const state = statusName ? this.nameToState.get(statusName) : undefined;
     if (!state) return null; // not in an active mapped state
 
