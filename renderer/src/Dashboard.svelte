@@ -64,6 +64,13 @@
     await api.retryIssue(id);
     void refresh();
   }
+  async function remove(id: string) {
+    if (!confirm(t('dash.removeConfirm').replace('{id}', id))) return;
+    const r = await api.removeIssue(id);
+    if (r.ok) toast(`${id} — removed`, 'success');
+    else if (r.message) toast(r.message, 'error');
+    void refresh();
+  }
   function onApprove(id: string, selection?: string, notes?: string) {
     void api.approve(id, selection, notes).then(refresh);
   }
@@ -117,6 +124,7 @@
           {/each}
           {#if issue.prs?.length}<button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</button>{/if}
           {#if issue.stuck}<button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</button>{/if}
+          <button onclick={() => remove(issue.identifier)}>{t('dash.remove')}</button>
         </div>
       </div>
     {/each}

@@ -11,7 +11,7 @@
  *   GET  /api/state       → { issues, pending, events }
  *   GET  /api/candidates  → on-demand tracker fetch
  *   GET  /api/diffs?id=   → diffs for an issue
- *   POST /api/start|complete|retry|refine|action
+ *   POST /api/start|complete|retry|remove|refine|action
  *   GET  /events          → SSE live stream
  */
 import { existsSync, readFileSync } from 'node:fs';
@@ -94,6 +94,9 @@ export class DashboardServer {
             } else if (url === '/api/retry' && method === 'POST') {
               const b = await readBody(req);
               json(200, o ? await o.retry(String(b.identifier)) : NOT_CONFIGURED);
+            } else if (url === '/api/remove' && method === 'POST') {
+              const b = await readBody(req);
+              json(200, o ? await o.removeIssue(String(b.identifier)) : NOT_CONFIGURED);
             } else if (url === '/api/refine' && method === 'POST') {
               const b = await readBody(req);
               json(200, o ? await o.refinePlan(String(b.identifier), String(b.focus ?? '')) : NOT_CONFIGURED);

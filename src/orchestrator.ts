@@ -320,6 +320,28 @@ export class Orchestrator {
     return { ok: true };
   }
 
+  /** Drop an issue from Corral: clean the workspace + untrack it, WITHOUT touching the
+   * tracker or any branch. For a stuck/abandoned run so the user can re-pick it later. */
+  async removeIssue(identifier: string): Promise<{ ok: boolean; message?: string }> {
+    const rt = this.store.get(identifier);
+    if (!rt) return { ok: false, message: 'Not tracked.' };
+    await this.serialize(identifier, async () => {
+      const handle = this.handles.get(identifier);
+      if (handle) {
+        await this.workspace.cleanup(handle).catch(() => {});
+        this.handles.delete(identifier);
+      }
+      this.clearApproval(rt);
+      if ('clearIssue' in this.channel) (this.channel as { clearIssue(id: string): void }).clearIssue(identifier);
+      bus.emitEvent({ identifier, kind: 'notice', label: '🗑 Removed from Corral (workspace cleaned, tracker untouched)' });
+      this.cost.clear(identifier);
+      this.store.delete(identifier);
+      this.limiter.release(identifier);
+      logger.child(identifier).info('issue removed by user');
+    });
+    return { ok: true };
+  }
+
   // ─────────────────────────────────────────────────── planning (Branch A)
 
   /** Reference repo path inside the workspace for the agent to consult (undefined if

@@ -32,6 +32,7 @@ export const startIssue = (identifier: string): Promise<CommandResult> => post('
 export const completeIssue = (identifier: string, force = false): Promise<CommandResult> =>
   post('/api/complete', { identifier, force });
 export const retryIssue = (identifier: string): Promise<CommandResult> => post('/api/retry', { identifier });
+export const removeIssue = (identifier: string): Promise<CommandResult> => post('/api/remove', { identifier });
 export const refineIssue = (identifier: string, focus: string): Promise<CommandResult> =>
   post('/api/refine', { identifier, focus });
 export const approve = (id: string, selection?: string, text?: string): Promise<CommandResult> =>
