@@ -23,17 +23,18 @@
 
   const stepKeys = ['step.ai', 'step.repo', 'step.tracker', 'step.workspace', 'step.channel'];
 
-  const providers: Array<{ id: WizardState['provider']; name: string; icon: string }> = [
+  // Only claude is implemented; gemini/gpt are gated until their adapters land so the
+  // wizard can never produce a config that fails to boot.
+  const providers: Array<{ id: WizardState['provider']; name: string; icon: string; soon?: boolean }> = [
     { id: 'claude', name: 'Claude', icon: '<path d="M12 3v18M3 12h18M6 6l12 12M18 6 6 18"/>' },
-    { id: 'gemini', name: 'Gemini', icon: '<path d="M12 3l7 9-7 9-7-9z"/>' },
-    { id: 'gpt', name: 'GPT', icon: '<circle cx="12" cy="12" r="8"/>' },
+    { id: 'gemini', name: 'Gemini', icon: '<path d="M12 3l7 9-7 9-7-9z"/>', soon: true },
+    { id: 'gpt', name: 'GPT', icon: '<circle cx="12" cy="12" r="8"/>', soon: true },
   ];
 
   let s: WizardState = $state(initialState());
   let step = $state(0);
   let error = $state('');
   let saving = $state(false);
-  let docker = $state<{ available: boolean; version?: string } | null>(null);
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
@@ -47,6 +48,10 @@
   onMount(async () => {
     const draft = await loadDraft();
     if (draft) s = draft;
+    // Coerce any gated option a stale draft/config might hold back to a working one.
+    if (s.provider !== 'claude') setProvider('claude');
+    if (s.transport === 'api') s.transport = 'cli';
+    if (s.backend === 'docker') s.backend = 'local';
     if (!window.corral) return;
     const found = new Set<string>();
     for (const ref of secretRefs(s)) {
@@ -101,10 +106,6 @@
   }
   function valid(i: number): boolean {
     return validateStep(i, s) === '';
-  }
-
-  async function detectDocker() {
-    docker = (await window.corral?.detectDocker()) ?? { available: false };
   }
 
   type TestState = { ok: boolean; detail?: string } | 'pending' | undefined;
@@ -268,16 +269,23 @@
 
       <div class="providers">
         {#each providers as p}
-          <button class="provider" class:sel={s.provider === p.id} onclick={() => setProvider(p.id)}>
+          <button
+            class="provider"
+            class:sel={s.provider === p.id}
+            class:soon={p.soon}
+            disabled={p.soon}
+            onclick={() => !p.soon && setProvider(p.id)}
+          >
             <svg class="picon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
             <span class="pname">{p.name}</span>
+            {#if p.soon}<span class="soon-tag">{t('badge.soon')}</span>{/if}
           </button>
         {/each}
       </div>
 
       <div class="transports">
-        <button class="transport" class:sel={s.transport === 'api'} onclick={() => (s.transport = 'api')}>
-          <span class="radio" class:on={s.transport === 'api'}></span>{t('transport.api')}
+        <button class="transport soon" disabled>
+          <span class="radio"></span>{t('transport.api')} <span class="soon-tag">{t('badge.soon')}</span>
         </button>
         <button class="transport" class:sel={s.transport === 'cli'} onclick={() => (s.transport = 'cli')}>
           <span class="radio" class:on={s.transport === 'cli'}></span>{t('transport.cli')}
@@ -527,14 +535,11 @@
         <button class="transport" class:sel={s.backend === 'local'} onclick={() => (s.backend = 'local')}>
           <span class="radio" class:on={s.backend === 'local'}></span>{t('workspace.local')}
         </button>
-        <button class="transport" class:sel={s.backend === 'docker'} onclick={() => (s.backend = 'docker')}>
-          <span class="radio" class:on={s.backend === 'docker'}></span>{t('workspace.docker')}
+        <button class="transport soon" disabled>
+          <span class="radio"></span>{t('workspace.docker')} <span class="soon-tag">{t('badge.soon')}</span>
         </button>
       </div>
-      <div class="testrow">
-        <button onclick={detectDocker} disabled={!hasBridge}>{t('workspace.detect')}</button>
-        {#if docker}<span class="badge" class:bad={!docker.available}>{docker.available ? `✓ ${docker.version}` : t('workspace.dockerNone')}</span>{/if}
-      </div>
+      <p class="hint">{t('workspace.dockerSoon')}</p>
     {:else if step === 4}
       <h1>{t('step.channel')}</h1>
       <div class="two">
@@ -731,6 +736,21 @@
   .provider .pname {
     font-size: 15px;
     font-weight: 500;
+  }
+  /* Gated (not-yet-implemented) options — visible but unselectable. */
+  .provider.soon,
+  .transport.soon {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+  .soon-tag {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    padding: 1px 7px;
+    color: var(--text-dim);
   }
   .transports {
     display: grid;
