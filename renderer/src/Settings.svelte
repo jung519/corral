@@ -73,6 +73,7 @@
         {@render row(t('field.language'), langLabel(s.language))}
         {@render row(t('agent.modelsLabel'), `${s.planningModel} · ${s.implementationModel} · ${s.reviewModel}`)}
         {@render row(t('field.apiKey'), secret(serviceFor(s.provider), 'default'))}
+        {#if s.provider === 'claude'}{@render row(t('field.oauthToken'), secret(serviceFor(s.provider), 'oauth'))}{/if}
       {/if}
     </div>
 

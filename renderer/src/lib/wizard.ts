@@ -41,6 +41,9 @@ export interface WizardState {
   provider: 'claude' | 'gemini' | 'gpt';
   transport: 'api' | 'cli';
   agentKey: string;
+  /** Claude subscription token from `claude setup-token` — lets docker auth with no
+   * API key (subscription, not pay-per-use). Stored in the keychain, never in config. */
+  agentOauthToken: string;
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
@@ -81,6 +84,7 @@ export function initialState(): WizardState {
     provider: 'claude',
     transport: 'cli',
     agentKey: '',
+    agentOauthToken: '',
     planningModel: 'opus',
     implementationModel: 'sonnet',
     reviewModel: 'opus',
@@ -154,8 +158,16 @@ export function validateStep(step: number, s: WizardState, isSaved: SecretSavedF
     case 0:
       if (s.transport === 'api' && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
         return vt('validate.apiKeyApi');
-      // Docker without the host login mount has no auth source → require an API key.
-      if (s.backend === 'docker' && !s.dockerMountLogin && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
+      // Docker has no auth source unless one of: host-login mount, an API key, or a
+      // subscription OAuth token (claude setup-token). Require at least one.
+      if (
+        s.backend === 'docker' &&
+        !s.dockerMountLogin &&
+        !s.agentKey.trim() &&
+        !isSaved(serviceFor(s.provider), 'default') &&
+        !s.agentOauthToken.trim() &&
+        !isSaved(serviceFor(s.provider), 'oauth')
+      )
         return vt('validate.apiKeyDocker');
       return '';
     case 1: {
@@ -288,6 +300,7 @@ export function buildConfigYaml(s: WizardState): string {
     `  provider: ${s.provider}`,
     `  transport: ${s.transport}`,
     `  credential: { service: ${serviceFor(s.provider)}, account: default }`,
+    `  oauth_credential: { service: ${serviceFor(s.provider)}, account: oauth }`,
     '  models:',
     `    planning: ${yamlStr(s.planningModel)}`,
     `    implementation: ${yamlStr(s.implementationModel)}`,
@@ -315,6 +328,7 @@ const DRAFT_KEY = 'corral.wizard.draft';
 function withoutSecrets(s: WizardState): WizardState {
   const clone: WizardState = JSON.parse(JSON.stringify(s));
   clone.agentKey = '';
+  clone.agentOauthToken = '';
   clone.notionToken = '';
   clone.jiraToken = '';
   clone.referenceToken = '';
@@ -369,6 +383,7 @@ export function secretRefs(s: WizardState): Array<{ service: string; account: st
   else if (s.trackerKind === 'jira') refs.push({ service: 'jira', account: 'default' });
   if (s.referenceRepo.trim()) refs.push({ service: 'reference', account: 'default' });
   refs.push({ service: serviceFor(s.provider), account: 'default' });
+  refs.push({ service: serviceFor(s.provider), account: 'oauth' });
   return refs;
 }
 
@@ -383,6 +398,8 @@ export function secretsFor(s: WizardState): Array<{ service: string; account: st
     out.push({ service: 'reference', account: 'default', value: s.referenceToken });
   }
   if (s.agentKey.trim()) out.push({ service: serviceFor(s.provider), account: 'default', value: s.agentKey });
+  if (s.agentOauthToken.trim())
+    out.push({ service: serviceFor(s.provider), account: 'oauth', value: s.agentOauthToken });
   // Trim so a stray trailing space/newline from a paste never reaches the API.
   return out.map((x) => ({ ...x, value: x.value.trim() })).filter((x) => x.value);
 }

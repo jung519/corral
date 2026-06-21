@@ -4,9 +4,13 @@
  * (spawn in the workdir) and docker (exec into the issue container).
  *
  * Lifted from upstream's ClaudeBackend. KEY ADAPTATION (BYOK): auth is the user's
- * own API key, injected as ANTHROPIC_API_KEY (local: process env; docker: `exec -e`)
- * — never the host ~/.claude subscription mount. Provider/transport-specific
- * concerns (where claude reads its rules, CLI flags) live here, not in GenericAgent.
+ * own credential, injected as env (local: process env; docker: `exec -e`) — never
+ * the host ~/.claude subscription mount. Two credential kinds are supported:
+ *   - ANTHROPIC_API_KEY        — pay-per-use API key
+ *   - CLAUDE_CODE_OAUTH_TOKEN  — subscription token from `claude setup-token`,
+ *     which lets the cli run in a container with NO API key (no billing).
+ * Provider/transport-specific concerns (where claude reads its rules, CLI flags)
+ * live here, not in GenericAgent.
  */
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
@@ -22,11 +26,15 @@ export class ClaudeCliTransport implements AgentTransport {
   readonly provider = 'claude' as const;
   readonly transport = 'cli' as const;
 
-  constructor(private readonly apiKey: string | null) {}
+  constructor(
+    private readonly apiKey: string | null,
+    private readonly oauthToken: string | null = null,
+  ) {}
 
   async preflight(): Promise<PreflightResult> {
     if (this.apiKey) return { ok: true };
-    return { ok: true, detail: 'no API key set; relying on an installed & logged-in claude CLI' };
+    if (this.oauthToken) return { ok: true, detail: 'using subscription OAuth token (CLAUDE_CODE_OAUTH_TOKEN)' };
+    return { ok: true, detail: 'no credential set; relying on an installed & logged-in claude CLI' };
   }
 
   async run(spec: AgentTurnSpec, onEvent: (event: AgentEvent) => void): Promise<void> {
@@ -99,9 +107,11 @@ export class ClaudeCliTransport implements AgentTransport {
     if (spec.handle.backend === 'local') {
       return { command: 'claude', args: ['-p', spec.prompt, ...flags], cwd: spec.handle.workdir };
     }
-    // docker: run inside the container as the worker user; inject the API key via -e.
+    // docker: run inside the container as the worker user; inject the credential via -e.
     const claudeCmd = ['claude', '-p', shq(spec.prompt), ...flags.map(shq)].join(' ');
-    const envArgs = this.apiKey ? ['-e', `ANTHROPIC_API_KEY=${this.apiKey}`] : [];
+    const envArgs: string[] = [];
+    if (this.apiKey) envArgs.push('-e', `ANTHROPIC_API_KEY=${this.apiKey}`);
+    if (this.oauthToken) envArgs.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${this.oauthToken}`);
     return {
       command: 'docker',
       args: [
@@ -128,6 +138,7 @@ export class ClaudeCliTransport implements AgentTransport {
       env[k] = v;
     }
     if (this.apiKey) env.ANTHROPIC_API_KEY = this.apiKey;
+    if (this.oauthToken) env.CLAUDE_CODE_OAUTH_TOKEN = this.oauthToken;
     return env;
   }
 }

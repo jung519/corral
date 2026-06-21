@@ -340,6 +340,20 @@
       {#if s.transport === 'cli'}<p class="hint">{t('cli.hint')}</p>{/if}
       {#if agentPinged}<p class="helper">{t('agent.pingOk')}</p>{/if}
 
+      {#if s.transport === 'cli' && s.provider === 'claude'}
+        <label class="field"
+          ><span>{t('field.oauthToken')}</span>
+          <input
+            type="password"
+            bind:value={s.agentOauthToken}
+            placeholder={!s.agentOauthToken && secretSaved(serviceFor(s.provider), 'oauth')
+              ? t('field.secretSaved')
+              : 'sk-ant-oat...'}
+          /></label
+        >
+        <p class="hint">{t('field.oauthToken.hint')}</p>
+      {/if}
+
       <span class="lbl">{t('agent.modelsLabel')}</span>
       <div class="three">
         <label class="field"

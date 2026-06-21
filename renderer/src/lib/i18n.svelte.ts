@@ -17,7 +17,8 @@ const en: Dict = {
   'wizard.exit': 'Close',
   'wizard.browserPreview': 'Browser preview — saving requires the desktop app.',
   'validate.apiKeyApi': 'An API key is required for the API transport.',
-  'validate.apiKeyDocker': 'An API key is required for the Docker backend (the container has no host login).',
+  'validate.apiKeyDocker':
+    'The Docker backend needs a credential: a subscription token (claude setup-token), an API key, or the host-login mount (Linux only).',
   'validate.repoMin': 'Add at least one repository.',
   'validate.repoKeyNeeded': 'Every repository needs a key.',
   'validate.repoKeyDup': 'Duplicate repository key "{key}".',
@@ -48,6 +49,9 @@ const en: Dict = {
   'agent.modelsLabel': 'Per-stage models',
   'field.apiKey': 'API key',
   'field.apiKey.optionalCli': ' · optional for CLI',
+  'field.oauthToken': 'Subscription token · optional',
+  'field.oauthToken.hint':
+    'From `claude setup-token` (requires a Claude subscription). Lets Docker authenticate with no API key — works on macOS, no billing. Recommended for the Docker backend.',
   'field.planningModel': 'Planning model',
   'field.implModel': 'Implementation model',
   'field.reviewModel': 'Review model',
@@ -121,7 +125,8 @@ const en: Dict = {
   'workspace.dockerNote': 'Isolated container per issue. Corral auto-builds a worker image from your repos (analyze → Dockerfile → build). Requires Docker installed.',
   'workspace.mountLogin': 'Use my host Claude login in the container',
   'workspace.mountLoginOn': 'Mounts ~/.claude (read-only) so the agent authenticates like local — no API key needed. ⚠️ Linux hosts only: on macOS the Claude login lives in the Keychain, not ~/.claude, so turn this OFF and use an API key.',
-  'workspace.mountLoginOff': 'Off → the agent uses an API key instead (required in step 1). Use this on macOS.',
+  'workspace.mountLoginOff':
+    'Off → authenticate with a subscription token (claude setup-token) or an API key from step 1. Use this on macOS.',
   'badge.soon': 'Coming soon',
   'field.port': 'Control-plane port',
   'field.maxActive': 'Max active issues',
@@ -195,7 +200,8 @@ const ko: Dict = {
   'wizard.exit': '닫기',
   'wizard.browserPreview': '브라우저 미리보기 — 저장은 데스크톱 앱에서 가능합니다.',
   'validate.apiKeyApi': 'API 트랜스포트에는 API 키가 필요합니다.',
-  'validate.apiKeyDocker': 'Docker 백엔드에는 API 키가 필요합니다(컨테이너에 호스트 로그인이 없음).',
+  'validate.apiKeyDocker':
+    'Docker 백엔드에는 인증 수단이 필요합니다: 구독 토큰(claude setup-token), API 키, 또는 호스트 로그인 마운트(Linux 전용) 중 하나.',
   'validate.repoMin': '저장소를 하나 이상 추가하세요.',
   'validate.repoKeyNeeded': '모든 저장소에 키가 필요합니다.',
   'validate.repoKeyDup': '저장소 키 "{key}"가 중복됩니다.',
@@ -226,6 +232,9 @@ const ko: Dict = {
   'agent.modelsLabel': '단계별 모델',
   'field.apiKey': 'API 키',
   'field.apiKey.optionalCli': ' · CLI는 선택',
+  'field.oauthToken': '구독 토큰 · 선택',
+  'field.oauthToken.hint':
+    '`claude setup-token` 출력값(Claude 구독 필요). API 키 없이 Docker에서 인증됩니다 — macOS에서도 동작, 종량 과금 없음. Docker 백엔드에 권장.',
   'field.planningModel': '계획 모델',
   'field.implModel': '구현 모델',
   'field.reviewModel': '리뷰 모델',
@@ -299,7 +308,8 @@ const ko: Dict = {
   'workspace.dockerNote': '이슈마다 격리 컨테이너. Corral이 repo를 분석해 워커 이미지를 자동 생성(분석 → Dockerfile → 빌드). Docker 설치 필요.',
   'workspace.mountLogin': '내 호스트 Claude 로그인을 컨테이너에서 사용',
   'workspace.mountLoginOn': '~/.claude를 읽기 전용으로 마운트해 local처럼 인증 — API 키 불필요. ⚠️ Linux 호스트 전용: macOS는 로그인이 키체인에 있어 ~/.claude로는 안 됩니다. macOS면 끄고 API 키를 쓰세요.',
-  'workspace.mountLoginOff': '끄면 → 에이전트가 API 키를 사용(1단계에서 필수). macOS는 이쪽을 쓰세요.',
+  'workspace.mountLoginOff':
+    '끄면 → 1단계의 구독 토큰(claude setup-token) 또는 API 키로 인증합니다. macOS는 이쪽을 쓰세요.',
   'badge.soon': '준비 중',
   'field.port': '컨트롤 플레인 포트',
   'field.maxActive': '동시 이슈 한도',

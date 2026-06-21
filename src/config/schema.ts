@@ -193,6 +193,10 @@ export const AgentSchema = z
     transport: z.enum(['api', 'cli']).default('api'),
     /** Required for `api` (BYOK); for `cli` the user's own CLI login is used. */
     credential: CredentialRefSchema.optional(),
+    /** Claude subscription OAuth token (from `claude setup-token`), injected as
+     *  CLAUDE_CODE_OAUTH_TOKEN — lets the cli authenticate in a container with NO API
+     *  key (subscription, not pay-per-use). */
+    oauth_credential: CredentialRefSchema.optional(),
     models: StageModelsSchema,
     max_turns: z.number().int().positive().optional(),
     max_budget_usd: z.number().positive().optional(),

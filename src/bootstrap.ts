@@ -55,7 +55,12 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
   const workspace = workspaces.create({ kind: config.workspace.backend, ...config.workspace }, {});
 
   const resolvedKey = config.agent.credential ? await resolveSecret(config.agent.credential) : '';
-  const agent = createAgent(config.agent, { apiKey: resolvedKey || null, io: workspace.io });
+  const resolvedOauth = config.agent.oauth_credential ? await resolveSecret(config.agent.oauth_credential) : '';
+  const agent = createAgent(config.agent, {
+    apiKey: resolvedKey || null,
+    oauthToken: resolvedOauth || null,
+    io: workspace.io,
+  });
 
   const channel = deps.channel ?? channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
