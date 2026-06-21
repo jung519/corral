@@ -419,6 +419,29 @@ export class Orchestrator {
     return { ok: true };
   }
 
+  /** Hard-restart an issue from scratch (for errors / hangs that retry can't resume):
+   * force-tear-down the current run — even mid-flight — then run startIssue again. */
+  async restartIssue(identifier: string): Promise<{ ok: boolean; message?: string }> {
+    const rt = this.store.get(identifier);
+    if (rt) {
+      const handle = this.handles.get(identifier);
+      if (handle) {
+        await this.workspace.cleanup(handle).catch(() => {});
+        this.handles.delete(identifier);
+      }
+      this.clearApproval(rt);
+      this.cost.clear(identifier);
+      this.store.delete(identifier);
+      this.limiter.release(identifier);
+      // Reset in-flight tracking so a hung run can't block or race the fresh start.
+      this.busy.delete(identifier);
+      this.chains.delete(identifier);
+      bus.emitEvent({ identifier, kind: 'notice', label: '🔄 Restarting from scratch' });
+      logger.child(identifier).info('issue restarted from scratch by user');
+    }
+    return this.startIssue(identifier);
+  }
+
   // ─────────────────────────────────────────────────── planning (Branch A)
 
   /** Reference repo path inside the workspace for the agent to consult (undefined if

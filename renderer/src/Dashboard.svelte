@@ -72,6 +72,12 @@
     else if (r.message) toast(r.message, 'error');
     void refresh();
   }
+  async function restart(id: string) {
+    if (!confirm(t('dash.restartConfirm').replace('{id}', id))) return;
+    const r = await api.restartIssue(id);
+    if (!r.ok && r.message) toast(r.message, 'error');
+    void refresh();
+  }
   function onApprove(id: string, selection?: string, notes?: string) {
     return api.approve(id, selection, notes).then(refresh);
   }
@@ -128,6 +134,7 @@
           {/each}
           {#if issue.prs?.length}<Button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</Button>{/if}
           {#if issue.stuck}<Button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</Button>{/if}
+          <Button onclick={() => restart(issue.identifier)}>{t('dash.restart')}</Button>
           <Button onclick={() => remove(issue.identifier)}>{t('dash.remove')}</Button>
         </div>
       </div>
