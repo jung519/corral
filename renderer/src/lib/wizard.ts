@@ -64,6 +64,8 @@ export interface WizardState {
    * two collapse onto a core column server-side. */
   detailedStates: boolean;
   backend: 'local' | 'docker';
+  /** Docker: mount the host ~/.claude login so the CLI auths without an API key. */
+  dockerMountLogin: boolean;
   port: number;
   maxActive: number;
   language: string;
@@ -100,6 +102,7 @@ export function initialState(): WizardState {
     states: { planning: '', plan_review: '', in_progress: '', in_review: '', done: '' },
     detailedStates: false,
     backend: 'local',
+    dockerMountLogin: true,
     port: 4400,
     maxActive: 3,
     language: 'en',
@@ -146,8 +149,8 @@ export function validateStep(step: number, s: WizardState): string {
   switch (step) {
     case 0:
       if (s.transport === 'api' && !s.agentKey.trim()) return vt('validate.apiKeyApi');
-      // The docker container has no host CLI login, so an API key is required there.
-      if (s.backend === 'docker' && !s.agentKey.trim()) return vt('validate.apiKeyDocker');
+      // Docker without the host login mount has no auth source → require an API key.
+      if (s.backend === 'docker' && !s.dockerMountLogin && !s.agentKey.trim()) return vt('validate.apiKeyDocker');
       return '';
     case 1: {
       if (s.repos.length === 0) return vt('validate.repoMin');
@@ -284,6 +287,7 @@ export function buildConfigYaml(s: WizardState): string {
     '',
     'workspace:',
     `  backend: ${s.backend}`,
+    ...(s.backend === 'docker' ? ['  docker:', `    mount_host_login: ${s.dockerMountLogin}`] : []),
     '',
     'channel:',
     '  kind: web',

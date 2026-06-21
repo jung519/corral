@@ -223,6 +223,10 @@ export const WorkspaceSchema = z
         /** When no `image` is set, auto-build a worker image from the repos' manifests
          *  (analyze on the host → generate Dockerfile → build). */
         auto_build: z.boolean().default(true),
+        /** Mount the host `~/.claude` login into the container (read-only) so the CLI
+         *  authenticates like the local backend — no API key needed. Off → inject an
+         *  API key instead. */
+        mount_host_login: z.boolean().default(true),
         memory: z.string().optional(),
         cpus: z.string().optional(),
         /** Extra env injected into the worker container. */

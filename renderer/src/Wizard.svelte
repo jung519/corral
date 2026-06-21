@@ -569,6 +569,13 @@
         </button>
       </div>
       <p class="hint">{s.backend === 'docker' ? t('workspace.dockerNote') : t('workspace.localNote')}</p>
+      {#if s.backend === 'docker'}
+        <label class="check">
+          <input type="checkbox" bind:checked={s.dockerMountLogin} />
+          <span>{t('workspace.mountLogin')}</span>
+        </label>
+        <p class="hint">{s.dockerMountLogin ? t('workspace.mountLoginOn') : t('workspace.mountLoginOff')}</p>
+      {/if}
     {:else if step === 4}
       <h1>{t('step.channel')}</h1>
       <div class="two">

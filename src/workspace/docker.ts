@@ -8,11 +8,12 @@
  * the agent transport's concern (API key / the user's own CLI login); any env the
  * orchestrator needs to inject goes through DockerBackendOptions.env.
  */
+import { homedir } from 'node:os';
 import type { WorkspaceConfig } from '../config/schema.js';
 import { logger } from '../core/logger.js';
 import type { CreateWorkspaceInput, WorkspaceAdapter, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 import { run, runOrThrow } from '../util/exec.js';
-import { dockerIO } from './docker-io.js';
+import { dockerIO, WORKER_USER } from './docker-io.js';
 
 const WORKDIR = '/workspace';
 
@@ -21,6 +22,9 @@ export interface DockerBackendOptions {
   memory?: string;
   cpus?: string;
   env?: Record<string, string>;
+  /** Mount the host ~/.claude login into the container (read-only) so the CLI
+   *  authenticates without an API key. */
+  mountHostLogin?: boolean;
 }
 
 export class DockerWorkspace implements WorkspaceAdapter {
@@ -49,6 +53,8 @@ export class DockerWorkspace implements WorkspaceAdapter {
     if (this.opts.memory) args.push('--memory', this.opts.memory);
     if (this.opts.cpus) args.push('--cpus', this.opts.cpus);
     for (const [k, v] of Object.entries(this.opts.env ?? {})) args.push('-e', `${k}=${v}`);
+    // Mount the host Claude login read-only so the CLI authenticates without an API key.
+    if (this.opts.mountHostLogin) args.push('-v', `${homedir()}/.claude:/home/${WORKER_USER}/.claude:ro`);
     args.push(image, 'sleep', 'infinity');
 
     log.info(`starting container ${name} (${image})`);
@@ -106,6 +112,7 @@ export function dockerOptionsFromConfig(cfg: WorkspaceConfig['docker'], imageOve
     memory: cfg?.memory,
     cpus: cfg?.cpus,
     env: cfg?.env,
+    mountHostLogin: cfg?.mount_host_login ?? true,
   };
 }
 
