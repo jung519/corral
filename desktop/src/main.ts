@@ -15,6 +15,7 @@ import { orchestratorRunning, startOrchestrator, stopOrchestrator } from './orch
 import {
   fetchNotionSchema,
   type RepoTestInput,
+  testReferenceConnection,
   testRepoConnection,
   testTrackerConnection,
   type TrackerTestInput,
@@ -76,6 +77,7 @@ function registerIpc(): void {
   ipcMain.handle('notion:schema', (_e, token: string, dbId: string) => fetchNotionSchema(token, dbId));
   ipcMain.handle('test:repo', (_e, input: RepoTestInput) => testRepoConnection(input));
   ipcMain.handle('test:tracker', (_e, input: TrackerTestInput) => testTrackerConnection(input));
+  ipcMain.handle('test:reference', (_e, repo: string, token: string) => testReferenceConnection(repo, token));
   ipcMain.handle('validate:github', (_e, token: string) => validateGithub(token));
   ipcMain.handle('validate:agent', (_e, provider: string, key: string) => validateAgent(provider, key));
 

@@ -53,6 +53,8 @@ const api = {
       email?: string;
       project?: string;
     }): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('test:tracker', input),
+    reference: (repo: string, token: string): Promise<{ ok: boolean; detail?: string }> =>
+      ipcRenderer.invoke('test:reference', repo, token),
   },
   /** Read a Notion DB's property schema for the wizard's property/option dropdowns. */
   notion: {

@@ -130,6 +130,13 @@
     });
   }
 
+  // Connection test for the skills/reference repo (GitHub owner/name or URL).
+  async function testReference() {
+    if (!window.corral || !s.referenceRepo.trim()) return;
+    test.reference = 'pending';
+    test.reference = await window.corral.test.reference(s.referenceRepo.trim(), s.referenceToken.trim());
+  }
+
   // Full connection test for the tracker (DB / issues repo / Jira project reachable).
   async function testTracker() {
     if (!window.corral) return;
@@ -398,6 +405,12 @@
             placeholder={!s.referenceToken && secretSaved('reference', 'default') ? t('field.secretSaved') : ''}
           /></label
         >
+        {#if hasBridge}
+          <div class="testrow">
+            <button onclick={testReference}>{t('test.connection')}</button>
+            {@render badge(test.reference)}
+          </div>
+        {/if}
       {/if}
       <p class="hint">{t('field.referenceRepo.hint')}</p>
     {:else if step === 2}

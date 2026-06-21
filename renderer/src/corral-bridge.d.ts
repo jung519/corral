@@ -49,6 +49,7 @@ declare global {
           email?: string;
           project?: string;
         }): Promise<{ ok: boolean; detail?: string }>;
+        reference(repo: string, token: string): Promise<{ ok: boolean; detail?: string }>;
       };
       startOrchestrator(): Promise<{ ok: boolean; port: number }>;
     };

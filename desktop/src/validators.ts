@@ -190,6 +190,19 @@ export async function testTrackerConnection(input: TrackerTestInput): Promise<Va
   );
 }
 
+/** Confirm the skills/reference repo is reachable. Auto-test supports a GitHub
+ * "owner/name" or a github.com URL (token optional for public repos). */
+export async function testReferenceConnection(repo: string, token: string): Promise<ValidationResult> {
+  const r = repo.trim();
+  if (!r) return { ok: false, detail: 'reference repo is required' };
+  const m = r.match(/^https?:\/\/github\.com\/([^/\s]+\/[^/\s]+?)(?:\.git)?\/?$/);
+  const ownerName = m?.[1] ?? (/^[^/\s]+\/[^/\s]+$/.test(r) ? r : null);
+  if (!ownerName) return { ok: false, detail: 'auto-test supports a GitHub owner/name or github.com URL' };
+  const headers: Record<string, string> = { Accept: 'application/vnd.github+json', 'User-Agent': 'corral' };
+  if (token.trim()) headers.Authorization = `Bearer ${token.trim()}`;
+  return reach(`https://api.github.com/repos/${ownerName}`, headers, (j) => pickStr(j, 'full_name'));
+}
+
 export function validateAgent(provider: string, key: string): Promise<ValidationResult> {
   if (provider === 'claude') {
     return check('https://api.anthropic.com/v1/models', { 'x-api-key': key, 'anthropic-version': '2023-06-01' });
