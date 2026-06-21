@@ -782,7 +782,7 @@ export class Orchestrator {
 
     if (await this.handleQuestion(rt, handle)) return;
 
-    const changed = await this.changedRepoKeys(handle, rt);
+    const changed = await this.changedRepoKeys(handle, rt, issue);
     if (changed.length === 0) {
       log.error('no committed diff in any repo after implementation');
       // Retryable: the agent may not have committed yet, or a transient git issue.
@@ -846,9 +846,9 @@ export class Orchestrator {
         label: round === 0 ? '🔍 Self-reviewing' : `🔍 Re-reviewing (after ${round} auto-fix round(s))`,
       });
       // Re-scope each round: an auto-fix may touch additional repos.
-      const changed = await this.changedRepoKeys(handle, rt);
-      const targets = this.reviewTargets(rt, changed);
-      const diff = await this.combinedDiff(handle, rt, changed);
+      const changed = await this.changedRepoKeys(handle, rt, issue);
+      const targets = this.reviewTargets(rt, issue, changed);
+      const diff = await this.combinedDiff(handle, rt, issue, changed);
       const diffStats = { lines: 0, files: 0 };
       for (const l of diff.split('\n')) {
         if (l.startsWith('diff --git ')) diffStats.files++;
@@ -944,7 +944,7 @@ export class Orchestrator {
   private async pushAndCreatePr(rt: IssueRuntime, issue: Issue, meta: Record<string, unknown>): Promise<void> {
     const log = logger.child(rt.identifier);
     const handle = this.handles.get(rt.identifier)!;
-    const changed = await this.changedRepoKeys(handle, rt);
+    const changed = await this.changedRepoKeys(handle, rt, issue);
     if (changed.length === 0) {
       await this.surfaceStuck(rt, 'No changes to open a PR for (empty diff in every repo).');
       return;
@@ -1069,17 +1069,24 @@ export class Orchestrator {
 
   private async uploadDiff(rt: IssueRuntime, issue: Issue, keys: string[]): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
-    const diff = await this.combinedDiff(handle, rt, keys);
+    const diff = await this.combinedDiff(handle, rt, issue, keys);
     if (diff.trim()) await this.channel.uploadDiff(rt.identifier, `${issue.identifier}.diff`, diff);
   }
 
   // ───────────────────────────────────────────────── multi-repo diff helpers
 
-  /** Repo keys whose clone has a non-empty diff vs its captured base commit. */
-  private async changedRepoKeys(handle: WorkspaceHandle, rt: IssueRuntime): Promise<string[]> {
+  /** Diff base for a repo: the commit captured at clone, or — if that wasn't recorded
+   * (e.g. an older build, or a recovered workspace) — the base BRANCH it was cloned
+   * from. Robust so a missing baseCommit can't silently hide the agent's changes. */
+  private baseFor(rt: IssueRuntime, issue: Issue, key: string): string | undefined {
+    return rt.baseCommits?.[key] ?? this.router.byKey(key)?.baseBranchFor(issue);
+  }
+
+  /** Repo keys whose clone has a non-empty diff vs its base (commit or base branch). */
+  private async changedRepoKeys(handle: WorkspaceHandle, rt: IssueRuntime, issue: Issue): Promise<string[]> {
     const keys: string[] = [];
     for (const repo of this.router.all()) {
-      const base = rt.baseCommits?.[repo.key];
+      const base = this.baseFor(rt, issue, repo.key);
       if (!base) continue;
       const diff = await this.workspace.io.getDiff(handle, base, repo.key);
       if (diff.trim()) keys.push(repo.key);
@@ -1088,15 +1095,17 @@ export class Orchestrator {
   }
 
   /** Review diff targets (subdir + base) for the given changed repo keys. */
-  private reviewTargets(rt: IssueRuntime, keys: string[]): ReviewTarget[] {
-    return keys.filter((k) => rt.baseCommits?.[k]).map((k) => ({ dir: k, base: rt.baseCommits![k]! }));
+  private reviewTargets(rt: IssueRuntime, issue: Issue, keys: string[]): ReviewTarget[] {
+    return keys
+      .map((k) => ({ dir: k, base: this.baseFor(rt, issue, k) }))
+      .filter((t): t is ReviewTarget => Boolean(t.base));
   }
 
   /** Combined diff across the given repos, each section headed by its subdir. */
-  private async combinedDiff(handle: WorkspaceHandle, rt: IssueRuntime, keys: string[]): Promise<string> {
+  private async combinedDiff(handle: WorkspaceHandle, rt: IssueRuntime, issue: Issue, keys: string[]): Promise<string> {
     let out = '';
     for (const k of keys) {
-      const base = rt.baseCommits?.[k];
+      const base = this.baseFor(rt, issue, k);
       if (!base) continue;
       const diff = await this.workspace.io.getDiff(handle, base, k);
       if (diff.trim()) out += `\n# ===== ${k}/ =====\n${diff}`;
