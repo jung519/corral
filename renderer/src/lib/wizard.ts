@@ -1,6 +1,7 @@
 /** Setup-wizard state → corral.yaml + the secret writes. Secrets never go into the
  * config — only CredentialRef pointers do. Repositories are a list (multi-repo);
  * each repo has its own key + description + credential (account = key). */
+import { t } from './i18n.svelte';
 
 export type RepoProvider = 'github' | 'gitlab' | 'bitbucket';
 export type TrackerKind = 'notion' | 'github_issues' | 'jira';
@@ -134,47 +135,54 @@ function firstGithub(s: WizardState): RepoEntry | undefined {
   return s.repos.find((r) => r.provider === 'github');
 }
 
+/** Localized validation message; `key` interpolates {key}, `k` interpolates {k}. */
+function vt(id: string, vars?: Record<string, string>): string {
+  let out = t(id);
+  if (vars) for (const [name, val] of Object.entries(vars)) out = out.replace(`{${name}}`, val);
+  return out;
+}
+
 export function validateStep(step: number, s: WizardState): string {
   switch (step) {
     case 0:
-      if (s.transport === 'api' && !s.agentKey.trim()) return 'API key is required for the api transport.';
+      if (s.transport === 'api' && !s.agentKey.trim()) return vt('validate.apiKeyApi');
       // The docker container has no host CLI login, so an API key is required there.
-      if (s.backend === 'docker' && !s.agentKey.trim()) return 'An API key is required for the Docker backend.';
+      if (s.backend === 'docker' && !s.agentKey.trim()) return vt('validate.apiKeyDocker');
       return '';
     case 1: {
-      if (s.repos.length === 0) return 'Add at least one repository.';
+      if (s.repos.length === 0) return vt('validate.repoMin');
       const keys = new Set<string>();
       for (const r of s.repos) {
-        if (!r.key.trim()) return 'Every repository needs a key.';
-        if (keys.has(r.key)) return `Duplicate repository key "${r.key}".`;
+        if (!r.key.trim()) return vt('validate.repoKeyNeeded');
+        if (keys.has(r.key)) return vt('validate.repoKeyDup', { key: r.key });
         keys.add(r.key);
-        if (!OWNER_NAME.test(r.repo)) return `Repository "${r.key}" must be "owner/name".`;
-        if (!r.token.trim()) return `A token is required for "${r.key}".`;
-        if (r.provider === 'gitlab' && !r.gitlabHost.trim()) return `A GitLab host is required for "${r.key}".`;
-        if (r.provider === 'bitbucket' && !r.bitbucketUser.trim()) return `A Bitbucket username is required for "${r.key}".`;
+        if (!OWNER_NAME.test(r.repo)) return vt('validate.repoOwnerName', { key: r.key });
+        if (!r.token.trim()) return vt('validate.repoToken', { key: r.key });
+        if (r.provider === 'gitlab' && !r.gitlabHost.trim()) return vt('validate.gitlabHost', { key: r.key });
+        if (r.provider === 'bitbucket' && !r.bitbucketUser.trim()) return vt('validate.bitbucketUser', { key: r.key });
       }
       return '';
     }
     case 2:
-      for (const k of CORE_STATE_KEYS) if (!s.states[k].trim()) return `State mapping "${k}" is required.`;
+      for (const k of CORE_STATE_KEYS) if (!s.states[k].trim()) return vt('validate.stateMapping', { k });
       if (s.detailedStates) {
-        for (const k of OPTIONAL_STATE_KEYS) if (!s.states[k].trim()) return `State mapping "${k}" is required.`;
+        for (const k of OPTIONAL_STATE_KEYS) if (!s.states[k].trim()) return vt('validate.stateMapping', { k });
       }
       if (s.trackerKind === 'notion') {
-        if (!s.notionDb.trim()) return 'Notion database id is required.';
-        if (!s.notionToken.trim()) return 'A Notion token is required.';
-        if (!s.statusProp.trim() || !s.idProp.trim()) return 'Status and ID property names are required.';
+        if (!s.notionDb.trim()) return vt('validate.notionDb');
+        if (!s.notionToken.trim()) return vt('validate.notionToken');
+        if (!s.statusProp.trim() || !s.idProp.trim()) return vt('validate.notionProps');
       } else if (s.trackerKind === 'github_issues') {
-        if (!OWNER_NAME.test(s.issuesRepo.trim() || firstGithub(s)?.repo || '')) return 'Issues repo must be "owner/name".';
+        if (!OWNER_NAME.test(s.issuesRepo.trim() || firstGithub(s)?.repo || '')) return vt('validate.issuesRepo');
       } else {
-        if (!s.jiraHost.trim()) return 'A Jira host is required.';
-        if (!s.jiraProject.trim()) return 'A Jira project key is required.';
-        if (!s.jiraEmail.trim()) return 'A Jira account email is required.';
-        if (!s.jiraToken.trim()) return 'A Jira API token is required.';
+        if (!s.jiraHost.trim()) return vt('validate.jiraHost');
+        if (!s.jiraProject.trim()) return vt('validate.jiraProject');
+        if (!s.jiraEmail.trim()) return vt('validate.jiraEmail');
+        if (!s.jiraToken.trim()) return vt('validate.jiraToken');
       }
       return '';
     case 4:
-      if (!Number.isInteger(s.port) || s.port <= 0) return 'Port must be a positive integer.';
+      if (!Number.isInteger(s.port) || s.port <= 0) return vt('validate.port');
       return '';
     default:
       return '';
