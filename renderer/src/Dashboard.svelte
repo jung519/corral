@@ -5,7 +5,7 @@
   import Button from './lib/Button.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
-  import { phaseColor, phaseLabelKey } from './lib/phase';
+  import { isWorking, phaseColor, phaseLabelKey } from './lib/phase';
   import { toast } from './lib/toast.svelte';
   import type { Candidate, CorralEvent, StateResponse } from './lib/types';
 
@@ -114,6 +114,9 @@
         <div class="issue-head">
           <strong>{issue.identifier}</strong>
           <span class="title">{issue.title ?? ''}</span>
+          {#if isWorking(issue.phase) && !issue.stuck}
+            <span class="working" title={t('dash.working')}><span class="spin" aria-hidden="true"></span>{t('dash.working')}</span>
+          {/if}
           <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase))}</span>
           <span class="cost">${issue.cost.toFixed(4)}</span>
         </div>
@@ -245,6 +248,27 @@
     border-radius: 6px;
     padding: 2px 8px;
     font-size: 11px;
+  }
+  .working {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--accent-text);
+    font-size: 11px;
+  }
+  .spin {
+    width: 11px;
+    height: 11px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    border-top-color: transparent;
+    animation: corral-spin 0.6s linear infinite;
+  }
+  @keyframes corral-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .cost {
     color: var(--text-dim);

@@ -29,6 +29,23 @@ export function stageIndex(phase: string): number {
   }
 }
 
+/** Phases where the AI is NOT actively working — waiting on a human, an external
+ * event (PR), an error, or finished. Everything else means an agent run is in flight. */
+const IDLE_PHASES = new Set([
+  'plan_sent',
+  'pr_plan_sent',
+  'question_sent',
+  'review_sent',
+  'pr_open',
+  'auth_error_waiting',
+  'done',
+]);
+
+/** True when the agent is actively working the issue (show a spinner). */
+export function isWorking(phase: string): boolean {
+  return !IDLE_PHASES.has(phase);
+}
+
 /** Badge text color for a phase (CSS var). */
 export function phaseColor(phase: string): string {
   if (phase === 'done' || phase === 'pr_open') return 'var(--green)';
