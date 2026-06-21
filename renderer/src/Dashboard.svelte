@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import ApprovalCard from './ApprovalCard.svelte';
   import PhaseBar from './PhaseBar.svelte';
+  import Button from './lib/Button.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import { phaseColor, phaseLabelKey } from './lib/phase';
@@ -72,10 +73,10 @@
     void refresh();
   }
   function onApprove(id: string, selection?: string, notes?: string) {
-    void api.approve(id, selection, notes).then(refresh);
+    return api.approve(id, selection, notes).then(refresh);
   }
   function onFeedback(id: string, text: string) {
-    void api.feedback(id, text).then(refresh);
+    return api.feedback(id, text).then(refresh);
   }
 </script>
 
@@ -83,7 +84,7 @@
   <span class="dot" class:on={online}></span>
   <h1>Corral</h1>
   <span class="count">{view.issues.length} {t('dash.count')}</span>
-  <button class="primary" onclick={openCandidates}>{t('dash.import')}</button>
+  <Button class="primary" onclick={openCandidates}>{t('dash.import')}</Button>
 </header>
 
 <main>
@@ -122,9 +123,9 @@
           {#each issue.prs ?? [] as pr}
             {#if pr.url}<a href={pr.url} target="_blank" rel="noreferrer">PR #{pr.number} ({pr.repoKey}) ↗</a>{/if}
           {/each}
-          {#if issue.prs?.length}<button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</button>{/if}
-          {#if issue.stuck}<button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</button>{/if}
-          <button onclick={() => remove(issue.identifier)}>{t('dash.remove')}</button>
+          {#if issue.prs?.length}<Button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</Button>{/if}
+          {#if issue.stuck}<Button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</Button>{/if}
+          <Button onclick={() => remove(issue.identifier)}>{t('dash.remove')}</Button>
         </div>
       </div>
     {/each}
@@ -158,7 +159,7 @@
           {#if c.inFlight}
             <span class="dim">{t('dash.inFlight')}</span>
           {:else}
-            <button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</button>
+            <Button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</Button>
           {/if}
         </div>
       {/each}
@@ -183,7 +184,7 @@
   .count {
     color: var(--text-dim);
   }
-  header .primary {
+  header :global(button.primary) {
     margin-left: auto;
   }
   .dot {

@@ -1,11 +1,12 @@
 <script lang="ts">
   import { t } from './lib/i18n.svelte';
+  import Button from './lib/Button.svelte';
   import type { PendingAction } from './lib/types';
 
   interface Props {
     action: PendingAction;
-    onApprove: (id: string, selection?: string, notes?: string) => void;
-    onFeedback: (id: string, text: string) => void;
+    onApprove: (id: string, selection?: string, notes?: string) => unknown | Promise<unknown>;
+    onFeedback: (id: string, text: string) => unknown | Promise<unknown>;
   }
   let { action, onApprove, onFeedback }: Props = $props();
 
@@ -16,11 +17,11 @@
   let notes = $state('');
 
   function approve() {
-    onApprove(action.id, action.options ? selection : undefined, notes.trim() || undefined);
+    return onApprove(action.id, action.options ? selection : undefined, notes.trim() || undefined);
   }
   function requestChanges() {
     if (!notes.trim()) return;
-    onFeedback(action.id, notes.trim());
+    return onFeedback(action.id, notes.trim());
   }
 </script>
 
@@ -53,8 +54,8 @@
   <textarea rows="2" placeholder={t('card.notes')} bind:value={notes}></textarea>
 
   <div class="actions">
-    <button class="primary" onclick={approve}>{t('card.approve')}</button>
-    <button onclick={requestChanges} disabled={!notes.trim()}>{t('card.requestChanges')}</button>
+    <Button class="primary" onclick={approve}>{t('card.approve')}</Button>
+    <Button onclick={requestChanges} disabled={!notes.trim()}>{t('card.requestChanges')}</Button>
   </div>
 </div>
 

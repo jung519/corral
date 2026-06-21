@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import Button from './lib/Button.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import {
@@ -169,7 +170,6 @@
   // Notion schema → property/option dropdowns (no manual name typing).
   type NotionProp = { name: string; type: string; options: string[] };
   let notionProps = $state<NotionProp[] | null>(null);
-  let loadingSchema = $state(false);
   let schemaError = $state('');
 
   const notionPropsByType = (types: string[]): NotionProp[] => (notionProps ?? []).filter((p) => types.includes(p.type));
@@ -180,7 +180,6 @@
       schemaError = t('notion.loadNeedsToken');
       return;
     }
-    loadingSchema = true;
     schemaError = '';
     try {
       const res = await window.corral.notion.schema(s.notionToken.trim(), s.notionDb.trim());
@@ -196,8 +195,6 @@
       }
     } catch (err) {
       schemaError = err instanceof Error ? err.message : String(err);
-    } finally {
-      loadingSchema = false;
     }
   }
 
@@ -382,7 +379,7 @@
           </div>
           {#if hasBridge}
             <div class="testrow">
-              <button onclick={() => testRepo(i)} disabled={!r.repo.trim() || !r.token.trim()}>{t('test.connection')}</button>
+              <Button onclick={() => testRepo(i)} disabled={!r.repo.trim() || !r.token.trim()}>{t('test.connection')}</Button>
               {@render badge(test[`repo-${i}`])}
             </div>
           {/if}
@@ -406,7 +403,7 @@
         >
         {#if hasBridge}
           <div class="testrow">
-            <button onclick={testReference}>{t('test.connection')}</button>
+            <Button onclick={testReference}>{t('test.connection')}</Button>
             {@render badge(test.reference)}
           </div>
         {/if}
@@ -447,9 +444,9 @@
         >
         {#if hasBridge}
           <div class="testrow">
-            <button onclick={loadNotionSchema} disabled={loadingSchema || !s.notionDb.trim() || !s.notionToken.trim()}>
-              {loadingSchema ? t('notion.loading') : t('notion.load')}
-            </button>
+            <Button onclick={loadNotionSchema} disabled={!s.notionDb.trim() || !s.notionToken.trim()}>
+              {t('notion.load')}
+            </Button>
             {#if notionProps}<span class="badge">✓ {notionProps.length} {t('notion.propsLoaded')}</span>{/if}
             {#if schemaError}<span class="badge bad">{schemaError}</span>{/if}
           </div>
@@ -517,7 +514,7 @@
 
       {#if hasBridge}
         <div class="testrow">
-          <button onclick={testTracker}>{t('test.connection')}</button>
+          <Button onclick={testTracker}>{t('test.connection')}</Button>
           {@render badge(test.tracker)}
         </div>
       {/if}
