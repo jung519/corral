@@ -52,6 +52,9 @@
     // Coerce any still-gated option a stale draft/config might hold back to a working one.
     if (s.provider !== 'claude') setProvider('claude');
     if (s.transport === 'api') s.transport = 'cli';
+    // Host-login mount doesn't work on macOS (login is in the Keychain, not ~/.claude),
+    // so a fresh macOS setup defaults to the API-key path instead.
+    if (!draft && window.corral?.platform === 'darwin') s.dockerMountLogin = false;
     if (!window.corral) return;
     const found = new Set<string>();
     for (const ref of secretRefs(s)) {

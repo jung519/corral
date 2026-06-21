@@ -7,6 +7,9 @@
 import { contextBridge, ipcRenderer } from 'electron';
 
 const api = {
+  /** Host OS platform ('darwin' | 'win32' | 'linux'). Lets the wizard pick
+   *  platform-appropriate defaults (e.g. host-login mount only works on Linux). */
+  platform: process.platform,
   config: {
     exists: (): Promise<boolean> => ipcRenderer.invoke('config:exists'),
     read: (): Promise<string | null> => ipcRenderer.invoke('config:read'),

@@ -5,6 +5,7 @@ export {};
 declare global {
   interface Window {
     corral?: {
+      platform: string;
       config: {
         exists(): Promise<boolean>;
         read(): Promise<string | null>;
