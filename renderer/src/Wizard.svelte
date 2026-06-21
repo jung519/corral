@@ -211,12 +211,23 @@
   }
 
   async function finish() {
-    for (let i = 0; i < stepKeys.length; i++) {
-      const e = validateStep(i, s);
+    const isSaved = (service: string, account: string) => savedSecrets.has(secretKey(service, account));
+    if (embedded) {
+      // Inline edit: validate only the section being edited (other sections keep their
+      // saved config/keys — don't force re-entering them).
+      const e = validateStep(step, s, isSaved);
       if (e) {
-        step = i;
         error = e;
         return;
+      }
+    } else {
+      for (let i = 0; i < stepKeys.length; i++) {
+        const e = validateStep(i, s, isSaved);
+        if (e) {
+          step = i;
+          error = e;
+          return;
+        }
       }
     }
     saving = true;

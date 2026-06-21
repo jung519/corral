@@ -145,12 +145,18 @@ function vt(id: string, vars?: Record<string, string>): string {
   return out;
 }
 
-export function validateStep(step: number, s: WizardState): string {
+/** Whether a secret (service/account) is already stored — a blank field is then OK
+ * (editing keeps the saved key). Default: nothing saved (first-run requires keys). */
+export type SecretSavedFn = (service: string, account: string) => boolean;
+
+export function validateStep(step: number, s: WizardState, isSaved: SecretSavedFn = () => false): string {
   switch (step) {
     case 0:
-      if (s.transport === 'api' && !s.agentKey.trim()) return vt('validate.apiKeyApi');
+      if (s.transport === 'api' && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
+        return vt('validate.apiKeyApi');
       // Docker without the host login mount has no auth source → require an API key.
-      if (s.backend === 'docker' && !s.dockerMountLogin && !s.agentKey.trim()) return vt('validate.apiKeyDocker');
+      if (s.backend === 'docker' && !s.dockerMountLogin && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
+        return vt('validate.apiKeyDocker');
       return '';
     case 1: {
       if (s.repos.length === 0) return vt('validate.repoMin');
@@ -162,7 +168,7 @@ export function validateStep(step: number, s: WizardState): string {
         if (keys.has(r.key)) return vt('validate.repoKeyDup', { key: r.key });
         keys.add(r.key);
         if (!OWNER_NAME.test(r.repo)) return vt('validate.repoOwnerName', { key: r.key });
-        if (!r.token.trim()) return vt('validate.repoToken', { key: r.key });
+        if (!r.token.trim() && !isSaved(r.provider, r.key)) return vt('validate.repoToken', { key: r.key });
         if (r.provider === 'gitlab' && !r.gitlabHost.trim()) return vt('validate.gitlabHost', { key: r.key });
         if (r.provider === 'bitbucket' && !r.bitbucketUser.trim()) return vt('validate.bitbucketUser', { key: r.key });
       }
@@ -175,7 +181,7 @@ export function validateStep(step: number, s: WizardState): string {
       }
       if (s.trackerKind === 'notion') {
         if (!s.notionDb.trim()) return vt('validate.notionDb');
-        if (!s.notionToken.trim()) return vt('validate.notionToken');
+        if (!s.notionToken.trim() && !isSaved('notion', 'default')) return vt('validate.notionToken');
         if (!s.statusProp.trim() || !s.idProp.trim()) return vt('validate.notionProps');
       } else if (s.trackerKind === 'github_issues') {
         if (!OWNER_NAME.test(s.issuesRepo.trim() || firstGithub(s)?.repo || '')) return vt('validate.issuesRepo');
@@ -183,7 +189,7 @@ export function validateStep(step: number, s: WizardState): string {
         if (!s.jiraHost.trim()) return vt('validate.jiraHost');
         if (!s.jiraProject.trim()) return vt('validate.jiraProject');
         if (!s.jiraEmail.trim()) return vt('validate.jiraEmail');
-        if (!s.jiraToken.trim()) return vt('validate.jiraToken');
+        if (!s.jiraToken.trim() && !isSaved('jira', 'default')) return vt('validate.jiraToken');
       }
       return '';
     case 4:
