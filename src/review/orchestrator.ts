@@ -35,6 +35,8 @@ export class ReviewOrchestrator {
     private readonly agent: AgentAdapter,
     private readonly cfg: ReviewConfig,
     private readonly profile: ResolvedProfile,
+    /** Per-turn timeout (ms) so a hung review round can't spin forever. */
+    private readonly turnTimeoutMs?: number,
   ) {}
 
   async run(
@@ -92,6 +94,7 @@ export class ReviewOrchestrator {
         prompt: reviewRoundPrompt(issue, round, targets, this.profile, referencePath),
         continueSession: false, // fresh, independent perspective
         model,
+        turnTimeoutMs: this.turnTimeoutMs,
       });
       onRoundCost?.(result);
       if (!result.ok) {

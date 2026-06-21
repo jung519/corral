@@ -67,8 +67,14 @@ export class Orchestrator {
     private readonly channel: ChannelAdapter,
     private readonly profile: ResolvedProfile,
   ) {
-    this.review = new ReviewOrchestrator(workspace.io, agent, config.review, profile);
-    this.planCritique = new PlanCritiqueOrchestrator(workspace.io, agent, config.plan_review, profile);
+    this.review = new ReviewOrchestrator(workspace.io, agent, config.review, profile, config.agent.turn_timeout_ms);
+    this.planCritique = new PlanCritiqueOrchestrator(
+      workspace.io,
+      agent,
+      config.plan_review,
+      profile,
+      config.agent.turn_timeout_ms,
+    );
     this.limiter = new ConcurrencyLimiter(config.max_active_issues);
     this.signals = buildSignals(profile.t);
 
@@ -426,7 +432,18 @@ export class Orchestrator {
         reference_path: this.referencePath(),
       });
       await this.wipeOutputs(handle);
-      const result = await this.agent.run(handle, issue, { stage, workflow, prompt, continueSession });
+      const a = this.config.agent;
+      const result = await this.agent.run(handle, issue, {
+        stage,
+        workflow,
+        prompt,
+        continueSession,
+        // Apply the configured limits — without these a hung agent runs forever.
+        turnTimeoutMs: a.turn_timeout_ms,
+        maxTurns: a.max_turns,
+        maxBudgetUsd: a.max_budget_usd,
+        allowedTools: a.allowed_tools,
+      });
       this.cost.add(rt.identifier, result);
       if (result.error === 'auth') {
         rt.phase = 'auth_error_waiting';

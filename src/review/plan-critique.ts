@@ -22,6 +22,8 @@ export class PlanCritiqueOrchestrator {
     private readonly agent: AgentAdapter,
     private readonly cfg: PlanReviewConfig,
     private readonly profile: ResolvedProfile,
+    /** Per-turn timeout (ms) so a hung critique round can't spin forever. */
+    private readonly turnTimeoutMs?: number,
   ) {}
 
   async run(
@@ -68,6 +70,7 @@ export class PlanCritiqueOrchestrator {
         prompt: planCritiquePrompt(issue, round, this.profile, referencePath, focus),
         continueSession: false,
         model,
+        turnTimeoutMs: this.turnTimeoutMs,
       });
       onRoundCost?.(result);
       if (!result.ok) {
