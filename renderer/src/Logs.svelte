@@ -36,7 +36,7 @@
           <span class="time">{ts(e.ts)}</span>
           <span class="id">{e.identifier}</span>
           <span class="kind kind-{e.kind}">{e.kind}</span>
-          <span class="label">{e.label}</span>
+          <span class="label" title={e.label}>{e.label}</span>
         </div>
       {/each}
     </div>
@@ -87,5 +87,9 @@
   }
   .label {
     flex: 1;
+    min-width: 0; /* allow the flex item to shrink so ellipsis works */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

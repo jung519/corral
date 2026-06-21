@@ -145,7 +145,7 @@
     <h2>{t('dash.timeline')}</h2>
     <div class="timeline">
       {#each live.slice().reverse() as e}
-        <div class="event"><span class="ev-id">{e.identifier}</span> {e.label}</div>
+        <div class="event" title={e.label}><span class="ev-id">{e.identifier}</span> {e.label}</div>
       {/each}
     </div>
   </section>
@@ -301,6 +301,9 @@
     font-size: 13px;
     padding: 2px 0;
     border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis; /* widen the window → more text shows; hover for full */
   }
   .ev-id {
     color: var(--text-dim);

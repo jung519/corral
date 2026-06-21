@@ -34,7 +34,8 @@ export function activityEvents(event: StreamEvent): AgentEvent[] {
       if (block.type === 'tool_use' && block.name) {
         out.push({ type: 'tool_use', name: block.name + toolHint(block.input) });
       } else if (block.type === 'text' && block.text?.trim()) {
-        out.push({ type: 'text', text: oneLine(block.text, 100) });
+        // Send (near-)full text; the UI truncates visually so widening reveals more.
+        out.push({ type: 'text', text: oneLine(block.text, 2000) });
       }
     }
   }
@@ -68,7 +69,7 @@ function toolHint(input: unknown): string {
   if (!input || typeof input !== 'object') return '';
   const i = input as Record<string, unknown>;
   const v = i.file_path ?? i.path ?? i.command ?? i.pattern ?? i.url ?? i.description;
-  return v ? `: ${oneLine(String(v), 80)}` : '';
+  return v ? `: ${oneLine(String(v), 2000)}` : '';
 }
 
 function oneLine(s: string, max: number): string {

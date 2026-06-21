@@ -299,7 +299,7 @@ export class Orchestrator {
             logger.child(identifier).info(`worker Dockerfile:\n${dockerfile}`);
             return Promise.resolve(true);
           },
-          onLog: (line) => bus.emitEvent({ identifier, kind: 'activity', label: `🐳 ${line.slice(0, 160)}` }),
+          onLog: (line) => bus.emitEvent({ identifier, kind: 'activity', label: `🐳 ${line.slice(0, 2000)}` }),
         });
         if (!result.ok) {
           this.store.delete(identifier);
