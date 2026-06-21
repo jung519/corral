@@ -2,11 +2,38 @@
   import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
-  import { CORE_STATE_KEYS, loadDraft, OPTIONAL_STATE_KEYS, secretRefs, serviceFor, type WizardState } from './lib/wizard';
+  import {
+    buildConfigYaml,
+    CORE_STATE_KEYS,
+    loadDraft,
+    OPTIONAL_STATE_KEYS,
+    saveDraft,
+    secretRefs,
+    secretsFor,
+    serviceFor,
+    type WizardState,
+  } from './lib/wizard';
 
   let configured = $state<boolean | undefined>(undefined);
   let s = $state<WizardState | null>(null);
   let savedSecrets = $state(new Set<string>());
+  // Which section (if any) is being edited inline. Secret-free sections only;
+  // AI/repo/tracker deep-link to the editor instead.
+  let editing = $state<string | null>(null);
+  let saving = $state(false);
+
+  async function save() {
+    if (!s || !window.corral) return;
+    saving = true;
+    try {
+      await window.corral.config.write(buildConfigYaml(s));
+      for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
+      await saveDraft(s);
+      editing = null;
+    } finally {
+      saving = false;
+    }
+  }
 
   const isSaved = (service: string, account: string) => savedSecrets.has(`${service}:${account}`);
   const secret = (service: string, account: string) =>
@@ -34,10 +61,19 @@
   <div class="row"><span class="k">{label}</span><span class="v">{value}</span></div>
 {/snippet}
 
-{#snippet head(title: string, section: string)}
+{#snippet head(title: string, section: string, inline = false)}
   <div class="hdr">
     <h2>{title}</h2>
-    <button class="edit" onclick={() => (location.hash = `#/setup/${section}`)}>{t('settings.edit')}</button>
+    {#if editing === section}
+      <span class="editing">
+        <button class="primary" onclick={save} disabled={saving}>{saving ? t('wizard.saving') : t('settings.save')}</button>
+        <button onclick={() => location.reload()}>{t('settings.cancel')}</button>
+      </span>
+    {:else}
+      <button class="edit" onclick={() => (inline ? (editing = section) : (location.hash = `#/setup/${section}`))}>
+        {t('settings.edit')}
+      </button>
+    {/if}
   </div>
 {/snippet}
 
@@ -100,15 +136,44 @@
     </div>
 
     <div class="card">
-      {@render head(t('step.workspace'), 'workspace')}
-      {@render row(t('workspace.backend'), s.backend === 'docker' ? t('workspace.docker') : t('workspace.local'))}
-      {#if s.backend === 'docker'}{@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}{/if}
+      {@render head(t('step.workspace'), 'workspace', true)}
+      {#if editing === 'workspace'}
+        <label class="erow"
+          ><span>{t('workspace.backend')}</span>
+          <select bind:value={s.backend}>
+            <option value="local">{t('workspace.local')}</option>
+            <option value="docker">{t('workspace.docker')}</option>
+          </select></label
+        >
+        {#if s.backend === 'docker'}
+          <label class="erow check"><input type="checkbox" bind:checked={s.dockerMountLogin} /><span>{t('workspace.mountLogin')}</span></label>
+        {/if}
+      {:else}
+        {@render row(t('workspace.backend'), s.backend === 'docker' ? t('workspace.docker') : t('workspace.local'))}
+        {#if s.backend === 'docker'}{@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}{/if}
+      {/if}
     </div>
 
     <div class="card">
-      {@render head(t('step.channel'), 'channel')}
-      {@render row(t('field.maxActive'), String(s.maxActive))}
-      {@render row(t('field.stack'), s.stack)}
+      {@render head(t('step.channel'), 'channel', true)}
+      {#if editing === 'channel'}
+        <label class="erow"
+          ><span>{t('field.maxActive')}</span>
+          <select bind:value={s.maxActive}>{#each [1, 2, 3, 4, 5, 6, 8, 10] as n}<option value={n}>{n}</option>{/each}</select></label
+        >
+        <label class="erow"
+          ><span>{t('field.language')}</span>
+          <select bind:value={s.language}><option value="en">English</option><option value="ko">한국어</option></select></label
+        >
+        <label class="erow"
+          ><span>{t('field.stack')}</span>
+          <select bind:value={s.stack}><option value="generic">generic</option><option value="nestjs">nestjs</option><option value="flutter">flutter</option></select></label
+        >
+      {:else}
+        {@render row(t('field.maxActive'), String(s.maxActive))}
+        {@render row(t('field.language'), langLabel(s.language))}
+        {@render row(t('field.stack'), s.stack)}
+      {/if}
     </div>
   {/if}
 
@@ -153,6 +218,31 @@
   .edit {
     font-size: 12px;
     padding: 3px 10px;
+  }
+  .editing {
+    display: flex;
+    gap: 6px;
+  }
+  .editing button {
+    font-size: 12px;
+    padding: 3px 10px;
+  }
+  .erow {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+  }
+  .erow > span {
+    color: var(--text-dim);
+    font-size: 13px;
+    min-width: 200px;
+  }
+  .erow.check {
+    cursor: pointer;
+  }
+  .erow.check input {
+    width: auto;
   }
   .hint {
     color: var(--text-dim);
