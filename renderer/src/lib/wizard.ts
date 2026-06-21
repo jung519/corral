@@ -138,6 +138,8 @@ export function validateStep(step: number, s: WizardState): string {
   switch (step) {
     case 0:
       if (s.transport === 'api' && !s.agentKey.trim()) return 'API key is required for the api transport.';
+      // The docker container has no host CLI login, so an API key is required there.
+      if (s.backend === 'docker' && !s.agentKey.trim()) return 'An API key is required for the Docker backend.';
       return '';
     case 1: {
       if (s.repos.length === 0) return 'Add at least one repository.';

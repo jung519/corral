@@ -71,6 +71,11 @@ agent:
 
 workspace:
   backend: local          # local | docker
+  # docker backend: a worker image is auto-built from your repos' manifests unless you
+  # set `image`. Requires Docker installed + an agent API key (the container has no host login).
+  # docker:
+  #   # image: my-worker:latest   # BYO image (skips auto-build)
+  #   auto_build: true            # analyze repos → generate Dockerfile → build (default)
 
 channel:
   kind: web               # web | slack

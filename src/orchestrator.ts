@@ -44,6 +44,8 @@ import type { RepositoryRouter } from './repository/router.js';
 import { PlanCritiqueOrchestrator } from './review/plan-critique.js';
 import { ReviewOrchestrator } from './review/orchestrator.js';
 import type { ReviewTarget } from './review/prompt.js';
+import { resolve } from 'node:path';
+import { ensureWorkerImage } from './workspace/image/index.js';
 
 /** Read-only reference/conventions repo clone path (under the workspace root). */
 const REFERENCE_DIR = '.reference';
@@ -203,6 +205,15 @@ export class Orchestrator {
 
     // Clone every configured repo side by side; the agent decides which to change.
     const repos = this.router.all();
+
+    // Docker + no explicit image → auto-build a worker image first. That's slow
+    // (clone manifests → generate Dockerfile → build), so the whole setup runs
+    // asynchronously; the API returns immediately and progress streams as events.
+    const dockerCfg = this.config.workspace.backend === 'docker' ? this.config.workspace.docker : undefined;
+    if (this.config.workspace.backend === 'docker' && !dockerCfg?.image && (dockerCfg?.auto_build ?? true)) {
+      return this.startIssueWithAutoImage(identifier, issue, repos);
+    }
+
     let handle;
     try {
       logger.child(identifier).info(`creating workspace (${repos.length} repo(s))`);
@@ -232,29 +243,95 @@ export class Orchestrator {
     this.store.upsert(rt);
     bus.emitEvent({ identifier, kind: 'phase', phase: 'planning', label: `📋 Planning started — ${issue.title}` });
 
+    void this.serialize(identifier, () => this.prepareAndPlan(rt, issue, repos, handle));
+    return { ok: true };
+  }
+
+  /** Per-repo afterClone hooks → attachments → planning dispatch. Shared by the sync
+   * (local / BYO image) and async (docker auto-build) start paths. */
+  private async prepareAndPlan(rt: IssueRuntime, issue: Issue, repos: RepositoryAdapter[], handle: WorkspaceHandle): Promise<void> {
+    const identifier = rt.identifier;
+    for (const r of repos) {
+      if (!r.afterClone) continue;
+      bus.emitEvent({ identifier, kind: 'notice', label: `📦 Installing dependencies (${r.key}) — ${r.afterClone}` });
+      const res = await this.workspace.io.exec(handle, `cd ${r.key} && ${r.afterClone}`);
+      if (res.code !== 0) {
+        bus.emitEvent({
+          identifier,
+          kind: 'notice',
+          label: `⚠️ Dependency install failed (${r.key}: ${r.afterClone}, code ${res.code}) — static gate/build may break`,
+        });
+        logger.child(identifier).warn(`after_clone failed (${r.key})`, res.stderr.slice(-400));
+      }
+    }
+    try {
+      await processAttachments(this.workspace.io, handle, issue);
+    } catch (err) {
+      bus.emitEvent({ identifier, kind: 'notice', label: `⚠️ Attachment processing error: ${oneLineErr(err)}` });
+    }
+    return this.dispatchPlanning(rt, issue).catch((err) => {
+      logger.child(identifier).error('planning failed', String(err));
+      bus.emitEvent({ identifier, kind: 'error', label: `❌ Planning failed: ${oneLineErr(err)}` });
+    });
+  }
+
+  /** Docker auto-build start path: build/ensure the worker image, then create the
+   * workspace and plan — all async so the API returns immediately. */
+  private async startIssueWithAutoImage(
+    identifier: string,
+    issue: Issue,
+    repos: RepositoryAdapter[],
+  ): Promise<{ ok: boolean; message?: string }> {
+    const repoKey = (issue.repoKey && repos.some((r) => r.key === issue.repoKey) ? issue.repoKey : repos[0]?.key) ?? '';
+    const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url };
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier, kind: 'notice', label: '🐳 Preparing worker image…' });
+
     void this.serialize(identifier, async () => {
-      for (const r of repos) {
-        if (!r.afterClone) continue;
-        bus.emitEvent({ identifier, kind: 'notice', label: `📦 Installing dependencies (${r.key}) — ${r.afterClone}` });
-        const res = await this.workspace.io.exec(handle, `cd ${r.key} && ${r.afterClone}`);
-        if (res.code !== 0) {
-          bus.emitEvent({
-            identifier,
-            kind: 'notice',
-            label: `⚠️ Dependency install failed (${r.key}: ${r.afterClone}, code ${res.code}) — static gate/build may break`,
-          });
-          logger.child(identifier).warn(`after_clone failed (${r.key})`, res.stderr.slice(-400));
-        }
-      }
       try {
-        await processAttachments(this.workspace.io, handle, issue);
+        const result = await ensureWorkerImage({
+          prepRoot: resolve(this.config.workspace.root, '.corral-image-prep', identifier),
+          repos: repos.map((r) => ({ key: r.key, cloneUrl: r.cloneUrl(), baseBranch: r.baseBranchFor(issue) })),
+          // Approval = config opt-in (workspace.docker.auto_build) + the Dockerfile is
+          // surfaced here for audit. (A per-build modal can be layered on this seam.)
+          approve: (dockerfile) => {
+            bus.emitEvent({ identifier, kind: 'notice', label: `🐳 Worker Dockerfile generated (${dockerfile.split('\n').length} lines) — building` });
+            logger.child(identifier).info(`worker Dockerfile:\n${dockerfile}`);
+            return Promise.resolve(true);
+          },
+          onLog: (line) => bus.emitEvent({ identifier, kind: 'activity', label: `🐳 ${line.slice(0, 160)}` }),
+        });
+        if (!result.ok) {
+          this.store.delete(identifier);
+          this.limiter.release(identifier);
+          bus.emitEvent({ identifier, kind: 'error', label: `❌ Worker image ${result.reason}${result.message ? `: ${result.message}` : ''}` });
+          return;
+        }
+        bus.emitEvent({ identifier, kind: 'notice', label: `🐳 Worker image ready (${result.cached ? 'cached' : 'built'}): ${result.tag}` });
+
+        const handle = await this.workspace.create({
+          identifier,
+          repos: repos.map((r) => ({ key: r.key, cloneUrl: r.cloneUrl(), baseBranch: r.baseBranchFor(issue) })),
+          image: result.tag,
+          extraRepos: this.referenceCloneUrl ? [{ cloneUrl: this.referenceCloneUrl, path: REFERENCE_DIR }] : undefined,
+        });
+        this.handles.set(identifier, handle);
+
+        const baseCommits: Record<string, string> = {};
+        for (const r of repos) {
+          const res = await this.workspace.io.exec(handle, `git -C ${r.key} rev-parse HEAD`);
+          if (res.code === 0) baseCommits[r.key] = res.stdout.trim();
+        }
+        rt.baseCommits = baseCommits;
+        this.store.upsert(rt);
+        bus.emitEvent({ identifier, kind: 'phase', phase: 'planning', label: `📋 Planning started — ${issue.title}` });
+
+        await this.prepareAndPlan(rt, issue, repos, handle);
       } catch (err) {
-        bus.emitEvent({ identifier, kind: 'notice', label: `⚠️ Attachment processing error: ${oneLineErr(err)}` });
+        this.store.delete(identifier);
+        this.limiter.release(identifier);
+        bus.emitEvent({ identifier, kind: 'error', label: `❌ Setup failed: ${oneLineErr(err)}` });
       }
-      return this.dispatchPlanning(rt, issue).catch((err) => {
-        logger.child(identifier).error('planning failed', String(err));
-        bus.emitEvent({ identifier, kind: 'error', label: `❌ Planning failed: ${oneLineErr(err)}` });
-      });
     });
     return { ok: true };
   }

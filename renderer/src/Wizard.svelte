@@ -48,10 +48,9 @@
   onMount(async () => {
     const draft = await loadDraft();
     if (draft) s = draft;
-    // Coerce any gated option a stale draft/config might hold back to a working one.
+    // Coerce any still-gated option a stale draft/config might hold back to a working one.
     if (s.provider !== 'claude') setProvider('claude');
     if (s.transport === 'api') s.transport = 'cli';
-    if (s.backend === 'docker') s.backend = 'local';
     if (!window.corral) return;
     const found = new Set<string>();
     for (const ref of secretRefs(s)) {
@@ -300,7 +299,7 @@
       </div>
 
       <label class="field"
-        ><span>{t('field.apiKey')}{s.transport === 'cli' ? t('field.apiKey.optionalCli') : ''}</span>
+        ><span>{t('field.apiKey')}{s.transport === 'cli' && s.backend !== 'docker' ? t('field.apiKey.optionalCli') : ''}</span>
         <div class="keyrow">
           <input
             type="password"
@@ -565,11 +564,11 @@
         <button class="transport" class:sel={s.backend === 'local'} onclick={() => (s.backend = 'local')}>
           <span class="radio" class:on={s.backend === 'local'}></span>{t('workspace.local')}
         </button>
-        <button class="transport soon" disabled>
-          <span class="radio"></span>{t('workspace.docker')} <span class="soon-tag">{t('badge.soon')}</span>
+        <button class="transport" class:sel={s.backend === 'docker'} onclick={() => (s.backend = 'docker')}>
+          <span class="radio" class:on={s.backend === 'docker'}></span>{t('workspace.docker')}
         </button>
       </div>
-      <p class="hint">{t('workspace.dockerSoon')}</p>
+      <p class="hint">{s.backend === 'docker' ? t('workspace.dockerNote') : t('workspace.localNote')}</p>
     {:else if step === 4}
       <h1>{t('step.channel')}</h1>
       <div class="two">

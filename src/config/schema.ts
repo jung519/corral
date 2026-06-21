@@ -218,7 +218,11 @@ export const WorkspaceSchema = z
     root: z.string().default('.corral-workspaces'),
     docker: z
       .object({
-        image: z.string().default('corral-worker:latest'),
+        /** Pre-built worker image to use (BYO). Omit to auto-build one (see auto_build). */
+        image: z.string().optional(),
+        /** When no `image` is set, auto-build a worker image from the repos' manifests
+         *  (analyze on the host → generate Dockerfile → build). */
+        auto_build: z.boolean().default(true),
         memory: z.string().optional(),
         cpus: z.string().optional(),
         /** Extra env injected into the worker container. */
