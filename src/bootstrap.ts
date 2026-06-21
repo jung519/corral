@@ -61,9 +61,40 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
 
   const profile = resolveProfile(config.profile);
   const repositoryRouter = new RepositoryRouter(repositoryList);
-  const orchestrator = new Orchestrator(config, tracker, repositoryRouter, workspace, agent, channel, profile);
+
+  // Resolve the optional reference/conventions repo clone URL (token embedded for a
+  // private GitHub repo). undefined → no reference repo is cloned.
+  let referenceCloneUrl: string | undefined;
+  if (config.profile.reference_repo) {
+    const token = config.profile.reference_credential ? await resolveSecret(config.profile.reference_credential) : '';
+    referenceCloneUrl = buildReferenceCloneUrl(config.profile.reference_repo, token);
+  }
+
+  const orchestrator = new Orchestrator(
+    config,
+    tracker,
+    repositoryRouter,
+    workspace,
+    agent,
+    channel,
+    profile,
+    referenceCloneUrl,
+  );
 
   return { config, profile, tracker, repositories: repositoryList, repositoryRouter, agent, workspace, channel, orchestrator };
+}
+
+/** Build a clone URL for the reference repo. Accepts "owner/name" (→ GitHub) or a
+ * full https URL; injects a token as x-access-token for github.com when provided. */
+function buildReferenceCloneUrl(repo: string, token: string): string {
+  if (/^https?:\/\//.test(repo)) {
+    if (token && repo.startsWith('https://github.com/')) {
+      return repo.replace('https://github.com/', `https://x-access-token:${token}@github.com/`);
+    }
+    return repo;
+  }
+  const base = token ? `https://x-access-token:${token}@github.com/` : 'https://github.com/';
+  return `${base}${repo}.git`;
 }
 
 export async function bootstrapFromFile(path: string, deps?: BootstrapDeps): Promise<App> {

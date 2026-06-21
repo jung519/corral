@@ -566,6 +566,23 @@
         >
       </div>
       <p class="hint">{t('field.stackDesc')}</p>
+
+      <span class="lbl">{t('field.referenceRepo')}</span>
+      <label class="field"
+        ><span>{t('field.referenceRepo.repo')}</span>
+        <input bind:value={s.referenceRepo} placeholder="acme/conventions" /></label
+      >
+      {#if s.referenceRepo.trim()}
+        <label class="field"
+          ><span>{t('field.referenceRepo.token')}</span>
+          <input
+            type="password"
+            bind:value={s.referenceToken}
+            placeholder={!s.referenceToken && secretSaved('reference', 'default') ? t('field.secretSaved') : ''}
+          /></label
+        >
+      {/if}
+      <p class="hint">{t('field.referenceRepo.hint')}</p>
     {/if}
 
     {#if error}<p class="error">{error}</p>{/if}

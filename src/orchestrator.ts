@@ -45,6 +45,9 @@ import { PlanCritiqueOrchestrator } from './review/plan-critique.js';
 import { ReviewOrchestrator } from './review/orchestrator.js';
 import type { ReviewTarget } from './review/prompt.js';
 
+/** Read-only reference/conventions repo clone path (under the workspace root). */
+const REFERENCE_DIR = '.reference';
+
 export class Orchestrator {
   private readonly review: ReviewOrchestrator;
   private readonly planCritique: PlanCritiqueOrchestrator;
@@ -66,6 +69,8 @@ export class Orchestrator {
     private readonly agent: AgentAdapter,
     private readonly channel: ChannelAdapter,
     private readonly profile: ResolvedProfile,
+    /** Authenticated clone URL of the read-only reference/conventions repo (or undefined). */
+    private readonly referenceCloneUrl?: string,
   ) {
     this.review = new ReviewOrchestrator(workspace.io, agent, config.review, profile, config.agent.turn_timeout_ms);
     this.planCritique = new PlanCritiqueOrchestrator(
@@ -205,6 +210,7 @@ export class Orchestrator {
         identifier,
         repos: repos.map((r) => ({ key: r.key, cloneUrl: r.cloneUrl(), baseBranch: r.baseBranchFor(issue) })),
         image: repos.length === 1 ? repos[0]!.workerImage : undefined,
+        extraRepos: this.referenceCloneUrl ? [{ cloneUrl: this.referenceCloneUrl, path: REFERENCE_DIR }] : undefined,
       });
     } catch (err) {
       this.limiter.release(identifier);
@@ -316,10 +322,10 @@ export class Orchestrator {
 
   // ─────────────────────────────────────────────────── planning (Branch A)
 
-  /** Reference repo path inside the workspace for the agent to consult (none for now). */
+  /** Reference repo path inside the workspace for the agent to consult (undefined if
+   * no reference repo is configured). Cloned read-only into REFERENCE_DIR at create. */
   private referencePath(): string | undefined {
-    // TODO: clone profile.referenceRepo read-only and return its workspace path.
-    return undefined;
+    return this.referenceCloneUrl ? REFERENCE_DIR : undefined;
   }
 
   private async dispatchPlanning(rt: IssueRuntime, issue: Issue): Promise<void> {

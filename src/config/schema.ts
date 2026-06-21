@@ -23,8 +23,12 @@ export const ProfileSchema = z.object({
   language: z.string().default('en'),
   /** Calibration profile id for review examples/thresholds, e.g. "generic", "nestjs". */
   stack: z.string().default('generic'),
-  /** Optional conventions/skills repo cloned read-only alongside the work repo. */
+  /** Optional conventions/skills repo cloned read-only alongside the work repos.
+   *  "owner/name" (GitHub) or a full https git URL. The agent consults it for
+   *  conventions but never commits to it. */
   reference_repo: z.string().optional(),
+  /** Credential for a private reference repo (omit for a public one). */
+  reference_credential: CredentialRefSchema.optional(),
 });
 
 // ───────────────────────────────────────────────────────────── axis 1: tracker

@@ -10,7 +10,9 @@
 profile:
   language: en          # output language for agent-authored plans/reviews
   stack: generic        # review calibration profile
-  # reference_repo: acme/conventions
+  # Optional read-only conventions/skills repo cloned beside your repos (agent consults it).
+  # reference_repo: acme/conventions          # "owner/name" or a full https URL
+  # reference_credential: { service: reference, account: default }   # only if private → CORRAL_REFERENCE_DEFAULT
 
 tracker:
   kind: notion

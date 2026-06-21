@@ -7,7 +7,7 @@ import { access, mkdir, readdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { logger } from '../core/logger.js';
 import type { CreateWorkspaceInput, WorkspaceAdapter, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
-import { runOrThrow } from '../util/exec.js';
+import { run, runOrThrow } from '../util/exec.js';
 import { localIO } from './local-io.js';
 
 export class LocalWorkspace implements WorkspaceAdapter {
@@ -33,6 +33,14 @@ export class LocalWorkspace implements WorkspaceAdapter {
       const dest = join(workdir, repo.key);
       log.info(`cloning ${redact(repo.cloneUrl)} → ${dest}`);
       await runOrThrow('git', ['clone', '--branch', repo.baseBranch, repo.cloneUrl, dest]);
+    }
+
+    // Reference/conventions repos cloned read-only (shallow) alongside the work tree.
+    for (const extra of input.extraRepos ?? []) {
+      const dest = join(workdir, extra.path);
+      log.info(`cloning reference repo → ${dest}`);
+      const res = await run('git', ['clone', '--depth', '1', extra.cloneUrl, dest]);
+      if (res.code !== 0) log.warn(`reference clone failed (${extra.path})`, res.stderr.slice(-300));
     }
 
     return { id: input.identifier, workdir, backend: 'local' };
