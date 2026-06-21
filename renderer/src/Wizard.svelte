@@ -22,11 +22,16 @@
     type WizardState,
   } from './lib/wizard';
 
+  // Embedded mode: render a single section inline (e.g. inside the Settings tab) with
+  // no stepper/nav — just that section's form + Save/Cancel. onDone fires after a save.
+  let { embedded = false, section = '', onDone }: { embedded?: boolean; section?: string; onDone?: () => void } = $props();
+
   const stepKeys = ['step.ai', 'step.repo', 'step.tracker', 'step.workspace', 'step.channel'];
 
   // Deep-link: #/setup/<section> opens directly on that section (Settings "Edit").
   const SECTION_STEP: Record<string, number> = { ai: 0, repo: 1, tracker: 2, workspace: 3, channel: 4 };
   function initialStep(): number {
+    if (embedded && section in SECTION_STEP) return SECTION_STEP[section]!;
     const m = (typeof location !== 'undefined' ? location.hash : '').match(/^#\/setup\/(\w+)/);
     return (m && SECTION_STEP[m[1] ?? '']) ?? 0;
   }
@@ -113,9 +118,6 @@
     error = '';
     void persistStep();
     if (step > 0) step -= 1;
-  }
-  function valid(i: number): boolean {
-    return validateStep(i, s) === '';
   }
 
   type TestState = { ok: boolean; detail?: string } | 'pending' | undefined;
@@ -223,7 +225,8 @@
         // Write the config first so it always lands, even if a later step throws.
         await window.corral.config.write(buildConfigYaml(s));
         for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
-        await window.corral.startOrchestrator();
+        // First-run brings the orchestrator up; an inline edit just persists config.
+        if (!embedded) await window.corral.startOrchestrator();
       } else {
         const out = await api.setup({ config: buildConfigYaml(s), secrets: secretsFor(s) });
         if (!out.ok) {
@@ -232,11 +235,15 @@
           return;
         }
       }
-      // Keep the (non-secret) draft as the last-applied state so "Re-run setup"
-      // re-opens the wizard pre-filled instead of blank. Captures the final step too.
+      // Keep the (non-secret) draft as the last-applied state so re-opening pre-fills.
       await saveDraft(s);
-      location.hash = '#/settings';
-      location.reload();
+      if (embedded) {
+        saving = false;
+        onDone?.();
+      } else {
+        location.hash = '#/settings';
+        location.reload();
+      }
     } catch (err) {
       error = `Save failed: ${err instanceof Error ? err.message : String(err)}`;
       saving = false;
@@ -252,14 +259,15 @@
   {/if}
 {/snippet}
 
-<div class="wizard">
+<div class="wizard" class:embedded>
+  {#if !embedded}
   <aside>
     <p class="brand">{t('wizard.sidebar')}</p>
     <ol>
       {#each stepKeys as key, i}
         <li>
-          <button class="step" class:active={i === step} class:done={valid(i)} onclick={() => goTo(i)}>
-            <span class="ico">{valid(i) ? '✓' : '▢'}</span>{t(key)}
+          <button class="step" class:active={i === step} onclick={() => goTo(i)}>
+            <span class="ico">{i + 1}</span>{t(key)}
           </button>
         </li>
       {/each}
@@ -273,9 +281,10 @@
       <button class:on={currentLang() === 'ko'} onclick={() => setLang('ko')}>한국어</button>
     </div>
   </aside>
+  {/if}
 
   <section>
-    <button class="close" onclick={() => (location.hash = '#/settings')}>✕ {t('wizard.exit')}</button>
+    {#if !embedded}<button class="close" onclick={() => (location.hash = '#/settings')}>✕ {t('wizard.exit')}</button>{/if}
     {#if step === 0}
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
@@ -620,11 +629,16 @@
     {#if !hasBridge}<p class="preview">{t('wizard.browserPreview')}</p>{/if}
 
     <footer>
-      <button onclick={back} disabled={step === 0}>{t('wizard.back')}</button>
-      {#if step < stepKeys.length - 1}
-        <button class="primary" onclick={next}>{t('wizard.next')} · {t(stepKeys[step + 1])}</button>
+      {#if embedded}
+        <button onclick={() => onDone?.()}>{t('settings.cancel')}</button>
+        <button class="primary" onclick={finish} disabled={saving}>{saving ? t('wizard.saving') : t('settings.save')}</button>
       {:else}
-        <button class="primary" onclick={finish} disabled={saving}>{saving ? t('wizard.saving') : t('wizard.finish')}</button>
+        <button onclick={back} disabled={step === 0}>{t('wizard.back')}</button>
+        {#if step < stepKeys.length - 1}
+          <button class="primary" onclick={next}>{t('wizard.next')} · {t(stepKeys[step + 1])}</button>
+        {:else}
+          <button class="primary" onclick={finish} disabled={saving}>{saving ? t('wizard.saving') : t('wizard.finish')}</button>
+        {/if}
       {/if}
     </footer>
   </section>
@@ -635,6 +649,14 @@
     display: grid;
     grid-template-columns: 240px 1fr;
     min-height: 100vh;
+  }
+  .wizard.embedded {
+    grid-template-columns: 1fr;
+    min-height: auto;
+  }
+  .wizard.embedded section {
+    padding: 4px 0 0;
+    max-width: none;
   }
   aside {
     background: var(--surface);
@@ -677,9 +699,6 @@
   .step .ico {
     font-size: 13px;
     opacity: 0.8;
-  }
-  .step.done {
-    color: var(--green);
   }
   .step.active {
     background: var(--accent);

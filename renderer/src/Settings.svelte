@@ -2,49 +2,20 @@
   import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
-  import {
-    buildConfigYaml,
-    CORE_STATE_KEYS,
-    loadDraft,
-    OPTIONAL_STATE_KEYS,
-    saveDraft,
-    secretRefs,
-    secretsFor,
-    serviceFor,
-    type WizardState,
-  } from './lib/wizard';
+  import Wizard from './Wizard.svelte';
+  import { CORE_STATE_KEYS, loadDraft, OPTIONAL_STATE_KEYS, secretRefs, serviceFor, type WizardState } from './lib/wizard';
 
   let configured = $state<boolean | undefined>(undefined);
   let s = $state<WizardState | null>(null);
   let savedSecrets = $state(new Set<string>());
-  // Which section (if any) is being edited inline. Secret-free sections only;
-  // AI/repo/tracker deep-link to the editor instead.
   let editing = $state<string | null>(null);
-  let saving = $state(false);
-
-  async function save() {
-    if (!s || !window.corral) return;
-    saving = true;
-    try {
-      await window.corral.config.write(buildConfigYaml(s));
-      for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
-      await saveDraft(s);
-      editing = null;
-    } finally {
-      saving = false;
-    }
-  }
 
   const isSaved = (service: string, account: string) => savedSecrets.has(`${service}:${account}`);
   const secret = (service: string, account: string) =>
     isSaved(service, account) ? `●●●● ${t('settings.saved')}` : t('settings.notSet');
   const langLabel = (c: string) => (c === 'ko' ? '한국어' : c === 'en' ? 'English' : c);
 
-  onMount(async () => {
-    void api
-      .getStatus()
-      .then((r) => (configured = r.configured))
-      .catch(() => (configured = undefined));
+  async function refresh() {
     const draft = await loadDraft();
     s = draft;
     if (draft && window.corral) {
@@ -54,6 +25,19 @@
       }
       savedSecrets = found;
     }
+  }
+
+  function onDone() {
+    editing = null;
+    void refresh();
+  }
+
+  onMount(() => {
+    void api
+      .getStatus()
+      .then((r) => (configured = r.configured))
+      .catch(() => (configured = undefined));
+    void refresh();
   });
 </script>
 
@@ -61,26 +45,15 @@
   <div class="row"><span class="k">{label}</span><span class="v">{value}</span></div>
 {/snippet}
 
-{#snippet head(title: string, section: string, inline = false)}
+{#snippet head(title: string, section: string)}
   <div class="hdr">
     <h2>{title}</h2>
-    {#if editing === section}
-      <span class="editing">
-        <button class="primary" onclick={save} disabled={saving}>{saving ? t('wizard.saving') : t('settings.save')}</button>
-        <button onclick={() => location.reload()}>{t('settings.cancel')}</button>
-      </span>
-    {:else}
-      <button class="edit" onclick={() => (inline ? (editing = section) : (location.hash = `#/setup/${section}`))}>
-        {t('settings.edit')}
-      </button>
-    {/if}
+    {#if editing !== section}<button class="edit" onclick={() => (editing = section)}>{t('settings.edit')}</button>{/if}
   </div>
 {/snippet}
 
 <div class="view">
-  <div class="top">
-    <h1>{t('settings.title')}</h1>
-  </div>
+  <h1>{t('settings.title')}</h1>
 
   {#if configured === false}
     <div class="card">
@@ -92,62 +65,65 @@
 
     <div class="card">
       {@render head(t('step.ai'), 'ai')}
-      {@render row(t('repo.provider'), s.provider)}
-      {@render row('Transport', s.transport)}
-      {@render row(t('field.language'), langLabel(s.language))}
-      {@render row(t('agent.modelsLabel'), `${s.planningModel} · ${s.implementationModel} · ${s.reviewModel}`)}
-      {@render row(t('field.apiKey'), secret(serviceFor(s.provider), 'default'))}
+      {#if editing === 'ai'}
+        <Wizard embedded section="ai" {onDone} />
+      {:else}
+        {@render row(t('repo.provider'), s.provider)}
+        {@render row('Transport', s.transport)}
+        {@render row(t('field.language'), langLabel(s.language))}
+        {@render row(t('agent.modelsLabel'), `${s.planningModel} · ${s.implementationModel} · ${s.reviewModel}`)}
+        {@render row(t('field.apiKey'), secret(serviceFor(s.provider), 'default'))}
+      {/if}
     </div>
 
     <div class="card">
       {@render head(t('step.repo'), 'repo')}
-      {#each s.repos as r}
-        {@render row(r.key || '—', `${r.provider} · ${r.repo}  (${r.production}/${r.development})`)}
-        {#if r.description.trim()}{@render row(`  ${t('field.repoDesc')}`, r.description)}{/if}
-        {@render row(`  ${t('field.repoToken')}`, secret(r.provider, r.key))}
-      {/each}
-      {@render row(t('field.referenceRepo'), s.referenceRepo.trim() || t('settings.none'))}
-      {#if s.referenceRepo.trim()}{@render row(`  ${t('field.referenceRepo.token')}`, secret('reference', 'default'))}{/if}
+      {#if editing === 'repo'}
+        <Wizard embedded section="repo" {onDone} />
+      {:else}
+        {#each s.repos as r}
+          {@render row(r.key || '—', `${r.provider} · ${r.repo}  (${r.production}/${r.development})`)}
+          {#if r.description.trim()}{@render row(`  ${t('field.repoDesc')}`, r.description)}{/if}
+          {@render row(`  ${t('field.repoToken')}`, secret(r.provider, r.key))}
+        {/each}
+        {@render row(t('field.referenceRepo'), s.referenceRepo.trim() || t('settings.none'))}
+        {#if s.referenceRepo.trim()}{@render row(`  ${t('field.referenceRepo.token')}`, secret('reference', 'default'))}{/if}
+      {/if}
     </div>
 
     <div class="card">
       {@render head(t('step.tracker'), 'tracker')}
-      {@render row(t('tracker.label'), s.trackerKind)}
-      {#if s.trackerKind === 'notion'}
-        {@render row(t('field.notionDb'), s.notionDb || '—')}
-        {@render row(t('field.statusProp'), s.statusProp || '—')}
-        {@render row(t('field.notionToken'), secret('notion', 'default'))}
-      {:else if s.trackerKind === 'github_issues'}
-        {@render row(t('field.issuesRepo'), s.issuesRepo || s.repos.find((r) => r.provider === 'github')?.repo || '—')}
-        {@render row(t('field.scopeLabel'), s.scopeLabel || '—')}
+      {#if editing === 'tracker'}
+        <Wizard embedded section="tracker" {onDone} />
       {:else}
-        {@render row(t('field.jiraHost'), s.jiraHost || '—')}
-        {@render row(t('field.jiraProject'), s.jiraProject || '—')}
-        {@render row(t('field.jiraEmail'), s.jiraEmail || '—')}
-        {@render row(t('field.jiraToken'), secret('jira', 'default'))}
+        {@render row(t('tracker.label'), s.trackerKind)}
+        {#if s.trackerKind === 'notion'}
+          {@render row(t('field.notionDb'), s.notionDb || '—')}
+          {@render row(t('field.statusProp'), s.statusProp || '—')}
+          {@render row(t('field.notionToken'), secret('notion', 'default'))}
+        {:else if s.trackerKind === 'github_issues'}
+          {@render row(t('field.issuesRepo'), s.issuesRepo || s.repos.find((r) => r.provider === 'github')?.repo || '—')}
+          {@render row(t('field.scopeLabel'), s.scopeLabel || '—')}
+        {:else}
+          {@render row(t('field.jiraHost'), s.jiraHost || '—')}
+          {@render row(t('field.jiraProject'), s.jiraProject || '—')}
+          {@render row(t('field.jiraEmail'), s.jiraEmail || '—')}
+          {@render row(t('field.jiraToken'), secret('jira', 'default'))}
+        {/if}
+        {@render row(
+          t('states.notion'),
+          [...CORE_STATE_KEYS, ...(s.detailedStates ? OPTIONAL_STATE_KEYS : [])]
+            .map((k) => s!.states[k])
+            .filter(Boolean)
+            .join(' / '),
+        )}
       {/if}
-      {@render row(
-        t('states.notion'),
-        [...CORE_STATE_KEYS, ...(s.detailedStates ? OPTIONAL_STATE_KEYS : [])]
-          .map((k) => s!.states[k])
-          .filter(Boolean)
-          .join(' / '),
-      )}
     </div>
 
     <div class="card">
-      {@render head(t('step.workspace'), 'workspace', true)}
+      {@render head(t('step.workspace'), 'workspace')}
       {#if editing === 'workspace'}
-        <label class="erow"
-          ><span>{t('workspace.backend')}</span>
-          <select bind:value={s.backend}>
-            <option value="local">{t('workspace.local')}</option>
-            <option value="docker">{t('workspace.docker')}</option>
-          </select></label
-        >
-        {#if s.backend === 'docker'}
-          <label class="erow check"><input type="checkbox" bind:checked={s.dockerMountLogin} /><span>{t('workspace.mountLogin')}</span></label>
-        {/if}
+        <Wizard embedded section="workspace" {onDone} />
       {:else}
         {@render row(t('workspace.backend'), s.backend === 'docker' ? t('workspace.docker') : t('workspace.local'))}
         {#if s.backend === 'docker'}{@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}{/if}
@@ -155,20 +131,9 @@
     </div>
 
     <div class="card">
-      {@render head(t('step.channel'), 'channel', true)}
+      {@render head(t('step.channel'), 'channel')}
       {#if editing === 'channel'}
-        <label class="erow"
-          ><span>{t('field.maxActive')}</span>
-          <select bind:value={s.maxActive}>{#each [1, 2, 3, 4, 5, 6, 8, 10] as n}<option value={n}>{n}</option>{/each}</select></label
-        >
-        <label class="erow"
-          ><span>{t('field.language')}</span>
-          <select bind:value={s.language}><option value="en">English</option><option value="ko">한국어</option></select></label
-        >
-        <label class="erow"
-          ><span>{t('field.stack')}</span>
-          <select bind:value={s.stack}><option value="generic">generic</option><option value="nestjs">nestjs</option><option value="flutter">flutter</option></select></label
-        >
+        <Wizard embedded section="channel" {onDone} />
       {:else}
         {@render row(t('field.maxActive'), String(s.maxActive))}
         {@render row(t('field.language'), langLabel(s.language))}
@@ -192,17 +157,11 @@
 <style>
   .view {
     padding: 24px 28px;
-    max-width: 760px;
-  }
-  .top {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 6px;
+    max-width: 820px;
   }
   h1 {
     font-size: 18px;
-    margin: 0;
+    margin: 0 0 6px;
   }
   h2 {
     font-size: 14px;
@@ -218,31 +177,6 @@
   .edit {
     font-size: 12px;
     padding: 3px 10px;
-  }
-  .editing {
-    display: flex;
-    gap: 6px;
-  }
-  .editing button {
-    font-size: 12px;
-    padding: 3px 10px;
-  }
-  .erow {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 6px 0;
-  }
-  .erow > span {
-    color: var(--text-dim);
-    font-size: 13px;
-    min-width: 200px;
-  }
-  .erow.check {
-    cursor: pointer;
-  }
-  .erow.check input {
-    width: auto;
   }
   .hint {
     color: var(--text-dim);
