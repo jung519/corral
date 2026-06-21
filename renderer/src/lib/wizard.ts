@@ -157,6 +157,8 @@ export function validateStep(step: number, s: WizardState): string {
       const keys = new Set<string>();
       for (const r of s.repos) {
         if (!r.key.trim()) return vt('validate.repoKeyNeeded');
+        // Used as a clone dir + shell arg + env account → keep it a safe slug.
+        if (!/^[A-Za-z0-9._-]+$/.test(r.key)) return vt('validate.repoKeyFormat', { key: r.key });
         if (keys.has(r.key)) return vt('validate.repoKeyDup', { key: r.key });
         keys.add(r.key);
         if (!OWNER_NAME.test(r.repo)) return vt('validate.repoOwnerName', { key: r.key });

@@ -234,7 +234,7 @@ export class Orchestrator {
     // on the agent to record it.
     const baseCommits: Record<string, string> = {};
     for (const r of repos) {
-      const res = await this.workspace.io.exec(handle, `git -C ${r.key} rev-parse HEAD`);
+      const res = await this.workspace.io.exec(handle, `git -C ${shq(r.key)} rev-parse HEAD`);
       if (res.code === 0) baseCommits[r.key] = res.stdout.trim();
     }
 
@@ -254,7 +254,7 @@ export class Orchestrator {
     for (const r of repos) {
       if (!r.afterClone) continue;
       bus.emitEvent({ identifier, kind: 'notice', label: `📦 Installing dependencies (${r.key}) — ${r.afterClone}` });
-      const res = await this.workspace.io.exec(handle, `cd ${r.key} && ${r.afterClone}`);
+      const res = await this.workspace.io.exec(handle, `cd ${shq(r.key)} && ${r.afterClone}`);
       if (res.code !== 0) {
         bus.emitEvent({
           identifier,
@@ -319,7 +319,7 @@ export class Orchestrator {
 
         const baseCommits: Record<string, string> = {};
         for (const r of repos) {
-          const res = await this.workspace.io.exec(handle, `git -C ${r.key} rev-parse HEAD`);
+          const res = await this.workspace.io.exec(handle, `git -C ${shq(r.key)} rev-parse HEAD`);
           if (res.code === 0) baseCommits[r.key] = res.stdout.trim();
         }
         rt.baseCommits = baseCommits;
@@ -784,12 +784,14 @@ export class Orchestrator {
 
     const changed = await this.changedRepoKeys(handle, rt);
     if (changed.length === 0) {
-      log.error('workspace diff is empty after implementation — no changes committed in any repo');
-      await this.channel.notify(
-        rt.identifier,
-        '❌ No changes in any repo. The agent did not commit (check repo config/isolation). Aborting.',
+      log.error('no committed diff in any repo after implementation');
+      // Retryable: the agent may not have committed yet, or a transient git issue.
+      // Retry resumes implementation and re-checks — the existing commit is reused.
+      await this.surfaceStuck(
+        rt,
+        'No committed changes detected in any repo. The agent may not have committed — press Retry to re-check / resume.',
+        true,
       );
-      bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: '❌ No changes — aborted (empty workspace diff)' });
       return;
     }
     bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `🗂 Changed repos: ${changed.join(', ')}` });
@@ -853,7 +855,7 @@ export class Orchestrator {
         else if ((l[0] === '+' && !l.startsWith('+++')) || (l[0] === '-' && !l.startsWith('---'))) diffStats.lines++;
       }
       const verifyCommands = changed.flatMap((k) =>
-        (this.router.byKey(k)?.verifyCommands ?? []).map((c) => `cd ${k} && ${c}`),
+        (this.router.byKey(k)?.verifyCommands ?? []).map((c) => `cd ${shq(k)} && ${c}`),
       );
       await this.review.run(
         handle,
@@ -956,7 +958,7 @@ export class Orchestrator {
       const branch = repo.branchNameFor(issue);
       const base = repo.baseBranchFor(issue);
       bus.emitEvent({ identifier: rt.identifier, kind: 'activity', label: `🔧 git -C ${key} push origin ${branch}` });
-      const push = await this.workspace.io.exec(handle, `git -C ${key} push -u origin ${branch} 2>&1`);
+      const push = await this.workspace.io.exec(handle, `git -C ${shq(key)} push -u origin ${branch} 2>&1`);
       if (push.code !== 0) {
         log.error(`git push failed (${key})`, push.stdout || push.stderr);
         await this.channel.notify(rt.identifier, `❌ Branch push failed (${key}): ${(push.stdout || push.stderr).slice(-300)}`);
@@ -1158,4 +1160,10 @@ export class Orchestrator {
 function oneLineErr(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/** Single-quote a string for safe interpolation into a shell command (repo keys can
+ * contain spaces/special chars). */
+function shq(s: string): string {
+  return `'${s.replace(/'/g, `'\\''`)}'`;
 }
