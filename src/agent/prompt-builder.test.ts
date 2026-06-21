@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Issue } from '../core/types.js';
 import { createTranslator } from '../profile/i18n.js';
-import { buildSignals, kickoffPrompt, turnPrompt } from './prompt-builder.js';
+import { buildSignals, kickoffPrompt, renderWorkflow, turnPrompt } from './prompt-builder.js';
 
 const issue: Issue = {
   identifier: 'ISS-9',
@@ -24,6 +24,15 @@ describe('prompt-builder', () => {
 
   it('turnPrompt passes the message through', () => {
     expect(turnPrompt('go ahead')).toBe('go ahead');
+  });
+
+  it('renders the mandatory skills section only when a reference path is set', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const withRef = await renderWorkflow({ issue, tracker_kind: 'notion', repos, reference_path: '.reference' }, 'WORKFLOW.md');
+    expect(withRef).toContain('Skills / conventions (REQUIRED)');
+    expect(withRef).toContain('.reference');
+    const without = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(without).not.toContain('Skills / conventions (REQUIRED)');
   });
 
   it('renders signals in the configured language', () => {

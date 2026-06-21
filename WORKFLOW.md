@@ -15,7 +15,20 @@ none it does not.
 {% for r in repos %}- `{{ r.dir }}/` — {{ r.description | default: "(no description)" }}
   · work branch `{{ r.branch }}` off `{{ r.base_branch }}`
 {% endfor %}
-{% if reference_path %}Consult the conventions in the reference repo at `{{ reference_path }}`.{% endif %}
+{% if reference_path %}
+## Skills / conventions (REQUIRED)
+
+A read-only **skills/conventions repo** is cloned at `{{ reference_path }}`. Before you
+read, modify, or create any code — at BOTH planning and implementation time — you **must**
+consult it and follow its rules:
+1. Explore its layout first (`{{ reference_path }}/README*` and its top-level directories)
+   to learn what conventions, design system, and project context it documents.
+2. Apply the relevant rules to your plan and your code. Treat a documented convention as
+   binding, not advisory.
+3. If your change touches an area the skills repo covers (e.g. UI, API shape, naming) and
+   you deviate, justify it explicitly in the plan/PR — otherwise comply.
+This repo is read-only: never edit or commit inside `{{ reference_path }}`.
+{% endif %}
 
 ## Issue
 
@@ -29,7 +42,8 @@ none it does not.
 
 ### A — Planning (fresh session, no prior memory)
 1. Inspect the ACTUAL repositories (the subdirectories above) to ground your plan in
-   reality, and identify which repo(s) the work belongs to.
+   reality, and identify which repo(s) the work belongs to.{% if reference_path %} First review
+   the skills/conventions repo at `{{ reference_path }}` so the plan follows its rules.{% endif %}
 2. Write a plan to `.corral/pending_plan.md` (Markdown): which repo(s) you will change and
    why, the approach, the files you will change (prefix each with its repo dir, e.g.
    `server/src/...`), edge cases, and **testable acceptance criteria**.
@@ -48,7 +62,9 @@ critique was addressed). Do not modify code.
 The prompt starts with a feedback marker. Revise `.corral/pending_plan.md` accordingly and stop.
 
 ### C — Implementation (after plan approval)
-For EACH repo you need to change:
+{% if reference_path %}Before writing any code, (re)check the skills/conventions repo at
+`{{ reference_path }}` and follow its rules as you implement.
+{% endif %}For EACH repo you need to change:
 1. `cd` into its subdirectory and create/switch to that repo's work branch (listed above)
    off its base branch.
 2. Implement the approved plan and commit your changes there (do not push).

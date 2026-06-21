@@ -575,7 +575,7 @@
       <span class="lbl">{t('field.referenceRepo')}</span>
       <label class="field"
         ><span>{t('field.referenceRepo.repo')}</span>
-        <input bind:value={s.referenceRepo} placeholder="acme/conventions" /></label
+        <input bind:value={s.referenceRepo} placeholder="acme/skills" /></label
       >
       {#if s.referenceRepo.trim()}
         <label class="field"
