@@ -34,10 +34,16 @@
   <div class="row"><span class="k">{label}</span><span class="v">{value}</span></div>
 {/snippet}
 
+{#snippet head(title: string, section: string)}
+  <div class="hdr">
+    <h2>{title}</h2>
+    <button class="edit" onclick={() => (location.hash = `#/setup/${section}`)}>{t('settings.edit')}</button>
+  </div>
+{/snippet}
+
 <div class="view">
   <div class="top">
     <h1>{t('settings.title')}</h1>
-    {#if configured}<button class="primary" onclick={() => (location.hash = '#/setup')}>{t('settings.edit')}</button>{/if}
   </div>
 
   {#if configured === false}
@@ -49,7 +55,7 @@
     <p class="hint">{t('settings.summaryHint')}</p>
 
     <div class="card">
-      <h2>{t('step.ai')}</h2>
+      {@render head(t('step.ai'), 'ai')}
       {@render row(t('repo.provider'), s.provider)}
       {@render row('Transport', s.transport)}
       {@render row(t('field.language'), langLabel(s.language))}
@@ -58,7 +64,7 @@
     </div>
 
     <div class="card">
-      <h2>{t('step.repo')}</h2>
+      {@render head(t('step.repo'), 'repo')}
       {#each s.repos as r}
         {@render row(r.key || '—', `${r.provider} · ${r.repo}  (${r.production}/${r.development})`)}
         {#if r.description.trim()}{@render row(`  ${t('field.repoDesc')}`, r.description)}{/if}
@@ -69,7 +75,7 @@
     </div>
 
     <div class="card">
-      <h2>{t('step.tracker')}</h2>
+      {@render head(t('step.tracker'), 'tracker')}
       {@render row(t('tracker.label'), s.trackerKind)}
       {#if s.trackerKind === 'notion'}
         {@render row(t('field.notionDb'), s.notionDb || '—')}
@@ -94,13 +100,13 @@
     </div>
 
     <div class="card">
-      <h2>{t('step.workspace')}</h2>
+      {@render head(t('step.workspace'), 'workspace')}
       {@render row(t('workspace.backend'), s.backend === 'docker' ? t('workspace.docker') : t('workspace.local'))}
       {#if s.backend === 'docker'}{@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}{/if}
     </div>
 
     <div class="card">
-      <h2>{t('step.channel')}</h2>
+      {@render head(t('step.channel'), 'channel')}
       {@render row(t('field.maxActive'), String(s.maxActive))}
       {@render row(t('field.stack'), s.stack)}
     </div>
@@ -135,8 +141,18 @@
   }
   h2 {
     font-size: 14px;
-    margin: 0 0 10px;
+    margin: 0;
     color: var(--text);
+  }
+  .hdr {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .edit {
+    font-size: 12px;
+    padding: 3px 10px;
   }
   .hint {
     color: var(--text-dim);

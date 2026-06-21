@@ -8,7 +8,7 @@ type Dict = Record<string, string>;
 
 const en: Dict = {
   'app.title': 'Corral — Setup',
-  'wizard.sidebar': 'Setup',
+  'wizard.sidebar': 'Edit settings',
   'wizard.back': 'Back',
   'wizard.next': 'Save & next',
   'wizard.finish': 'Finish & start',
@@ -183,7 +183,7 @@ const en: Dict = {
 
 const ko: Dict = {
   'app.title': 'Corral — 초기 설정',
-  'wizard.sidebar': '설정 마법사',
+  'wizard.sidebar': '설정 편집',
   'wizard.back': '이전',
   'wizard.next': '저장 후 다음',
   'wizard.finish': '완료 · 시작',

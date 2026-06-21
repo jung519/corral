@@ -24,6 +24,13 @@
 
   const stepKeys = ['step.ai', 'step.repo', 'step.tracker', 'step.workspace', 'step.channel'];
 
+  // Deep-link: #/setup/<section> opens directly on that section (Settings "Edit").
+  const SECTION_STEP: Record<string, number> = { ai: 0, repo: 1, tracker: 2, workspace: 3, channel: 4 };
+  function initialStep(): number {
+    const m = (typeof location !== 'undefined' ? location.hash : '').match(/^#\/setup\/(\w+)/);
+    return (m && SECTION_STEP[m[1] ?? '']) ?? 0;
+  }
+
   // Only claude is implemented; gemini/gpt are gated until their adapters land so the
   // wizard can never produce a config that fails to boot.
   const providers: Array<{ id: WizardState['provider']; name: string; icon: string; soon?: boolean }> = [
@@ -33,7 +40,7 @@
   ];
 
   let s: WizardState = $state(initialState());
-  let step = $state(0);
+  let step = $state(initialStep());
   let error = $state('');
   let saving = $state(false);
 
@@ -228,7 +235,7 @@
       // Keep the (non-secret) draft as the last-applied state so "Re-run setup"
       // re-opens the wizard pre-filled instead of blank. Captures the final step too.
       await saveDraft(s);
-      location.hash = '#/';
+      location.hash = '#/settings';
       location.reload();
     } catch (err) {
       error = `Save failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -268,7 +275,7 @@
   </aside>
 
   <section>
-    <button class="close" onclick={() => (location.hash = '#/')}>✕ {t('wizard.exit')}</button>
+    <button class="close" onclick={() => (location.hash = '#/settings')}>✕ {t('wizard.exit')}</button>
     {#if step === 0}
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
