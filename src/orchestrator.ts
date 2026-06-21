@@ -583,14 +583,13 @@ export class Orchestrator {
       const result = await this.dispatch(rt, issue, signal, true, 'planning');
       if (result.ok) await this.resendApproval(rt, issue, rt.phase === 'plan_sent' ? 'plan' : 'pr_plan', SCRATCH.pendingPlan);
     } else if (rt.phase === 'review_sent') {
-      const result = await this.dispatch(rt, issue, signal, true, 'planning');
+      // Manual review flow: the human's text drives the next step. The agent applies the
+      // instruction — editing + committing code if asked — then we re-review ONCE and
+      // present again (clean → PR, findings → card). No automatic fix→re-review loop.
+      this.clearApproval(rt);
+      const result = await this.dispatch(rt, issue, signal, true, 'implementation');
       if (!result.ok) return;
-      const handle = this.handles.get(identifier)!;
-      if (await this.readOutput(handle, SCRATCH.pendingPlan)) {
-        await this.afterPlanProduced(rt, issue, 'fix_plan');
-      } else {
-        await this.resendApproval(rt, issue, 'review', SCRATCH.pendingReview);
-      }
+      await this.presentReview(rt, issue);
     } else {
       logger.child(rt.identifier).warn(`feedback ignored in phase ${rt.phase}`);
     }
@@ -630,7 +629,7 @@ export class Orchestrator {
     await this.reviewAfterImplement(rt, issue);
   }
 
-  /** Post-implementation tail: question → diff guard → self-review loop → PR / review card. */
+  /** Post-implementation tail: question → diff guard → present the self-review. */
   private async reviewAfterImplement(rt: IssueRuntime, issue: Issue): Promise<void> {
     const log = logger.child(rt.identifier);
     const handle = this.handles.get(rt.identifier)!;
@@ -649,6 +648,19 @@ export class Orchestrator {
     }
     bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `🗂 Changed repos: ${changed.join(', ')}` });
 
+    await this.presentReview(rt, issue);
+  }
+
+  /**
+   * Run the self-review once over the changed repos and route the result:
+   *   - clean (no BLOCKER/SUGGESTION) + auto_pr_when_clean → open the PR automatically
+   *   - findings remain → present to the human (review_sent); NO auto-fix (manual mode)
+   * Shared by the initial post-implementation review and post-feedback re-reviews.
+   * (With review.max_fix_rounds > 0, selfReviewLoop still auto-fixes internally.)
+   */
+  private async presentReview(rt: IssueRuntime, issue: Issue): Promise<void> {
+    const log = logger.child(rt.identifier);
+    const handle = this.handles.get(rt.identifier)!;
     const review = await this.selfReviewLoop(rt, issue, handle);
     if (!review) {
       log.warn('self-review produced no review');
@@ -666,7 +678,12 @@ export class Orchestrator {
     rt.approvalId = approvalId;
     rt.phase = 'review_sent';
     this.store.upsert(rt);
-    bus.emitEvent({ identifier: rt.identifier, kind: 'approval', phase: 'review_sent', label: '🔔 Action needed — review (fixes auto-applied)' });
+    bus.emitEvent({
+      identifier: rt.identifier,
+      kind: 'approval',
+      phase: 'review_sent',
+      label: '🔔 Action needed — review (✅ approve = PR / text = edit + re-review)',
+    });
   }
 
   /** Self-review with an auto-fix loop. Returns the final review (fixes applied), or null. */
@@ -754,20 +771,17 @@ export class Orchestrator {
     const result = await this.dispatch(rt, issue, this.signals.approve, true, 'implementation');
     if (!result.ok) return;
 
+    // Manual flow: approval always opens the PR with the current code — no fix plan.
     const meta = await this.readJson(handle, SCRATCH.prMeta);
     if (meta && typeof meta.title === 'string') {
       await this.pushAndCreatePr(rt, issue, meta);
       return;
     }
-    const plan = await this.readOutput(handle, SCRATCH.pendingPlan);
-    if (plan) {
-      await this.afterPlanProduced(rt, issue, 'fix_plan');
-    } else {
-      await this.surfaceStuck(
-        rt,
-        'After review approval, neither a fix plan (.corral/pending_plan.md) nor PR metadata was produced. If there were BLOCKERs a fix plan should appear — check the agent output and retry.',
-      );
-    }
+    await this.surfaceStuck(
+      rt,
+      'After review approval, no PR metadata (.corral/pr_meta.json) was produced. Approval always opens a PR — check the agent output and retry.',
+      true,
+    );
   }
 
   private async implementFix(rt: IssueRuntime, issue: Issue): Promise<void> {

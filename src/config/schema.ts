@@ -242,35 +242,19 @@ const SemgrepSchema = z
   })
   .optional();
 
-const AdaptiveSchema = z
-  .object({
-    enabled: z.boolean().default(false),
-    heavy: z
-      .object({
-        min_diff_lines: z.number().int().positive().default(300),
-        labels: z.array(z.string()).default([]),
-        rounds: z.number().int().positive().default(3),
-      })
-      .default({}),
-    light: z
-      .object({
-        max_diff_lines: z.number().int().positive().default(50),
-        max_files: z.number().int().positive().default(3),
-        rounds: z.number().int().positive().default(1),
-      })
-      .default({}),
-  })
-  .default({});
-
 export const ReviewSchema = z
   .object({
-    /** Independent review rounds (fresh sessions) per cycle. */
+    /** Fixed number of independent review rounds (fresh sessions) for EVERY issue.
+     *  No adaptive depth — diff line count measures size, not risk, so it's not used
+     *  to scale rounds. The static gate (lint/typecheck) always runs once on top. */
     rounds: z.number().int().positive().default(1),
-    /** Max auto-fix → re-review cycles before handing to a human. */
-    max_fix_rounds: z.number().int().nonnegative().default(2),
+    /** Auto-fix loop: max review→fix→re-review cycles before handing to a human.
+     *  Default 0 = fully manual: review runs ONCE, then the human decides (approve = PR,
+     *  or text feedback = edit code + re-review once). Set >0 to re-enable auto-fixing.
+     *  The cost driver was "Opus output × automatic re-review" — keep depth, cut count. */
+    max_fix_rounds: z.number().int().nonnegative().default(0),
     /** Open the PR automatically when self-review is clean (no blocker/suggestion). */
     auto_pr_when_clean: z.boolean().default(false),
-    adaptive: AdaptiveSchema,
     /** Optional semgrep static analysis (omit to skip). */
     semgrep: SemgrepSchema,
   })

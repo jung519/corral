@@ -49,15 +49,16 @@ export class ReviewOrchestrator {
   ): Promise<ReviewResult> {
     const log = logger.child(issue.identifier);
 
-    // Clear the previous cycle's round/semgrep files so an adaptive re-review with
-    // FEWER rounds can't leave a stale higher-numbered round to be folded in.
+    // Clear the previous cycle's round/semgrep files so a re-review can't leave a
+    // stale higher-numbered round file behind to be folded into the consolidation.
     await this.io.exec(handle, `rm -f ${SCRATCH_DIR}/review_round_*.md ${SCRATCH.semgrep}`);
 
     // Static gate first so every parallel round can read its deterministic facts.
     const staticQa = await runStaticQa(this.io, handle, verifyCommands);
 
-    const rounds = this.resolveRounds(issue.labels, diffStats);
-    log.info(`review rounds = ${rounds}`);
+    // Fixed review depth: the same number of independent rounds for every issue.
+    const rounds = this.cfg.rounds;
+    log.info(`review rounds = ${rounds}${diffStats ? ` (diff: ${diffStats.lines} lines / ${diffStats.files} files)` : ''}`);
 
     const tasks: Array<Promise<string | null>> = [];
     for (let r = 1; r <= rounds; r++) {
@@ -72,19 +73,6 @@ export class ReviewOrchestrator {
     const roundFiles = roundResults.filter((f): f is string => f !== null);
     log.info(`review complete: ${roundFiles.length} round file(s), semgrep=${semgrepRan}, static_qa=${staticQa.ran}`);
     return { roundFiles, semgrepRan, staticQaRan: staticQa.ran, staticQaFailed: staticQa.anyFailed };
-  }
-
-  /** Adaptive depth: heavy (large diff / complex label) → more rounds; light → fewer. */
-  private resolveRounds(labels: string[], diffStats?: { lines: number; files: number }): number {
-    const a = this.cfg.adaptive;
-    if (!a.enabled || !diffStats) return this.cfg.rounds;
-    if (diffStats.lines >= a.heavy.min_diff_lines || labels.some((l) => a.heavy.labels.includes(l))) {
-      return a.heavy.rounds;
-    }
-    if (diffStats.lines <= a.light.max_diff_lines && diffStats.files <= a.light.max_files) {
-      return a.light.rounds;
-    }
-    return this.cfg.rounds;
   }
 
   private async runRound(

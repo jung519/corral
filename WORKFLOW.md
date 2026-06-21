@@ -64,17 +64,29 @@ and write the unresolved counts as JSON to `.corral/review_status.json`:
 `{"blocker": N, "suggestion": N, "nit": N}`.
 
 ### Apply review fixes
-Apply the BLOCKER and SUGGESTION fixes from `.corral/pending_review.md`, commit (in the
-relevant repo subdir), and stop. (NITs are advisory — do not block on them.)
+(Only when the orchestrator explicitly asks — auto-fix is off by default.) Apply the BLOCKER
+and SUGGESTION fixes from `.corral/pending_review.md`, commit (in the relevant repo subdir),
+and stop. (NITs are advisory — do not block on them.)
 
-### F — Review approved
-- If unresolved BLOCKERs remain, write a fix plan to `.corral/pending_plan.md` and stop.
-- Otherwise write PR metadata as JSON to `.corral/pr_meta.json`: `{"title": "…", "body": "…"}`.
-  The orchestrator opens one PR per changed repo using this title/body. Do NOT push or open
-  PRs yourself.
+### E — Review feedback (the prompt starts with a feedback marker while a review is pending)
+This is the human's instruction after reading the review. Usually one of:
+- **A code-change request** ("fix X") → edit and commit the code on the relevant repo's work
+  branch (English commit message). Do NOT recompute base commits. **Do NOT push.**
+- **A re-review request / opinion** ("look again at Y", "this finding is a false positive") →
+  no code change needed.
+Either way, then just **stop** — the orchestrator runs the review **once more** and presents
+it to the human again (clean → PR opens automatically). Do NOT write a plan, options, a fix
+plan, or `pr_meta.json`.
+
+### F — Review approved (the prompt starts with the approval marker)
+The human approved — open the PR with the **current code as-is**, even if findings remain. Do
+NOT write a fix plan. Make sure your work is committed on each changed repo's work branch, then
+write PR metadata as JSON to `.corral/pr_meta.json`: `{"title": "…", "body": "…"}`. The
+orchestrator opens one PR per changed repo using this title/body. Do NOT push or open PRs yourself.
 
 ### H — Fix plan approved
-Implement the fix, commit in the relevant repo subdir, and write `.corral/pr_meta.json` as above.
+Implement the approved fix plan, commit in the relevant repo subdir, and write
+`.corral/pr_meta.json` as above.
 
 ---
 
