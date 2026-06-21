@@ -43,7 +43,7 @@ export function planCritiquePrompt(
   lines.push(
     `Classify each finding as BLOCKER / SUGGESTION / NIT with a rationale and (where relevant) a file:line.`,
     `Write your critique as Markdown to ${out}. Do NOT modify any code or the plan file.`,
-    `Write in ${profile.language}; keep severity labels, file paths, and code identifiers in English.`,
+    `Write in ${profile.languageName}; keep severity labels, file paths, and code identifiers in English.`,
     `If the plan is genuinely sound after probing, write "${profile.t('review.noIssues')}" to ${out}.`,
   );
   return lines.join(' ');
@@ -100,7 +100,7 @@ export function reviewRoundPrompt(
     `REJECT (do not report, state the reason): "this could be slow" with no evidence on a cold path; a style preference the linter already allows; a "missing await" on a deliberately fire-and-forget call.`,
     `Classify each finding as BLOCKER / SUGGESTION / NIT with a file:line reference and a short rationale.`,
     `Write your findings as Markdown to ${out}. Do NOT modify any source code.`,
-    `Write the findings in ${profile.language}; keep severity labels, file paths, and code identifiers in English.`,
+    `Write the findings in ${profile.languageName}; keep severity labels, file paths, and code identifiers in English.`,
     `Be concise but do not omit a real BLOCKER. If you genuinely find nothing after probing, write "${profile.t('review.noIssues')}" to ${out}.`,
   );
   return lines.join(' ');

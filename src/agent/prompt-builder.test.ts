@@ -35,6 +35,15 @@ describe('prompt-builder', () => {
     expect(without).not.toContain('Skills / conventions (REQUIRED)');
   });
 
+  it('renders the output-language instruction from the context', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const ko = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    expect(ko).toContain('Output language');
+    expect(ko).toContain('Korean (한국어)');
+    const def = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(def).toContain('English'); // default when no language given
+  });
+
   it('renders signals in the configured language', () => {
     const ko = buildSignals(createTranslator('ko'));
     expect(ko.approve).toBe('✅ 승인됨');

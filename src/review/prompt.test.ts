@@ -20,7 +20,7 @@ describe('review prompts (de-masil)', () => {
 
   it('reviewRoundPrompt renders language, calibration and phrases from the profile', () => {
     const p = reviewRoundPrompt(issue, 1, [{ dir: 'server', base: 'abc123' }], profileKo);
-    expect(p).toContain('Write the findings in ko');
+    expect(p).toContain('Write the findings in Korean');
     expect(p).toContain('특이사항 없음');
     expect(p).toContain('해결됨');
     expect(p).toContain('git -C server diff abc123..HEAD');
@@ -52,7 +52,7 @@ describe('review prompts (de-masil)', () => {
   it('uses generic calibration for the generic stack', () => {
     const generic = resolveProfile(ProfileSchema.parse({}));
     const p = reviewRoundPrompt(issue, 1, [{ dir: '.', base: 'b' }], generic);
-    expect(p).toContain('Write the findings in en');
+    expect(p).toContain('Write the findings in English');
     expect(p).toContain('Command/SQL injection');
   });
 

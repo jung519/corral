@@ -527,6 +527,7 @@ export class Orchestrator {
       const workflow = await renderWorkflow({
         issue,
         tracker_kind: this.tracker.kind,
+        language: this.profile.languageName,
         repos: this.router.all().map((r) => ({
           key: r.key,
           dir: r.key,

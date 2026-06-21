@@ -32,6 +32,8 @@ export interface WorkflowContext {
   tracker_kind: string;
   /** All repos cloned side by side; the agent commits in whichever it changes. */
   repos: WorkflowRepo[];
+  /** Human-readable output language for agent-authored docs (e.g. "Korean"). */
+  language?: string;
   /** Path of the reference/conventions repo cloned in the workspace; undefined to skip. */
   reference_path?: string;
 }

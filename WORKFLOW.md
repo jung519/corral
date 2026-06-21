@@ -30,6 +30,13 @@ consult it and follow its rules:
 This repo is read-only: never edit or commit inside `{{ reference_path }}`.
 {% endif %}
 
+## Output language
+
+Write every human-facing file you produce — `.corral/pending_plan.md`,
+`.corral/pending_review.md`, `.corral/question.md`, and the title/body in
+`.corral/pr_meta.json` — in **{{ language | default: "English" }}**. Keep code,
+identifiers, file paths, commands, and severity labels (BLOCKER/SUGGESTION/NIT) in English.
+
 ## Issue
 
 **{{ issue.title }}**
