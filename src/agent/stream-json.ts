@@ -72,7 +72,8 @@ function toolHint(input: unknown): string {
   return v ? `: ${oneLine(String(v), 2000)}` : '';
 }
 
-function oneLine(s: string, max: number): string {
+/** Collapse whitespace to a single line and cap length (UI widens to reveal more). */
+export function oneLine(s: string, max: number): string {
   const t = s.replace(/\s+/g, ' ').trim();
   return t.length <= max ? t : t.slice(0, max) + '…';
 }

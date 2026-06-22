@@ -207,6 +207,10 @@ export function validateAgent(provider: string, key: string): Promise<Validation
   if (provider === 'claude') {
     return check('https://api.anthropic.com/v1/models', { 'x-api-key': key, 'anthropic-version': '2023-06-01' });
   }
-  // gemini/gpt key checks are provider-specific; skip with a clear note for now.
+  if (provider === 'gemini') {
+    // Gemini API keys go in the query string, not a header.
+    return check(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(key)}`, {});
+  }
+  // gpt key check is provider-specific; skip with a clear note until codex lands.
   return Promise.resolve({ ok: true, detail: `validation not available for ${provider}` });
 }

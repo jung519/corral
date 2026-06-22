@@ -40,7 +40,7 @@
   // wizard can never produce a config that fails to boot.
   const providers: Array<{ id: WizardState['provider']; name: string; icon: string; soon?: boolean }> = [
     { id: 'claude', name: 'Claude', icon: '<path d="M12 3v18M3 12h18M6 6l12 12M18 6 6 18"/>' },
-    { id: 'gemini', name: 'Gemini', icon: '<path d="M12 3l7 9-7 9-7-9z"/>', soon: true },
+    { id: 'gemini', name: 'Gemini', icon: '<path d="M12 3l7 9-7 9-7-9z"/>' },
     { id: 'gpt', name: 'GPT', icon: '<circle cx="12" cy="12" r="8"/>', soon: true },
   ];
 
@@ -61,8 +61,8 @@
   onMount(async () => {
     const draft = await loadDraft();
     if (draft) s = draft;
-    // Coerce any still-gated option a stale draft/config might hold back to a working one.
-    if (s.provider !== 'claude') setProvider('claude');
+    // Coerce any still-gated provider a stale draft/config might hold back to a working one.
+    if (providers.find((p) => p.id === s.provider)?.soon) setProvider('claude');
     if (s.transport === 'api') s.transport = 'cli';
     // Host-login mount doesn't work on macOS (login is in the Keychain, not ~/.claude),
     // so a fresh macOS setup defaults to the API-key path instead.
@@ -186,6 +186,9 @@
   }
 
   const agentPinged = $derived(typeof test.agent === 'object' && test.agent?.ok === true);
+  const keyPlaceholder = $derived(
+    s.provider === 'gemini' ? 'AIza…' : s.provider === 'gpt' ? 'sk-…' : 'sk-ant-…',
+  );
 
   // Notion schema → property/option dropdowns (no manual name typing).
   type NotionProp = { name: string; type: string; options: string[] };
@@ -339,7 +342,9 @@
           <input
             type="password"
             bind:value={s.agentKey}
-            placeholder={!s.agentKey && secretSaved(serviceFor(s.provider), 'default') ? t('field.secretSaved') : 'sk-ant-...'}
+            placeholder={!s.agentKey && secretSaved(serviceFor(s.provider), 'default')
+              ? t('field.secretSaved')
+              : keyPlaceholder}
             onblur={testAgent}
           />
           {@render badge(test.agent)}
