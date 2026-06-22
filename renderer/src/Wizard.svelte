@@ -128,6 +128,14 @@
     test.agent = 'pending';
     test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
   }
+  // Check the provider's official CLI is installed (transport: cli). Install-only —
+  // login is provider-specific and not reliably checkable without a billed turn.
+  async function testCli() {
+    if (!window.corral) return;
+    test.cli = 'pending';
+    const r = await window.corral.detectCli(s.provider);
+    test.cli = { ok: r.installed, detail: r.installed ? (r.version ?? t('cli.installed')) : t('cli.notInstalled') };
+  }
   // Full connection test for one repo (checks the actual repo is reachable, not just the token).
   async function testRepo(i: number) {
     const r = s.repos[i];
@@ -337,7 +345,15 @@
           {@render badge(test.agent)}
         </div></label
       >
-      {#if s.transport === 'cli'}<p class="hint">{t('cli.hint')}</p>{/if}
+      {#if s.transport === 'cli'}
+        <p class="hint">{t('cli.hint')}</p>
+        {#if hasBridge}
+          <div class="testrow">
+            <Button onclick={testCli}>{t('cli.check')}</Button>
+            {@render badge(test.cli)}
+          </div>
+        {/if}
+      {/if}
       {#if agentPinged}<p class="helper">{t('agent.pingOk')}</p>{/if}
 
       {#if s.transport === 'cli' && s.provider === 'claude'}

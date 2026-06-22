@@ -31,6 +31,9 @@ const api = {
   },
   /** Detect a usable Docker CLI (for the workspace-backend wizard step). */
   detectDocker: (): Promise<{ available: boolean; version?: string }> => ipcRenderer.invoke('docker:detect'),
+  /** Detect a provider's official agent CLI (claude/gemini/codex) — install check. */
+  detectCli: (provider: string): Promise<{ installed: boolean; version?: string }> =>
+    ipcRenderer.invoke('cli:detect', provider),
   /** Verify a token/key before writing config (wizard "Test" buttons). */
   validate: {
     notion: (token: string): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('validate:notion', token),

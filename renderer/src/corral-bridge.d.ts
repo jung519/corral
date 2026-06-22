@@ -22,6 +22,7 @@ declare global {
         delete(service: string, account: string): Promise<void>;
       };
       detectDocker(): Promise<{ available: boolean; version?: string }>;
+      detectCli(provider: string): Promise<{ installed: boolean; version?: string }>;
       validate: {
         notion(token: string): Promise<{ ok: boolean; detail?: string }>;
         github(token: string): Promise<{ ok: boolean; detail?: string }>;

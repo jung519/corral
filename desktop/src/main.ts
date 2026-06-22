@@ -6,7 +6,7 @@
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { exec } from 'node:child_process';
+import { exec, execFile } from 'node:child_process';
 import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
@@ -72,6 +72,7 @@ function registerIpc(): void {
   ipcMain.handle('secret:delete', (_e, service: string, account: string) => deleteSecret(service, account));
 
   ipcMain.handle('docker:detect', () => detectDocker());
+  ipcMain.handle('cli:detect', (_e, provider: string) => detectCli(provider));
 
   ipcMain.handle('validate:notion', (_e, token: string) => validateNotion(token));
   ipcMain.handle('notion:schema', (_e, token: string, dbId: string) => fetchNotionSchema(token, dbId));
@@ -93,6 +94,22 @@ function detectDocker(): Promise<{ available: boolean; version?: string }> {
     exec('docker --version', (err, stdout) => {
       if (err) resolve({ available: false });
       else resolve({ available: true, version: stdout.trim() });
+    });
+  });
+}
+
+/** The official CLI binary for each agent provider. */
+const CLI_BIN: Record<string, string> = { claude: 'claude', gemini: 'gemini', gpt: 'codex' };
+
+/** Check whether a provider's CLI is installed (runs `<bin> --version`). Binary is
+ *  looked up from a fixed whitelist, never interpolated from the provider arg. */
+function detectCli(provider: string): Promise<{ installed: boolean; version?: string }> {
+  const bin = CLI_BIN[provider];
+  if (!bin) return Promise.resolve({ installed: false });
+  return new Promise((resolve) => {
+    execFile(bin, ['--version'], { timeout: 5000 }, (err, stdout) => {
+      if (err) resolve({ installed: false });
+      else resolve({ installed: true, version: stdout.trim().split('\n')[0] });
     });
   });
 }
