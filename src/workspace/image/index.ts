@@ -13,9 +13,17 @@ import { logger } from '../../core/logger.js';
 import { run } from '../../util/exec.js';
 import { buildImage, imageExists, workerImageTag } from './builder.js';
 import { detectWorkerImage } from './detect.js';
-import { renderDockerfile } from './dockerfile.js';
+import { AGENT_CLI_PACKAGES, DEFAULT_AGENT_CLI, renderDockerfile } from './dockerfile.js';
 import { collectManifests, type CollectedManifest, manifestHash } from './manifest.js';
 import { WORKER_IMAGE_TEMPLATE_VERSION, type WorkerImageSpec } from './spec.js';
+
+/** Map configured agent providers → the npm CLI packages to install, deduped and
+ *  sorted (stable hash). Unknown providers are skipped; empty → just the Claude CLI. */
+export function cliPackagesForProviders(providers: string[] | undefined): string[] {
+  const pkgs = (providers ?? []).map((p) => AGENT_CLI_PACKAGES[p]).filter((p): p is string => Boolean(p));
+  const unique = [...new Set(pkgs.length ? pkgs : [DEFAULT_AGENT_CLI])];
+  return unique.sort();
+}
 
 /** Generate a spec from manifests via the agent (unfamiliar stacks); null on failure. */
 export type AgentSpecFn = (manifests: CollectedManifest[]) => Promise<WorkerImageSpec | null>;
@@ -46,6 +54,8 @@ export interface EnsureWorkerImageDeps {
   approve: (dockerfile: string, spec: WorkerImageSpec) => Promise<boolean>;
   /** Optional agent fallback for unfamiliar stacks (hybrid). */
   agentSpec?: AgentSpecFn;
+  /** Configured agent providers (primary + fallbacks) → which CLIs the image installs. */
+  agentProviders?: string[];
   onLog?: (line: string) => void;
 }
 
@@ -67,12 +77,15 @@ export async function ensureWorkerImage(deps: EnsureWorkerImageDeps): Promise<En
     }
 
     const manifests = await collectManifests(prep, deps.repos.map((r) => r.key));
-    const tag = workerImageTag(manifestHash(manifests, WORKER_IMAGE_TEMPLATE_VERSION));
+    // The installed CLI set is part of the image identity — fold it into the cache key
+    // so adding/removing a fallback provider rebuilds rather than reusing a stale image.
+    const cliPkgs = cliPackagesForProviders(deps.agentProviders);
+    const tag = workerImageTag(manifestHash(manifests, `${WORKER_IMAGE_TEMPLATE_VERSION}|clis=${cliPkgs.join(',')}`));
     if (await imageExists(tag)) return { ok: true, tag, cached: true };
 
     const { spec, source } = await chooseSpec(manifests, deps.agentSpec);
-    log.info(`worker image spec via ${source}: ${spec.base_image}`);
-    const dockerfile = renderDockerfile(spec);
+    log.info(`worker image spec via ${source}: ${spec.base_image} (clis: ${cliPkgs.join(', ')})`);
+    const dockerfile = renderDockerfile(spec, { agentClis: cliPkgs });
 
     if (!(await deps.approve(dockerfile, spec))) return { ok: false, reason: 'declined' };
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { renderDockerfile } from './dockerfile.js';
+import { cliPackagesForProviders } from './index.js';
 import { WorkerImageSpecSchema } from './spec.js';
 
 const nodeSpec = WorkerImageSpecSchema.parse({
@@ -28,6 +29,15 @@ describe('renderDockerfile', () => {
     expect(df).toContain('npm install -g @anthropic-ai/claude-code');
   });
 
+  it('installs a CLI for each configured provider (cross-provider failover in docker)', () => {
+    const df = renderDockerfile(nodeSpec, { agentClis: cliPackagesForProviders(['claude', 'gemini']) });
+    expect(df).toContain('npm install -g @anthropic-ai/claude-code @google/gemini-cli');
+  });
+
+  it('rejects an unsafe CLI package name', () => {
+    expect(() => renderDockerfile(nodeSpec, { agentClis: ['pkg; rm -rf /'] })).toThrow(/unsafe npm package/);
+  });
+
   it('rejects an unsafe base image', () => {
     expect(() => renderDockerfile(WorkerImageSpecSchema.parse({ base_image: 'node:24 && rm -rf /' }))).toThrow(/unsafe base/);
   });
@@ -42,5 +52,20 @@ describe('renderDockerfile', () => {
     expect(() =>
       renderDockerfile(WorkerImageSpecSchema.parse({ base_image: 'node:24', setup_commands: ['ok\nUSER root'] })),
     ).toThrow(/single line/);
+  });
+});
+
+describe('cliPackagesForProviders', () => {
+  it('defaults to the Claude CLI when empty/undefined', () => {
+    expect(cliPackagesForProviders(undefined)).toEqual(['@anthropic-ai/claude-code']);
+    expect(cliPackagesForProviders([])).toEqual(['@anthropic-ai/claude-code']);
+  });
+
+  it('maps providers, dedupes, sorts, and skips unknowns', () => {
+    expect(cliPackagesForProviders(['gemini', 'claude', 'gemini'])).toEqual([
+      '@anthropic-ai/claude-code',
+      '@google/gemini-cli',
+    ]);
+    expect(cliPackagesForProviders(['gpt'])).toEqual(['@anthropic-ai/claude-code']); // unknown → default
   });
 });
