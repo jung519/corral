@@ -58,6 +58,14 @@ export function renderDockerfile(spec: WorkerImageSpec): string {
     'RUN useradd -m -s /bin/bash worker && mkdir -p /workspace && chown -R worker:worker /workspace',
     'USER worker',
     'WORKDIR /workspace',
+    // The worker user has no git identity; `git commit` errors without one. The host
+    // (local backend) inherits the operator's ~/.gitconfig, but a fresh container does
+    // not — set a default so the agent can commit. safe.directory '*' avoids "dubious
+    // ownership" if a repo dir ends up owned differently than the runner.
+    'RUN git config --global user.email "agent@corral.local" \\',
+    '    && git config --global user.name "Corral Agent" \\',
+    '    && git config --global init.defaultBranch main \\',
+    "    && git config --global --add safe.directory '*'",
   );
 
   return `${lines.join('\n')}\n`;

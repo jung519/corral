@@ -10,7 +10,7 @@ import type { CollectedManifest } from './manifest.js';
 
 /** Bump when the rendered Dockerfile's guaranteed layer changes — it's folded into
  * the image cache hash so existing images rebuild on a template change. */
-export const WORKER_IMAGE_TEMPLATE_VERSION = '1';
+export const WORKER_IMAGE_TEMPLATE_VERSION = '2';
 
 export const WorkerImageSpecSchema = z.object({
   /** Debian/Ubuntu-based base image (apt available), e.g. "node:24-bookworm-slim". */

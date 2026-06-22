@@ -18,6 +18,7 @@ describe('renderDockerfile', () => {
     expect(df).toContain('npm install -g @anthropic-ai/claude-code'); // guaranteed
     expect(df).toContain('USER worker'); // non-root
     expect(df).toContain('WORKDIR /workspace');
+    expect(df).toContain('git config --global user.email'); // commit identity (fresh container has none)
   });
 
   it('works with no system packages or setup commands', () => {
