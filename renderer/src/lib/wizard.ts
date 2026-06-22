@@ -120,9 +120,12 @@ export function serviceFor(provider: WizardState['provider']): string {
   return { claude: 'anthropic', gemini: 'google', gpt: 'openai' }[provider];
 }
 
+// Use the CLIs' own version-agnostic tier aliases, never concrete version numbers
+// (those churn constantly and would go stale). Each CLI resolves the alias to its
+// current model: claude opus/sonnet/haiku, gemini pro/flash/flash-lite (also `auto`).
 export const MODELS: Record<WizardState['provider'], string[]> = {
   claude: ['opus', 'sonnet', 'haiku'],
-  gemini: ['gemini-2.5-pro', 'gemini-2.5-flash'],
+  gemini: ['pro', 'flash', 'flash-lite'],
   gpt: ['gpt-5', 'gpt-5-mini', 'o4-mini'],
 };
 
