@@ -183,9 +183,18 @@ function vt(id: string, vars?: Record<string, string>): string {
  * (editing keeps the saved key). Default: nothing saved (first-run requires keys). */
 export type SecretSavedFn = (service: string, account: string) => boolean;
 
+/** Gemini's CLI can't authenticate inside a container: it has no injectable token
+ *  (unlike Claude's CLAUDE_CODE_OAUTH_TOKEN) and Corral doesn't mount ~/.gemini, so
+ *  the only docker auth would be a raw API key — which defeats the no-key model.
+ *  Gemini is therefore disallowed under the docker backend (primary or fallback). */
+export function geminiDockerConflict(s: WizardState): boolean {
+  return s.backend === 'docker' && (s.provider === 'gemini' || s.fallbacks.some((f) => f.provider === 'gemini'));
+}
+
 export function validateStep(step: number, s: WizardState, isSaved: SecretSavedFn = () => false): string {
   switch (step) {
     case 0:
+      if (geminiDockerConflict(s)) return vt('validate.geminiDocker');
       if (s.transport === 'api' && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
         return vt('validate.apiKeyApi');
       // Docker has no auth source unless one of: host-login mount, an API key, or a
@@ -233,6 +242,10 @@ export function validateStep(step: number, s: WizardState, isSaved: SecretSavedF
         if (!s.jiraEmail.trim()) return vt('validate.jiraEmail');
         if (!s.jiraToken.trim() && !isSaved('jira', 'default')) return vt('validate.jiraToken');
       }
+      return '';
+    case 3:
+      // Workspace step: catch a docker+gemini combo even when the AI step isn't open.
+      if (geminiDockerConflict(s)) return vt('validate.geminiDocker');
       return '';
     case 4:
       if (!Number.isInteger(s.port) || s.port <= 0) return vt('validate.port');

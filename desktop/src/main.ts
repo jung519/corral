@@ -6,7 +6,7 @@
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
 import { app, BrowserWindow, ipcMain } from 'electron';
-import { exec, execFile } from 'node:child_process';
+import { exec, execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
@@ -73,6 +73,7 @@ function registerIpc(): void {
 
   ipcMain.handle('docker:detect', () => detectDocker());
   ipcMain.handle('cli:detect', (_e, provider: string) => detectCli(provider));
+  ipcMain.handle('claude:setup-token', () => runClaudeSetupToken());
 
   ipcMain.handle('validate:notion', (_e, token: string) => validateNotion(token));
   ipcMain.handle('notion:schema', (_e, token: string, dbId: string) => fetchNotionSchema(token, dbId));
@@ -110,6 +111,41 @@ function detectCli(provider: string): Promise<{ installed: boolean; version?: st
     execFile(bin, ['--version'], { timeout: 5000 }, (err, stdout) => {
       if (err) resolve({ installed: false });
       else resolve({ installed: true, version: stdout.trim().split('\n')[0] });
+    });
+  });
+}
+
+/** Run `claude setup-token` to obtain a long-lived subscription OAuth token at save
+ *  time, so the user doesn't have to run it in a terminal and paste the result. The
+ *  CLI opens the browser itself and serves a localhost OAuth callback (no stdin/TTY
+ *  needed), then prints the `sk-ant-oat…` token — which we extract from its output.
+ *  On failure we return the output tail (it contains the URL) so the UI can fall back
+ *  to manual auth. */
+function runClaudeSetupToken(): Promise<{ ok: boolean; token?: string; error?: string }> {
+  return new Promise((resolve) => {
+    let out = '';
+    let settled = false;
+    const finish = (r: { ok: boolean; token?: string; error?: string }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const child = spawn('claude', ['setup-token'], { stdio: ['ignore', 'pipe', 'pipe'] });
+    // Browser auth can take a while; give the user 5 minutes before giving up.
+    const timer = setTimeout(() => {
+      child.kill('SIGTERM');
+      finish({ ok: false, error: 'timeout — 인증이 완료되지 않았습니다 (5분 초과)' });
+    }, 300_000);
+    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
+    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
+    child.on('error', (err) =>
+      finish({ ok: false, error: `claude CLI 실행 실패 (설치/PATH 확인): ${err instanceof Error ? err.message : String(err)}` }),
+    );
+    child.on('close', () => {
+      const m = out.match(/sk-ant-oat[A-Za-z0-9_-]+/);
+      if (m) finish({ ok: true, token: m[0] });
+      else finish({ ok: false, error: out.trim().slice(-600) || '출력에서 토큰을 찾지 못했습니다.' });
     });
   });
 }

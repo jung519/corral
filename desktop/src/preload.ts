@@ -34,6 +34,10 @@ const api = {
   /** Detect a provider's official agent CLI (claude/gemini/codex) — install check. */
   detectCli: (provider: string): Promise<{ installed: boolean; version?: string }> =>
     ipcRenderer.invoke('cli:detect', provider),
+  /** Run `claude setup-token` to obtain a subscription OAuth token at save time
+   *  (opens the browser; returns the token or an error/URL tail). */
+  claudeSetupToken: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
+    ipcRenderer.invoke('claude:setup-token'),
   /** Verify a token/key before writing config (wizard "Test" buttons). */
   validate: {
     notion: (token: string): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('validate:notion', token),

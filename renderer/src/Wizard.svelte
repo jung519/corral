@@ -104,9 +104,14 @@
     s.reviewModel = d.review;
   }
 
+  // Gemini's CLI can't authenticate inside a container (no injectable token, no
+  // ~/.gemini mount), so it's disallowed under the docker backend — disabled in the UI.
+  const dockerBlocksGemini = (id: WizardState['provider']) => s.backend === 'docker' && id === 'gemini';
+
   // ── Fallback agents (failover order) ──────────────────────────────────────
   function addFallback() {
-    s.fallbacks = [...s.fallbacks, newFallback()];
+    // Default a new fallback to a provider valid for the current backend.
+    s.fallbacks = [...s.fallbacks, newFallback(s.backend === 'docker' ? 'claude' : 'gemini')];
   }
   function removeFallback(i: number) {
     s.fallbacks = s.fallbacks.filter((_, j) => j !== i);
@@ -155,6 +160,26 @@
     if (!window.corral || !s.agentKey) return;
     test.agent = 'pending';
     test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
+  }
+
+  // Obtain a Claude subscription OAuth token via `claude setup-token` (opens the
+  // browser), then drop it into the field so it's saved with the section. No manual
+  // terminal copy/paste needed.
+  let setupTokenMsg = $state('');
+  async function runSetupToken() {
+    if (!window.corral) return;
+    setupTokenMsg = t('oauth.setupRunning');
+    try {
+      const r = await window.corral.claudeSetupToken();
+      if (r.ok && r.token) {
+        s.agentOauthToken = r.token;
+        setupTokenMsg = t('oauth.setupOk');
+      } else {
+        setupTokenMsg = `${t('oauth.setupFail')} ${r.error ?? ''}`.trim();
+      }
+    } catch (e) {
+      setupTokenMsg = `${t('oauth.setupFail')} ${String(e)}`.trim();
+    }
   }
   // Check the provider's official CLI is installed (transport: cli). Install-only —
   // login is provider-specific and not reliably checkable without a billed turn.
@@ -343,16 +368,18 @@
           <button
             class="provider"
             class:sel={s.provider === p.id}
-            class:soon={p.soon}
-            disabled={p.soon}
-            onclick={() => !p.soon && setProvider(p.id)}
+            class:soon={p.soon || dockerBlocksGemini(p.id)}
+            disabled={p.soon || dockerBlocksGemini(p.id)}
+            onclick={() => !p.soon && !dockerBlocksGemini(p.id) && setProvider(p.id)}
           >
             <svg class="picon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
             <span class="pname">{p.name}</span>
-            {#if p.soon}<span class="soon-tag">{t('badge.soon')}</span>{/if}
+            {#if p.soon}<span class="soon-tag">{t('badge.soon')}</span>
+            {:else if dockerBlocksGemini(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
           </button>
         {/each}
       </div>
+      {#if s.backend === 'docker'}<p class="hint">{t('provider.dockerGeminiNote')}</p>{/if}
 
       <div class="transports">
         <button class="transport soon" disabled>
@@ -400,6 +427,12 @@
           /></label
         >
         <p class="hint">{t('field.oauthToken.hint')}</p>
+        {#if hasBridge}
+          <div class="testrow">
+            <Button onclick={runSetupToken}>{t('oauth.setupBtn')}</Button>
+            {#if setupTokenMsg}<span class="helper">{setupTokenMsg}</span>{/if}
+          </div>
+        {/if}
       {/if}
 
       <span class="lbl">{t('agent.modelsLabel')}</span>
@@ -439,8 +472,15 @@
             </div>
             <div class="transports tri">
               {#each fallbackProviders as p}
-                <button class="transport" class:sel={f.provider === p.id} onclick={() => setFallbackProvider(f, p.id)}>
+                <button
+                  class="transport"
+                  class:sel={f.provider === p.id}
+                  class:soon={dockerBlocksGemini(p.id)}
+                  disabled={dockerBlocksGemini(p.id)}
+                  onclick={() => !dockerBlocksGemini(p.id) && setFallbackProvider(f, p.id)}
+                >
                   <span class="radio" class:on={f.provider === p.id}></span>{p.name}
+                  {#if dockerBlocksGemini(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
                 </button>
               {/each}
             </div>
