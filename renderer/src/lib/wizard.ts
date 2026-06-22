@@ -37,6 +37,17 @@ export function newRepo(): RepoEntry {
   };
 }
 
+/** A fallback agent: tried (in list order) when the agent above it is out of capacity.
+ *  Always cli transport for now; carries its own credentials + per-stage models. */
+export interface FallbackEntry {
+  provider: WizardState['provider'];
+  key: string; // API key (BYOK) — optional for cli (own login)
+  oauthToken: string; // claude subscription token (claude only)
+  planningModel: string;
+  implementationModel: string;
+  reviewModel: string;
+}
+
 export interface WizardState {
   provider: 'claude' | 'gemini' | 'gpt';
   transport: 'api' | 'cli';
@@ -47,6 +58,8 @@ export interface WizardState {
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
+  /** Ordered fallback agents (failover when the one above is out of capacity). */
+  fallbacks: FallbackEntry[];
   repos: RepoEntry[];
   trackerKind: TrackerKind;
   notionDb: string;
@@ -88,6 +101,7 @@ export function initialState(): WizardState {
     planningModel: 'opus',
     implementationModel: 'sonnet',
     reviewModel: 'opus',
+    fallbacks: [],
     repos: [{ ...newRepo(), key: 'main' }],
     trackerKind: 'notion',
     notionDb: '',
@@ -137,6 +151,19 @@ export function defaultModels(provider: WizardState['provider']): {
   const m = MODELS[provider];
   const first = m[0] ?? '';
   return { planning: first, implementation: m[1] ?? first, review: first };
+}
+
+/** A new fallback entry defaulting to the given provider's models (cli transport). */
+export function newFallback(provider: WizardState['provider'] = 'gemini'): FallbackEntry {
+  const d = defaultModels(provider);
+  return {
+    provider,
+    key: '',
+    oauthToken: '',
+    planningModel: d.planning,
+    implementationModel: d.implementation,
+    reviewModel: d.review,
+  };
 }
 
 const OWNER_NAME = /^[^/\s]+\/[^/\s]+$/;
@@ -285,6 +312,29 @@ function trackerYaml(s: WizardState): string[] {
   return lines;
 }
 
+/** YAML for agent.fallbacks (one ordered entry each). Credential accounts are unique
+ *  per index (fb0, fb1, …) so multiple agents — even same provider — never collide. */
+function fallbackYaml(s: WizardState): string[] {
+  if (s.fallbacks.length === 0) return [];
+  const lines = ['  fallbacks:'];
+  s.fallbacks.forEach((f, i) => {
+    const svc = serviceFor(f.provider);
+    lines.push(
+      `    - provider: ${f.provider}`,
+      '      transport: cli',
+      `      credential: { service: ${svc}, account: fb${i} }`,
+    );
+    if (f.provider === 'claude') lines.push(`      oauth_credential: { service: ${svc}, account: fb${i}-oauth }`);
+    lines.push(
+      '      models:',
+      `        planning: ${yamlStr(f.planningModel)}`,
+      `        implementation: ${yamlStr(f.implementationModel)}`,
+      `        review: ${yamlStr(f.reviewModel)}`,
+    );
+  });
+  return lines;
+}
+
 export function buildConfigYaml(s: WizardState): string {
   const profile = ['profile:', `  language: ${yamlStr(s.language)}`, `  stack: ${yamlStr(s.stack)}`];
   if (s.referenceRepo.trim()) {
@@ -308,6 +358,7 @@ export function buildConfigYaml(s: WizardState): string {
     `    planning: ${yamlStr(s.planningModel)}`,
     `    implementation: ${yamlStr(s.implementationModel)}`,
     `    review: ${yamlStr(s.reviewModel)}`,
+    ...fallbackYaml(s),
     '',
     'workspace:',
     `  backend: ${s.backend}`,
@@ -332,6 +383,10 @@ function withoutSecrets(s: WizardState): WizardState {
   const clone: WizardState = JSON.parse(JSON.stringify(s));
   clone.agentKey = '';
   clone.agentOauthToken = '';
+  for (const f of clone.fallbacks) {
+    f.key = '';
+    f.oauthToken = '';
+  }
   clone.notionToken = '';
   clone.jiraToken = '';
   clone.referenceToken = '';
@@ -387,6 +442,10 @@ export function secretRefs(s: WizardState): Array<{ service: string; account: st
   if (s.referenceRepo.trim()) refs.push({ service: 'reference', account: 'default' });
   refs.push({ service: serviceFor(s.provider), account: 'default' });
   refs.push({ service: serviceFor(s.provider), account: 'oauth' });
+  s.fallbacks.forEach((f, i) => {
+    refs.push({ service: serviceFor(f.provider), account: `fb${i}` });
+    if (f.provider === 'claude') refs.push({ service: serviceFor(f.provider), account: `fb${i}-oauth` });
+  });
   return refs;
 }
 
@@ -403,6 +462,11 @@ export function secretsFor(s: WizardState): Array<{ service: string; account: st
   if (s.agentKey.trim()) out.push({ service: serviceFor(s.provider), account: 'default', value: s.agentKey });
   if (s.agentOauthToken.trim())
     out.push({ service: serviceFor(s.provider), account: 'oauth', value: s.agentOauthToken });
+  s.fallbacks.forEach((f, i) => {
+    if (f.key.trim()) out.push({ service: serviceFor(f.provider), account: `fb${i}`, value: f.key });
+    if (f.provider === 'claude' && f.oauthToken.trim())
+      out.push({ service: serviceFor(f.provider), account: `fb${i}-oauth`, value: f.oauthToken });
+  });
   // Trim so a stray trailing space/newline from a paste never reaches the API.
   return out.map((x) => ({ ...x, value: x.value.trim() })).filter((x) => x.value);
 }

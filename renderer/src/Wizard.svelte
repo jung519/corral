@@ -7,9 +7,11 @@
     buildConfigYaml,
     CORE_STATE_KEYS,
     defaultModels,
+    type FallbackEntry,
     initialState,
     loadDraft,
     MODELS,
+    newFallback,
     newRepo,
     OPTIONAL_STATE_KEYS,
     type RepoProvider,
@@ -102,6 +104,32 @@
     s.reviewModel = d.review;
   }
 
+  // ── Fallback agents (failover order) ──────────────────────────────────────
+  function addFallback() {
+    s.fallbacks = [...s.fallbacks, newFallback()];
+  }
+  function removeFallback(i: number) {
+    s.fallbacks = s.fallbacks.filter((_, j) => j !== i);
+  }
+  function moveFallback(i: number, dir: -1 | 1) {
+    const j = i + dir;
+    if (j < 0 || j >= s.fallbacks.length) return;
+    const next = [...s.fallbacks];
+    [next[i], next[j]] = [next[j], next[i]];
+    s.fallbacks = next;
+  }
+  function setFallbackProvider(f: FallbackEntry, p: WizardState['provider']) {
+    f.provider = p;
+    const d = defaultModels(p);
+    f.planningModel = d.planning;
+    f.implementationModel = d.implementation;
+    f.reviewModel = d.review;
+    f.key = '';
+    f.oauthToken = '';
+  }
+  // Providers selectable for a fallback (exclude still-gated ones).
+  const fallbackProviders = providers.filter((p) => !p.soon);
+
   // Non-sequential: jump to any step freely; validation is per-item (sidebar ✓) and
   // a full check at Finish (which jumps to the first invalid step).
   function goTo(i: number) {
@@ -186,9 +214,8 @@
   }
 
   const agentPinged = $derived(typeof test.agent === 'object' && test.agent?.ok === true);
-  const keyPlaceholder = $derived(
-    s.provider === 'gemini' ? 'AIza…' : s.provider === 'gpt' ? 'sk-…' : 'sk-ant-…',
-  );
+  const keyHint = (p: WizardState['provider']) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-…');
+  const keyPlaceholder = $derived(keyHint(s.provider));
 
   // Notion schema → property/option dropdowns (no manual name typing).
   type NotionProp = { name: string; type: string; options: string[] };
@@ -396,6 +423,71 @@
           </select></label
         >
       </div>
+
+      {#if s.transport === 'cli'}
+        <span class="lbl">{t('agent.fallbackLabel')}</span>
+        <p class="hint">{t('agent.fallbackHint')}</p>
+        {#each s.fallbacks as f, i (i)}
+          <div class="repo-card">
+            <div class="repo-head">
+              <span class="repo-num">{i + 2}. {f.provider}</span>
+              <div class="reorder">
+                <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
+                <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
+                <button class="ghost-x" onclick={() => removeFallback(i)} title={t('repo.remove')}>✕</button>
+              </div>
+            </div>
+            <div class="transports tri">
+              {#each fallbackProviders as p}
+                <button class="transport" class:sel={f.provider === p.id} onclick={() => setFallbackProvider(f, p.id)}>
+                  <span class="radio" class:on={f.provider === p.id}></span>{p.name}
+                </button>
+              {/each}
+            </div>
+            <label class="field"
+              ><span>{t('field.apiKey')}{t('field.apiKey.optionalCli')}</span>
+              <input
+                type="password"
+                bind:value={f.key}
+                placeholder={!f.key && secretSaved(serviceFor(f.provider), `fb${i}`) ? t('field.secretSaved') : keyHint(f.provider)}
+              /></label
+            >
+            {#if f.provider === 'claude'}
+              <label class="field"
+                ><span>{t('field.oauthToken')}</span>
+                <input
+                  type="password"
+                  bind:value={f.oauthToken}
+                  placeholder={!f.oauthToken && secretSaved(serviceFor(f.provider), `fb${i}-oauth`)
+                    ? t('field.secretSaved')
+                    : 'sk-ant-oat…'}
+                /></label
+              >
+            {/if}
+            <div class="three">
+              <label class="field"
+                ><span>{t('field.planningModel')}</span>
+                <select bind:value={f.planningModel}>
+                  {#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}
+                </select></label
+              >
+              <label class="field"
+                ><span>{t('field.implModel')}</span>
+                <select bind:value={f.implementationModel}>
+                  {#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}
+                </select></label
+              >
+              <label class="field"
+                ><span>{t('field.reviewModel')}</span>
+                <select bind:value={f.reviewModel}>
+                  {#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}
+                </select></label
+              >
+            </div>
+          </div>
+        {/each}
+        <button class="add-repo" onclick={addFallback}>{t('agent.fallbackAdd')}</button>
+      {/if}
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
       <p class="subtitle">{t('repo.multiHint')}</p>
@@ -981,8 +1073,16 @@
     cursor: pointer;
     padding: 2px 6px;
   }
-  .ghost-x:hover {
+  .ghost-x:hover:not(:disabled) {
     color: var(--red);
+  }
+  .ghost-x:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+  .reorder {
+    display: flex;
+    gap: 2px;
   }
   .add-repo {
     width: 100%;

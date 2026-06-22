@@ -74,6 +74,9 @@
         {@render row(t('agent.modelsLabel'), `${s.planningModel} · ${s.implementationModel} · ${s.reviewModel}`)}
         {@render row(t('field.apiKey'), secret(serviceFor(s.provider), 'default'))}
         {#if s.provider === 'claude'}{@render row(t('field.oauthToken'), secret(serviceFor(s.provider), 'oauth'))}{/if}
+        {#each s.fallbacks ?? [] as f, i}
+          {@render row(`${t('agent.fallbackLabel')} ${i + 2}`, `${f.provider} · ${f.planningModel}/${f.implementationModel}/${f.reviewModel}`)}
+        {/each}
       {/if}
     </div>
 

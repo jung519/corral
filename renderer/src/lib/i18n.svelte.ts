@@ -59,6 +59,10 @@ const en: Dict = {
   'cli.check': 'Check CLI is installed',
   'cli.installed': 'Installed',
   'cli.notInstalled': 'Not found in PATH — install the CLI',
+  'agent.fallbackLabel': 'Fallback agents (failover order)',
+  'agent.fallbackHint':
+    'Tried in order when the agent above runs out of capacity (usage/rate limit, account ended). Each keeps its own key and models.',
+  'agent.fallbackAdd': '+ Add fallback agent',
   'workspace.desc': 'Where the agent clones the repo and actually works — your local folder, or an isolated Docker container per issue.',
   'workspace.local': 'Local (host folder)',
   'workspace.docker': 'Docker (isolated container)',
@@ -245,6 +249,10 @@ const ko: Dict = {
   'cli.check': 'CLI 설치 확인',
   'cli.installed': '설치됨',
   'cli.notInstalled': 'PATH에서 찾을 수 없음 — CLI를 설치하세요',
+  'agent.fallbackLabel': '폴백 에이전트 (전환 순서)',
+  'agent.fallbackHint':
+    '위 에이전트의 사용량이 소진되면(사용량/요청 한도, 계정 종료) 순서대로 다음 에이전트를 시도합니다. 각자 키와 모델을 따로 가집니다.',
+  'agent.fallbackAdd': '+ 폴백 에이전트 추가',
   'workspace.desc': '에이전트가 저장소를 받아 실제로 작업하는 곳 — 로컬 폴더, 또는 이슈별 격리된 Docker 컨테이너.',
   'workspace.local': '로컬 (호스트 폴더)',
   'workspace.docker': 'Docker (격리 컨테이너)',
