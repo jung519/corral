@@ -2,10 +2,11 @@
  * is owned by the entrypoint (main.ts) so it can run in "setup mode" before any
  * config exists. Missing credentials are NOT fatal — they resolve to empty and the
  * relevant action fails later with an auth error, so the app always boots. */
+import { FailoverAgent, type FailoverMember } from './agent/failover.js';
 import { createAgent } from './agent/index.js';
 import { channels } from './channel/index.js';
 import { loadConfig } from './config/loader.js';
-import type { Config } from './config/schema.js';
+import type { AgentRoutingConfig, Config } from './config/schema.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import type { CredentialRef, CredentialStore } from './credentials/types.js';
 import type {
@@ -54,13 +55,19 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
 
   const workspace = workspaces.create({ kind: config.workspace.backend, ...config.workspace }, {});
 
-  const resolvedKey = config.agent.credential ? await resolveSecret(config.agent.credential) : '';
-  const resolvedOauth = config.agent.oauth_credential ? await resolveSecret(config.agent.oauth_credential) : '';
-  const agent = createAgent(config.agent, {
-    apiKey: resolvedKey || null,
-    oauthToken: resolvedOauth || null,
-    io: workspace.io,
-  });
+  // Primary agent + ordered fallbacks → a single AgentAdapter that fails over when the
+  // active agent's usage is exhausted. Each member resolves its own credentials (BYOK).
+  const buildMember = async (r: AgentRoutingConfig, label: string): Promise<FailoverMember> => {
+    const apiKey = r.credential ? await resolveSecret(r.credential) : '';
+    const oauthToken = r.oauth_credential ? await resolveSecret(r.oauth_credential) : '';
+    const adapter = createAgent(r, { apiKey: apiKey || null, oauthToken: oauthToken || null, io: workspace.io });
+    return { adapter, label };
+  };
+  const primary = await buildMember(config.agent, `${config.agent.provider}:${config.agent.transport}`);
+  const fallbacks = await Promise.all(
+    config.agent.fallbacks.map((f, i) => buildMember(f, `${f.provider}:${f.transport} #${i + 2}`)),
+  );
+  const agent = fallbacks.length ? new FailoverAgent([primary, ...fallbacks]) : primary.adapter;
 
   const channel = deps.channel ?? channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 

@@ -22,7 +22,7 @@ export type AgentTransportId = 'api' | 'cli';
 /** Per-stage model mapping, provider-neutral (e.g. planning→opus, implementation→sonnet). */
 export type StageModels = Partial<Record<AgentStage, string>>;
 
-export type AgentErrorKind = 'timeout' | 'auth' | 'crashed' | 'budget';
+export type AgentErrorKind = 'timeout' | 'auth' | 'crashed' | 'budget' | 'rate_limit';
 
 /**
  * Result of checking a provider × transport is usable BEFORE running a turn:

@@ -187,31 +187,41 @@ export const StageModelsSchema = z
   })
   .default({});
 
-export const AgentSchema = z
-  .object({
-    provider: z.enum(['claude', 'gemini', 'gpt']),
-    transport: z.enum(['api', 'cli']).default('api'),
-    /** Required for `api` (BYOK); for `cli` the user's own CLI login is used. */
-    credential: CredentialRefSchema.optional(),
-    /** Claude subscription OAuth token (from `claude setup-token`), injected as
-     *  CLAUDE_CODE_OAUTH_TOKEN — lets the cli authenticate in a container with NO API
-     *  key (subscription, not pay-per-use). */
-    oauth_credential: CredentialRefSchema.optional(),
-    models: StageModelsSchema,
-    max_turns: z.number().int().positive().optional(),
-    max_budget_usd: z.number().positive().optional(),
-    turn_timeout_ms: z.number().int().positive().default(3_600_000),
-    allowed_tools: z.array(z.string()).default([]),
-  })
-  .superRefine((agent, ctx) => {
-    if (agent.transport === 'api' && !agent.credential) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ['credential'],
-        message: 'api transport requires a credential (BYOK)',
-      });
-    }
-  });
+/** Routing + per-stage models for one agent — the fields that differ between a
+ *  primary agent and each ordered fallback. Execution limits (turns/budget/timeout)
+ *  are NOT here: they live on the primary and apply uniformly to whichever agent
+ *  ends up running the turn. */
+export const AgentRoutingSchema = z.object({
+  provider: z.enum(['claude', 'gemini', 'gpt']),
+  transport: z.enum(['api', 'cli']).default('api'),
+  /** Required for `api` (BYOK); for `cli` the user's own CLI login is used. */
+  credential: CredentialRefSchema.optional(),
+  /** Claude subscription OAuth token (from `claude setup-token`), injected as
+   *  CLAUDE_CODE_OAUTH_TOKEN — lets the cli authenticate in a container with NO API
+   *  key (subscription, not pay-per-use). */
+  oauth_credential: CredentialRefSchema.optional(),
+  models: StageModelsSchema,
+});
+
+const requireApiCredential = (agent: { transport: string; credential?: unknown }, ctx: z.RefinementCtx, path: (string | number)[]) => {
+  if (agent.transport === 'api' && !agent.credential) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path, message: 'api transport requires a credential (BYOK)' });
+  }
+};
+
+export const AgentSchema = AgentRoutingSchema.extend({
+  max_turns: z.number().int().positive().optional(),
+  max_budget_usd: z.number().positive().optional(),
+  turn_timeout_ms: z.number().int().positive().default(3_600_000),
+  allowed_tools: z.array(z.string()).default([]),
+  /** Ordered fallback agents. When the active agent's usage is exhausted (rate limit /
+   *  account ended → rate_limit/auth/budget), the orchestrator advances to the next
+   *  one. Empty = single-agent (no failover). */
+  fallbacks: z.array(AgentRoutingSchema).default([]),
+}).superRefine((agent, ctx) => {
+  requireApiCredential(agent, ctx, ['credential']);
+  agent.fallbacks.forEach((fb, i) => requireApiCredential(fb, ctx, ['fallbacks', i, 'credential']));
+});
 
 // ─────────────────────────────────────────────────────────── axis 4: workspace
 
@@ -304,6 +314,7 @@ export type Config = z.infer<typeof ConfigSchema>;
 export type TrackerConfig = z.infer<typeof TrackerSchema>;
 export type RepositoryConfig = z.infer<typeof RepositorySchema>;
 export type AgentConfig = z.infer<typeof AgentSchema>;
+export type AgentRoutingConfig = z.infer<typeof AgentRoutingSchema>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceSchema>;
 export type ChannelConfig = z.infer<typeof ChannelSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;

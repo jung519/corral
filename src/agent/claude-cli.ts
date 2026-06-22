@@ -15,7 +15,14 @@
 import { logger } from '../core/logger.js';
 import { containerName, WORKER_USER } from '../workspace/docker-io.js';
 import { type CliStreamParser, runCliTurn, shq } from './cli-runner.js';
-import { activityEvents, applyUsage, looksLikeAuth, parseStreamLine, type StreamEvent } from './stream-json.js';
+import {
+  activityEvents,
+  applyUsage,
+  looksLikeAuth,
+  looksLikeRateLimit,
+  parseStreamLine,
+  type StreamEvent,
+} from './stream-json.js';
 import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from './types.js';
 
 /** Maps Claude Code's stream-json output to normalized events. */
@@ -24,6 +31,7 @@ const claudeParser: CliStreamParser<StreamEvent> = {
   activity: activityEvents,
   usage: applyUsage,
   isAuthFailure: (ev, line) => ev.type === 'result' && ev.is_error === true && looksLikeAuth(line),
+  isRateLimit: (ev, line) => ev.type === 'result' && ev.is_error === true && looksLikeRateLimit(line),
 };
 
 /** Where the claude CLI reads its durable behavior rules inside the workspace. */

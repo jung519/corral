@@ -575,11 +575,18 @@ export class Orchestrator {
       });
       this.cost.add(rt.identifier, result);
       if (result.error === 'auth') {
+        // Reached only when every configured agent (primary + fallbacks) failed auth.
         rt.phase = 'auth_error_waiting';
         this.store.upsert(rt);
         await this.channel.notify(
           rt.identifier,
           'Agent authentication appears to have expired. Re-authenticate on the host, then let us know.',
+        );
+      } else if (result.error === 'rate_limit') {
+        // Every agent is out of capacity for now; the run is retryable once a limit resets.
+        await this.channel.notify(
+          rt.identifier,
+          'All configured agents are out of usage capacity. Retry after a limit resets, or add another fallback agent.',
         );
       }
       return result;

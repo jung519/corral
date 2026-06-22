@@ -4,7 +4,7 @@
  *
  * The working path is the CLI transport (spawns the user's installed CLI, BYOK via
  * API key). The raw-HTTP `api` transport is a stub (see claude-api.ts). */
-import type { AgentConfig } from '../config/schema.js';
+import type { AgentRoutingConfig } from '../config/schema.js';
 import { Registry } from '../core/registry.js';
 import type { AgentAdapter, WorkspaceIO } from '../core/types.js';
 import { ClaudeApiTransport } from './claude-api.js';
@@ -30,7 +30,7 @@ agentTransports.register('claude:api', (_config, ctx) => new ClaudeApiTransport(
 agentTransports.register('gemini:cli', (_config, ctx) => new GeminiCliTransport(ctx.apiKey));
 // gpt:cli (codex) is added in a later milestone.
 
-export function createAgent(config: AgentConfig, ctx: AgentTransportCtx): AgentAdapter {
+export function createAgent(config: AgentRoutingConfig, ctx: AgentTransportCtx): AgentAdapter {
   const transport = agentTransports.create({ kind: `${config.provider}:${config.transport}` }, ctx);
   return new GenericAgent(transport, { primary: true, models: config.models, io: ctx.io });
 }

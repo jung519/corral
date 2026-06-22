@@ -65,6 +65,15 @@ export function looksLikeAuth(text: string): boolean {
   );
 }
 
+/** Whether the text indicates a usage/rate limit was hit (the agent's quota for this
+ *  window is spent) — the trigger to fail over to the next agent. Distinct from auth:
+ *  the credential is valid, it's just temporarily/permanently out of capacity. */
+export function looksLikeRateLimit(text: string): boolean {
+  return /(rate.?limit|usage limit|quota|too many requests|429|resets? at|reached your .*limit|limit reached|overloaded|capacity)/i.test(
+    text,
+  );
+}
+
 function toolHint(input: unknown): string {
   if (!input || typeof input !== 'object') return '';
   const i = input as Record<string, unknown>;

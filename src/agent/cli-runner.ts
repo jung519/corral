@@ -10,7 +10,7 @@
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { Logger } from '../core/logger.js';
-import { looksLikeAuth, type UsageAcc } from './stream-json.js';
+import { looksLikeAuth, looksLikeRateLimit, type UsageAcc } from './stream-json.js';
 import type { AgentEvent, AgentTurnSpec } from './types.js';
 
 /** How to read one CLI's stream output, normalized to AgentEvents. */
@@ -24,6 +24,9 @@ export interface CliStreamParser<T> {
   /** Whether this event signals an auth/credential failure (non-retryable). The raw
    *  line is passed so parsers can keyword-match the serialized error text. */
   isAuthFailure(event: T, rawLine: string): boolean;
+  /** Optional: whether this event signals the usage/rate limit was hit (fail-over
+   *  trigger). The raw line is passed for keyword matching. */
+  isRateLimit?(event: T, rawLine: string): boolean;
   /** Optional: emit any buffered output at end-of-stream (stateful parsers only).
    *  Stateful parsers MUST be instantiated per turn — never shared across turns. */
   flush?(): AgentEvent[];
@@ -53,6 +56,7 @@ export function runCliTurn<T>(
     });
     const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
     let sawAuth = false;
+    let sawRateLimit = false;
     let timedOut = false;
     let stderr = '';
 
@@ -72,11 +76,13 @@ export function runCliTurn<T>(
       for (const e of parser.activity(event)) onEvent(e);
       parser.usage(event, acc);
       if (parser.isAuthFailure(event, line)) sawAuth = true;
+      if (parser.isRateLimit?.(event, line)) sawRateLimit = true;
     });
 
     child.stderr.on('data', (d: Buffer) => {
       stderr += d.toString();
       if (looksLikeAuth(stderr)) sawAuth = true;
+      if (looksLikeRateLimit(stderr)) sawRateLimit = true;
     });
 
     child.on('error', (err) => {
@@ -92,7 +98,10 @@ export function runCliTurn<T>(
       if (timer) clearTimeout(timer);
       if (parser.flush) for (const e of parser.flush()) onEvent(e);
       onEvent({ type: 'usage', ...acc });
-      if (sawAuth) onEvent({ type: 'error', error: 'auth' });
+      // rate_limit before auth: a spent quota is auto-recoverable (fail over), whereas
+      // auth needs manual re-auth — don't misreport a usage limit as the latter.
+      if (sawRateLimit) onEvent({ type: 'error', error: 'rate_limit' });
+      else if (sawAuth) onEvent({ type: 'error', error: 'auth' });
       else if (timedOut) onEvent({ type: 'error', error: 'timeout' });
       else if (code !== 0) onEvent({ type: 'error', error: 'crashed', message: stderr.slice(-300) });
       log.info(`agent done code=${code} cost=$${acc.costUsd.toFixed(4)} tok=${acc.inputTokens}/${acc.outputTokens}`);

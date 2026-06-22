@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { activityEvents, applyUsage, looksLikeAuth, parseStreamLine, type UsageAcc } from './stream-json.js';
+import {
+  activityEvents,
+  applyUsage,
+  looksLikeAuth,
+  looksLikeRateLimit,
+  parseStreamLine,
+  type UsageAcc,
+} from './stream-json.js';
 
 describe('stream-json parsing', () => {
   it('parses JSON lines and ignores noise', () => {
@@ -37,5 +44,13 @@ describe('stream-json parsing', () => {
     expect(looksLikeAuth('Error: invalid api key')).toBe(true);
     expect(looksLikeAuth('please run /login first')).toBe(true);
     expect(looksLikeAuth('everything is fine')).toBe(false);
+  });
+
+  it('detects usage/rate limits (failover trigger)', () => {
+    expect(looksLikeRateLimit('You have reached your usage limit')).toBe(true);
+    expect(looksLikeRateLimit('rate limit exceeded, resets at 5pm')).toBe(true);
+    expect(looksLikeRateLimit('HTTP 429 Too Many Requests')).toBe(true);
+    expect(looksLikeRateLimit('quota exceeded for this project')).toBe(true);
+    expect(looksLikeRateLimit('wrote the plan successfully')).toBe(false);
   });
 });

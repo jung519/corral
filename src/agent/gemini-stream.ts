@@ -8,7 +8,7 @@
  * Pure of spawn/IO so it's unit-testable, like stream-json.ts (Claude).
  */
 import type { CliStreamParser } from './cli-runner.js';
-import { looksLikeAuth, oneLine, type UsageAcc } from './stream-json.js';
+import { looksLikeAuth, looksLikeRateLimit, oneLine, type UsageAcc } from './stream-json.js';
 import type { AgentEvent } from './types.js';
 
 export interface GeminiEvent {
@@ -74,6 +74,10 @@ export class GeminiStreamParser implements CliStreamParser<GeminiEvent> {
 
   isAuthFailure(event: GeminiEvent, rawLine: string): boolean {
     return event.type === 'error' && looksLikeAuth(rawLine);
+  }
+
+  isRateLimit(event: GeminiEvent, rawLine: string): boolean {
+    return event.type === 'error' && looksLikeRateLimit(rawLine);
   }
 
   /** Emit any buffered trailing text (a final line with no trailing newline). */

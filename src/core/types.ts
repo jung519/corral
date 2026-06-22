@@ -173,7 +173,7 @@ export interface AgentRunResult {
   inputTokens: number;
   outputTokens: number;
   /** Set when the run failed in a way the orchestrator must react to. */
-  error?: 'timeout' | 'auth' | 'crashed' | 'budget';
+  error?: 'timeout' | 'auth' | 'crashed' | 'budget' | 'rate_limit';
   exitCode: number | null;
 }
 
