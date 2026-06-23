@@ -5,7 +5,7 @@
  * config exists it starts the orchestrator child and loads the dashboard. All
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification } from 'electron';
 import { exec, execFile, spawn } from 'node:child_process';
 import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
@@ -74,6 +74,7 @@ function registerIpc(): void {
   ipcMain.handle('docker:detect', () => detectDocker());
   ipcMain.handle('cli:detect', (_e, provider: string) => detectCli(provider));
   ipcMain.handle('claude:setup-token', () => runClaudeSetupToken());
+  ipcMain.handle('notify', (_e, title: string, body: string) => showNotification(title, body));
 
   ipcMain.handle('validate:notion', (_e, token: string) => validateNotion(token));
   ipcMain.handle('notion:schema', (_e, token: string, dbId: string) => fetchNotionSchema(token, dbId));
@@ -88,6 +89,22 @@ function registerIpc(): void {
     void win?.loadURL(rendererUrl('#/'));
     return { ok: true, port: CONTROL_PLANE_PORT };
   });
+}
+
+/** Show an OS notification when human action is needed (approval / error). Suppressed
+ *  while the window is focused — no point nagging if the user is already looking. Click
+ *  raises the app so they can act immediately. */
+function showNotification(title: string, body: string): void {
+  if (!Notification.isSupported() || win?.isFocused()) return;
+  const n = new Notification({ title, body });
+  n.on('click', () => {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    }
+  });
+  n.show();
 }
 
 function detectDocker(): Promise<{ available: boolean; version?: string }> {

@@ -23,7 +23,23 @@
         if (!s.configured && !location.hash.startsWith('#/setup')) location.hash = '#/setup';
       })
       .catch(() => {});
-    return () => window.removeEventListener('hashchange', onHash);
+
+    // OS notifications when a human action is needed — fired app-wide (any tab) so a
+    // pending approval doesn't sit unseen for hours. The main process suppresses these
+    // while the window is focused. `approval` = decision needed; `error` = needs a look.
+    const unsubNotify = api.subscribeEvents((e) => {
+      if (!window.corral) return;
+      if (e.kind === 'approval') {
+        void window.corral.notify(`🔔 ${t('notify.actionNeeded')}`, `${e.identifier}`);
+      } else if (e.kind === 'error') {
+        void window.corral.notify(`⚠️ ${t('notify.error')}`, `${e.identifier} — ${e.label}`);
+      }
+    });
+
+    return () => {
+      window.removeEventListener('hashchange', onHash);
+      unsubNotify();
+    };
   });
 
   const isSetup = $derived(route.startsWith('#/setup'));

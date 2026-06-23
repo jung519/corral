@@ -38,6 +38,8 @@ const api = {
    *  (opens the browser; returns the token or an error/URL tail). */
   claudeSetupToken: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
     ipcRenderer.invoke('claude:setup-token'),
+  /** Show an OS notification (human action needed). No-op while the window is focused. */
+  notify: (title: string, body: string): Promise<void> => ipcRenderer.invoke('notify', title, body),
   /** Verify a token/key before writing config (wizard "Test" buttons). */
   validate: {
     notion: (token: string): Promise<{ ok: boolean; detail?: string }> => ipcRenderer.invoke('validate:notion', token),
