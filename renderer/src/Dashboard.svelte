@@ -5,7 +5,7 @@
   import Button from './lib/Button.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
-  import { isWorking, phaseColor, phaseLabelKey } from './lib/phase';
+  import { phaseActivity, phaseColor, phaseLabelKey } from './lib/phase';
   import { toast } from './lib/toast.svelte';
   import type { Candidate, CorralEvent, StateResponse } from './lib/types';
 
@@ -120,8 +120,10 @@
         <div class="issue-head">
           <strong>{issue.identifier}</strong>
           <span class="title">{issue.title ?? ''}</span>
-          {#if isWorking(issue.phase) && !issue.stuck}
+          {#if !issue.stuck && phaseActivity(issue.phase) === 'working'}
             <span class="working" title={t('dash.working')}><span class="spin" aria-hidden="true"></span>{t('dash.working')}</span>
+          {:else if !issue.stuck && phaseActivity(issue.phase) === 'waiting'}
+            <span class="waiting" title={t('dash.waiting')}><span class="pulse" aria-hidden="true"></span>{t('dash.waiting')}</span>
           {/if}
           <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase))}</span>
           <span class="cost">${issue.cost.toFixed(4)}</span>
@@ -275,6 +277,33 @@
   @keyframes corral-spin {
     to {
       transform: rotate(360deg);
+    }
+  }
+  /* Awaiting a human/external action — still in flight, but not the agent working. */
+  .waiting {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--amber, #d29922);
+    font-size: 11px;
+  }
+  .pulse {
+    width: 9px;
+    height: 9px;
+    flex-shrink: 0;
+    border-radius: 50%;
+    background: currentColor;
+    animation: corral-pulse 1.1s ease-in-out infinite;
+  }
+  @keyframes corral-pulse {
+    0%,
+    100% {
+      opacity: 0.35;
+      transform: scale(0.85);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.1);
     }
   }
   .cost {

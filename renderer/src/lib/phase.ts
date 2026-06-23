@@ -46,6 +46,22 @@ export function isWorking(phase: string): boolean {
   return !IDLE_PHASES.has(phase);
 }
 
+/** Phases that are in-flight but paused on a human action or an external event (PR
+ * merge) — not the agent working, but the issue is still actively progressing. */
+const WAITING_PHASES = new Set(['plan_sent', 'pr_plan_sent', 'question_sent', 'review_sent', 'pr_open']);
+
+export type PhaseActivity = 'working' | 'waiting' | 'error' | 'done' | 'idle';
+
+/** What the current stage is doing — drives the in-progress indicator on the PhaseBar.
+ * `working` = agent running, `waiting` = awaiting a human/external action (still in
+ * flight), `error` = needs re-auth, `done` = finished. */
+export function phaseActivity(phase: string): PhaseActivity {
+  if (phase === 'done') return 'done';
+  if (phase === 'auth_error_waiting') return 'error';
+  if (WAITING_PHASES.has(phase)) return 'waiting';
+  return isWorking(phase) ? 'working' : 'idle';
+}
+
 /** Badge text color for a phase (CSS var). */
 export function phaseColor(phase: string): string {
   if (phase === 'done' || phase === 'pr_open') return 'var(--green)';
