@@ -30,6 +30,10 @@ export interface IssueRuntime {
   /** For dashboard display. */
   title?: string;
   url?: string;
+  /** Epoch ms the issue run started (for the history record's wall-clock time). */
+  startedAt?: number;
+  /** Accumulated agent run time in ms (real "AI working" time, vs wall clock). */
+  agentActiveMs?: number;
   /** Base commit per repo key, captured at clone — defines each repo's review diff. */
   baseCommits?: Record<string, string>;
   /** PRs opened for this issue, one per repo that changed. */

@@ -11,6 +11,7 @@
  *   GET  /api/state       → { issues, pending, events }
  *   GET  /api/candidates  → on-demand tracker fetch
  *   GET  /api/diffs?id=   → diffs for an issue
+ *   GET  /api/history     → past runs (?id= one record, else list; ?outcome=&limit=&offset=)
  *   POST /api/start|complete|retry|remove|restart|refine|action
  *   GET  /events          → SSE live stream
  */
@@ -85,6 +86,17 @@ export class DashboardServer {
             } else if (url.startsWith('/api/diffs')) {
               const id = new URL(url, 'http://x').searchParams.get('id') ?? '';
               json(200, { diffs: this.deps.channel.getDiffs(id) });
+            } else if (url.startsWith('/api/history')) {
+              const q = new URL(url, 'http://x').searchParams;
+              const id = q.get('id');
+              if (id) {
+                json(200, { record: o ? o.getHistory(id) : undefined });
+              } else {
+                const outcome = q.get('outcome') as 'completed' | 'removed' | 'failed' | null;
+                const limit = q.get('limit') ? Number(q.get('limit')) : undefined;
+                const offset = q.get('offset') ? Number(q.get('offset')) : undefined;
+                json(200, { records: o ? o.listHistory({ limit, offset, outcome: outcome ?? undefined }) : [] });
+              }
             } else if (url === '/api/start' && method === 'POST') {
               const b = await readBody(req);
               json(200, o ? await o.startIssue(String(b.identifier)) : NOT_CONFIGURED);

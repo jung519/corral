@@ -18,10 +18,18 @@
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
+import { TimingAgent } from './agent/timing-agent.js';
 import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 import { CostTracker } from './core/cost-tracker.js';
 import { bus } from './core/events.js';
+import {
+  type HistoryPhase,
+  type HistoryRecord,
+  HISTORY_SCHEMA_VERSION,
+  type IssueOutcome,
+  JsonlHistoryStore,
+} from './core/issue-history.js';
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
 import { SCRATCH } from './core/paths.js';
@@ -54,6 +62,9 @@ export class Orchestrator {
   private readonly review: ReviewOrchestrator;
   private readonly planCritique: PlanCritiqueOrchestrator;
   private readonly cost = new CostTracker();
+  private readonly history = new JsonlHistoryStore();
+  /** Timing-wrapped agent (measures AI working time); the injected adapter is wrapped. */
+  private readonly agent: AgentAdapter;
   private readonly limiter: ConcurrencyLimiter;
   private readonly store = new IssueStateStore();
   private readonly signals: Signals;
@@ -68,16 +79,19 @@ export class Orchestrator {
     private readonly tracker: TrackerAdapter,
     private readonly router: RepositoryRouter,
     private readonly workspace: WorkspaceAdapter,
-    private readonly agent: AgentAdapter,
+    agent: AgentAdapter,
     private readonly channel: ChannelAdapter,
     private readonly profile: ResolvedProfile,
     /** Authenticated clone URL of the read-only reference/conventions repo (or undefined). */
     private readonly referenceCloneUrl?: string,
   ) {
-    this.review = new ReviewOrchestrator(workspace.io, agent, config.review, profile, config.agent.turn_timeout_ms);
+    // Wrap the agent once so every turn — planning, critique, review — is timed into
+    // the issue's "AI working" total (recorded in the history entry on completion).
+    this.agent = new TimingAgent(agent, (id, ms) => this.recordAgentMs(id, ms));
+    this.review = new ReviewOrchestrator(workspace.io, this.agent, config.review, profile, config.agent.turn_timeout_ms);
     this.planCritique = new PlanCritiqueOrchestrator(
       workspace.io,
-      agent,
+      this.agent,
       config.plan_review,
       profile,
       config.agent.turn_timeout_ms,
@@ -87,6 +101,79 @@ export class Orchestrator {
 
     this.channel.onApprove((id, detail) => this.handleApprove(id, detail));
     this.channel.onFeedback((id, text) => this.handleFeedback(id, text));
+  }
+
+  /** Accumulate an agent turn's duration onto the issue (persisted, survives restart). */
+  private recordAgentMs(identifier: string, ms: number): void {
+    const rt = this.store.get(identifier);
+    if (!rt) return;
+    rt.agentActiveMs = (rt.agentActiveMs ?? 0) + ms;
+    this.store.upsert(rt);
+  }
+
+  /** Append a terminal history record for an issue (called just before it's dropped
+   *  from the live store). Tracker-independent: title/url/kind are snapshotted here. */
+  private archive(rt: IssueRuntime, outcome: IssueOutcome): void {
+    try {
+      this.history.append(this.buildHistoryRecord(rt, outcome));
+    } catch (err) {
+      logger.child(rt.identifier).warn('history archive failed (non-fatal)', String(err));
+    }
+  }
+
+  private buildHistoryRecord(rt: IssueRuntime, outcome: IssueOutcome): HistoryRecord {
+    const endedAt = Date.now();
+    const startedAt = rt.startedAt ?? endedAt;
+    const wallMs = Math.max(0, endedAt - startedAt);
+    const agentActiveMs = rt.agentActiveMs ?? 0;
+
+    // Phase timeline + setup time, derived from this issue's events (still buffered
+    // until cleanup clears them). setup = start → first "planning" phase (image+clone).
+    const phaseEvents = bus.recent(rt.identifier).filter((e) => e.kind === 'phase' && e.phase);
+    const phases: HistoryPhase[] = phaseEvents.map((e, i) => ({
+      phase: e.phase!,
+      at: e.ts,
+      durationMs: Math.max(0, (i + 1 < phaseEvents.length ? phaseEvents[i + 1]!.ts : endedAt) - e.ts),
+    }));
+    const firstPlanning = phaseEvents.find((e) => e.phase === 'planning');
+    const setupMs = firstPlanning ? Math.max(0, firstPlanning.ts - startedAt) : 0;
+    const humanWaitMs = Math.max(0, wallMs - agentActiveMs - setupMs);
+    const failoverUsed = bus
+      .recent(rt.identifier)
+      .some((e) => e.label.includes('소진') || e.label.includes('전환') || e.label.toLowerCase().includes('failover'));
+
+    const cost = this.cost.get(rt.identifier);
+    const repoKeys = Object.keys(rt.baseCommits ?? {});
+
+    return {
+      v: HISTORY_SCHEMA_VERSION,
+      identifier: rt.identifier,
+      title: rt.title,
+      url: rt.url,
+      trackerKind: this.tracker.kind,
+      repoKeys: repoKeys.length ? repoKeys : this.router.all().map((r) => r.key),
+      backend: this.config.workspace.backend,
+      outcome,
+      prs: (rt.prs ?? []).map((p) => ({ repoKey: p.repoKey, number: p.number, url: p.url })),
+      startedAt,
+      endedAt,
+      wallMs,
+      agentActiveMs,
+      humanWaitMs,
+      setupMs,
+      dispatches: cost?.dispatches ?? 0,
+      phases,
+      costUsd: cost?.costUsd ?? 0,
+      inputTokens: cost?.inputTokens ?? 0,
+      outputTokens: cost?.outputTokens ?? 0,
+      models: {
+        planning: this.config.agent.models.planning ?? '',
+        implementation: this.config.agent.models.implementation ?? '',
+        review: this.config.agent.models.review ?? '',
+      },
+      agentProvider: this.config.agent.provider,
+      failoverUsed,
+    };
   }
 
   // ───────────────────────────────────────────────────────── lifecycle
@@ -127,6 +214,7 @@ export class Orchestrator {
         logger.child(rt.identifier).info(`recovered (phase=${rt.phase})`);
       } else if (rt.phase !== 'pr_open') {
         logger.child(rt.identifier).warn('workspace missing on recovery; dropping state');
+        this.archive(rt, 'failed');
         this.store.delete(rt.identifier);
       } else {
         active.push(rt.identifier); // PR open: still tracked for comments/merge
@@ -239,7 +327,7 @@ export class Orchestrator {
     }
 
     const repoKey = (issue.repoKey && repos.some((r) => r.key === issue.repoKey) ? issue.repoKey : repos[0]?.key) ?? '';
-    const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url, baseCommits };
+    const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url, baseCommits, startedAt: Date.now() };
     this.store.upsert(rt);
     bus.emitEvent({ identifier, kind: 'phase', phase: 'planning', label: `📋 Planning started — ${issue.title}` });
 
@@ -283,7 +371,7 @@ export class Orchestrator {
     repos: RepositoryAdapter[],
   ): Promise<{ ok: boolean; message?: string }> {
     const repoKey = (issue.repoKey && repos.some((r) => r.key === issue.repoKey) ? issue.repoKey : repos[0]?.key) ?? '';
-    const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url };
+    const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url, startedAt: Date.now() };
     this.store.upsert(rt);
     bus.emitEvent({ identifier, kind: 'notice', label: '🐳 Preparing worker image…' });
 
@@ -305,6 +393,7 @@ export class Orchestrator {
           onLog: (line) => bus.emitEvent({ identifier, kind: 'activity', label: `🐳 ${line.slice(0, 2000)}` }),
         });
         if (!result.ok) {
+          this.archive(rt, 'failed');
           this.store.delete(identifier);
           this.limiter.release(identifier);
           bus.emitEvent({ identifier, kind: 'error', label: `❌ Worker image ${result.reason}${result.message ? `: ${result.message}` : ''}` });
@@ -331,6 +420,7 @@ export class Orchestrator {
 
         await this.prepareAndPlan(rt, issue, repos, handle);
       } catch (err) {
+        this.archive(rt, 'failed');
         this.store.delete(identifier);
         this.limiter.release(identifier);
         bus.emitEvent({ identifier, kind: 'error', label: `❌ Setup failed: ${oneLineErr(err)}` });
@@ -414,6 +504,7 @@ export class Orchestrator {
       this.clearApproval(rt);
       if ('clearIssue' in this.channel) (this.channel as { clearIssue(id: string): void }).clearIssue(identifier);
       bus.emitEvent({ identifier, kind: 'notice', label: '🗑 Removed from Corral (workspace cleaned, tracker untouched)' });
+      this.archive(rt, 'removed');
       this.cost.clear(identifier);
       this.store.delete(identifier);
       this.limiter.release(identifier);
@@ -433,6 +524,7 @@ export class Orchestrator {
         this.handles.delete(identifier);
       }
       this.clearApproval(rt);
+      this.archive(rt, 'failed'); // the aborted attempt is part of the history
       this.cost.clear(identifier);
       this.store.delete(identifier);
       this.limiter.release(identifier);
@@ -1046,6 +1138,7 @@ export class Orchestrator {
     }
     if ('clearIssue' in this.channel) (this.channel as { clearIssue(id: string): void }).clearIssue(identifier);
     bus.emitEvent({ identifier, kind: 'phase', phase: 'done', label: '🎉 Done (cleaned up)' });
+    this.archive(rt, 'completed');
     this.cost.clear(identifier);
     this.store.delete(identifier);
     this.limiter.release(identifier);
@@ -1055,6 +1148,16 @@ export class Orchestrator {
   /** Snapshot for the dashboard: each tracked issue + its accumulated cost. */
   snapshot(): Array<IssueRuntime & { cost: number }> {
     return this.store.all().map((rt) => ({ ...rt, cost: this.cost.get(rt.identifier)?.costUsd ?? 0 }));
+  }
+
+  /** Past issue runs (completed/removed/failed), newest first. Tracker-independent. */
+  listHistory(opts?: { limit?: number; offset?: number; outcome?: IssueOutcome }): HistoryRecord[] {
+    return this.history.list(opts);
+  }
+
+  /** Most recent history record for one identifier (or undefined). */
+  getHistory(identifier: string): HistoryRecord | undefined {
+    return this.history.get(identifier);
   }
 
   // ─────────────────────────────────────────────────────────── helpers
