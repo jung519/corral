@@ -440,6 +440,7 @@ export class Orchestrator {
 
         await this.prepareAndPlan(rt, issue, repos, handle);
       } catch (err) {
+        logger.child(identifier).error('setup failed', oneLineErr(err));
         this.archive(rt, 'failed');
         this.store.delete(identifier);
         this.limiter.release(identifier);

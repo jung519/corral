@@ -71,6 +71,10 @@ export class DockerWorkspace implements WorkspaceAdapter {
         `git clone --branch ${shq(repo.baseBranch)} ${shq(repo.cloneUrl)} ${shq(dest)}`,
       );
       if (clone.code !== 0) {
+        // Log the reason to the per-issue file (not just the thrown error) so a setup
+        // failure — e.g. a missing base branch on a newly-added repo — is diagnosable
+        // from the log alone, not only the transient "Setup failed" UI event.
+        log.error(`clone failed (${repo.key}, branch ${repo.baseBranch})`, clone.stderr.slice(-400));
         await this.cleanup(handle);
         throw new Error(`clone failed (${repo.key}): ${clone.stderr}`);
       }
