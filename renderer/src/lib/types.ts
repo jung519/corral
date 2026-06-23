@@ -56,3 +56,30 @@ export interface CommandResult {
   merged?: boolean;
   message?: string;
 }
+
+/** Mirrors HistoryRecord in src/core/issue-history.ts. */
+export interface HistoryRecord {
+  v: number;
+  identifier: string;
+  title?: string;
+  url?: string;
+  trackerKind: string;
+  repoKeys: string[];
+  backend: 'local' | 'docker';
+  outcome: 'completed' | 'removed' | 'failed';
+  prs: { repoKey: string; number: number; url?: string; merged?: boolean }[];
+  startedAt: number;
+  endedAt: number;
+  wallMs: number;
+  agentActiveMs: number;
+  humanWaitMs: number;
+  setupMs: number;
+  dispatches: number;
+  phases: { phase: string; at: number; durationMs: number }[];
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  models: { planning: string; implementation: string; review: string };
+  agentProvider: string;
+  failoverUsed?: boolean;
+}

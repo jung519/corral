@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import About from './About.svelte';
   import Dashboard from './Dashboard.svelte';
+  import History from './History.svelte';
   import Logs from './Logs.svelte';
   import Settings from './Settings.svelte';
   import Toast from './Toast.svelte';
@@ -29,6 +30,7 @@
 
   const nav = [
     { hash: '#/', key: 'nav.dashboard' },
+    { hash: '#/history', key: 'nav.history' },
     { hash: '#/logs', key: 'nav.logs' },
     { hash: '#/settings', key: 'nav.settings' },
     { hash: '#/about', key: 'nav.about' },
@@ -54,7 +56,9 @@
       </ul>
     </nav>
     <div class="content">
-      {#if route.startsWith('#/logs')}
+      {#if route.startsWith('#/history')}
+        <History />
+      {:else if route.startsWith('#/logs')}
         <Logs />
       {:else if route.startsWith('#/settings')}
         <Settings />

@@ -1,4 +1,4 @@
-import type { Candidate, CommandResult, CorralEvent, StateResponse } from './types';
+import type { Candidate, CommandResult, CorralEvent, HistoryRecord, StateResponse } from './types';
 
 /** When the renderer is loaded from file:// (Electron), relative URLs don't reach
  * the control plane — point them at the localhost server (CORS is enabled there). */
@@ -21,6 +21,12 @@ export async function getState(): Promise<StateResponse> {
 
 export async function getStatus(): Promise<{ configured: boolean }> {
   return (await fetch(apiBase() + '/api/status')).json() as Promise<{ configured: boolean }>;
+}
+
+export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
+  const q = outcome ? `?outcome=${encodeURIComponent(outcome)}` : '';
+  const data = (await (await fetch(apiBase() + '/api/history' + q)).json()) as { records: HistoryRecord[] };
+  return data.records ?? [];
 }
 
 export async function getCandidates(): Promise<Candidate[]> {
