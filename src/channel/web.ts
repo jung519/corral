@@ -11,7 +11,10 @@ import { bus } from '../core/events.js';
 import { logger } from '../core/logger.js';
 import type { ApprovalDetail, ApprovalRequest, ChannelAdapter } from '../core/types.js';
 
-marked.setOptions({ gfm: true, breaks: false });
+// breaks: true → honor the agent's single newlines as <br> (GitHub-style). Review
+// findings put the file ref and the detail on separate lines without a blank line
+// between them; without this they collapse into one dense paragraph.
+marked.setOptions({ gfm: true, breaks: true });
 
 export interface PendingAction {
   id: string;
