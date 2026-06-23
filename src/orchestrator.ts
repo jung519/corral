@@ -127,7 +127,15 @@ export class Orchestrator {
    *  from the live store). Tracker-independent: title/url/kind are snapshotted here. */
   private archive(rt: IssueRuntime, outcome: IssueOutcome): void {
     try {
-      this.history.append(this.buildHistoryRecord(rt, outcome));
+      const record = this.buildHistoryRecord(rt, outcome);
+      // Skip trivially-empty attempts (e.g. a restart right after start, or an aborted
+      // setup): no agent work, no dispatch, no PR. Recording these as "failed" is noise
+      // and collides in the list with the live re-run of the same id. Completed runs are
+      // always kept (completion is meaningful even if cheap).
+      if (outcome !== 'completed' && record.dispatches === 0 && record.agentActiveMs === 0 && record.prs.length === 0) {
+        return;
+      }
+      this.history.append(record);
     } catch (err) {
       logger.child(rt.identifier).warn('history archive failed (non-fatal)', String(err));
     }
