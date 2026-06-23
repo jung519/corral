@@ -103,6 +103,18 @@ export class Orchestrator {
     this.channel.onFeedback((id, text) => this.handleFeedback(id, text));
   }
 
+  /** Provider-specific guidance when the agent has no/invalid credential (login_required). */
+  private loginHelp(): string {
+    switch (this.config.agent.provider) {
+      case 'claude':
+        return '⚠️ Claude 인증이 안 됩니다(로그인/자격증명 없음). 호스트에서 claude 로그인 또는 구독 토큰(claude setup-token)을 설정한 뒤 다시 시도하세요.';
+      case 'gemini':
+        return '⚠️ Gemini 인증이 안 됩니다. GEMINI_API_KEY를 설정하거나 gemini 로그인 후 다시 시도하세요.';
+      default:
+        return `⚠️ ${this.config.agent.provider} 인증이 안 됩니다(자격증명 없음/무효). 설정에서 키 또는 로그인을 확인하세요.`;
+    }
+  }
+
   /** Accumulate an agent turn's duration onto the issue (persisted, survives restart). */
   private recordAgentMs(identifier: string, ms: number): void {
     const rt = this.store.get(identifier);
@@ -669,13 +681,20 @@ export class Orchestrator {
         allowedTools: a.allowed_tools,
       });
       this.cost.add(rt.identifier, result);
-      if (result.error === 'auth') {
-        // Reached only when every configured agent (primary + fallbacks) failed auth.
+      if (result.error === 'login_required') {
+        // A missing/invalid credential — a SETUP problem, not exhausted capacity. We do
+        // NOT silently fail over to another provider; surface it so the user fixes auth.
+        rt.phase = 'auth_error_waiting';
+        this.store.upsert(rt);
+        bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: this.loginHelp() });
+        await this.channel.notify(rt.identifier, this.loginHelp());
+      } else if (result.error === 'auth') {
+        // Reached only when every configured agent (primary + fallbacks) ended/expired.
         rt.phase = 'auth_error_waiting';
         this.store.upsert(rt);
         await this.channel.notify(
           rt.identifier,
-          'Agent authentication appears to have expired. Re-authenticate on the host, then let us know.',
+          'Agent authentication expired mid-run (session/account ended). Re-authenticate on the host, then let us know.',
         );
       } else if (result.error === 'rate_limit') {
         // Every agent is out of capacity for now; the run is retryable once a limit resets.

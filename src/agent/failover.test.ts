@@ -74,6 +74,15 @@ describe('FailoverAgent', () => {
     }
   });
 
+  it('does NOT fail over on login_required (a setup error) — returns it as-is', async () => {
+    const a = member('a', [fail('login_required')]);
+    const b = member('b', [ok()]);
+    const r = await new FailoverAgent([a, b]).run(ws, issue, opts());
+    expect(r.error).toBe('login_required');
+    expect((a.adapter as FakeAgent).calls).toHaveLength(1);
+    expect((b.adapter as FakeAgent).calls).toHaveLength(0); // never switched providers
+  });
+
   it('returns the last failure when every agent is exhausted', async () => {
     const fa = new FailoverAgent([member('a', [fail('rate_limit')]), member('b', [fail('auth')])]);
     const r = await fa.run(ws, issue, opts());

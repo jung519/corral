@@ -172,8 +172,14 @@ export interface AgentRunResult {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
-  /** Set when the run failed in a way the orchestrator must react to. */
-  error?: 'timeout' | 'auth' | 'crashed' | 'budget' | 'rate_limit';
+  /**
+   * Set when the run failed in a way the orchestrator must react to.
+   * - `login_required`: no/invalid credential — a setup error (NOT failover-eligible).
+   * - `auth`: authenticated then the session/account ended mid-run (failover-eligible).
+   * - `rate_limit` / `budget`: out of capacity (failover-eligible).
+   * - `timeout` / `crashed`: transient/bug — retried on the same agent.
+   */
+  error?: 'timeout' | 'auth' | 'login_required' | 'crashed' | 'budget' | 'rate_limit';
   exitCode: number | null;
 }
 

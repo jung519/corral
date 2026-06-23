@@ -7,6 +7,9 @@
  * Trigger = the active run returns a fail-over error (rate_limit / auth / budget):
  * its quota/window is spent or its account ended. timeout/crashed are NOT triggers —
  * those are transient/bug failures the orchestrator retries on the same agent.
+ * login_required is NOT a trigger either: a missing/invalid credential is a setup
+ * error, not exhausted capacity — it's returned as-is so the orchestrator surfaces it
+ * (don't silently mask a misconfigured primary by switching providers).
  *
  * State is account-wide (shared across all issues): if account #1's quota is spent,
  * every issue should move to #2. A cooldown periodically retries from the top so a
@@ -64,12 +67,14 @@ export class FailoverAgent implements AgentAdapter {
         return result;
       }
 
-      // Exhausted — advance and tell the user. The error surfaces only if every agent fails.
+      // Out of capacity — advance and tell the user. The error surfaces only if every
+      // agent fails. Word it by cause: a spent quota vs an ended/expired account.
       lastResult = result;
       const next = this.members[i + 1];
+      const reason = result.error === 'auth' ? '인증 만료/계정 종료' : '사용량 소진';
       const msg = next
-        ? `⚠️ ${member.label} 사용량 소진(${result.error}) → ${next.label}(으)로 전환`
-        : `❌ 모든 에이전트 사용량 소진 — 마지막: ${member.label}(${result.error})`;
+        ? `⚠️ ${member.label} ${reason}(${result.error}) → ${next.label}(으)로 전환`
+        : `❌ 모든 에이전트 중단 — 마지막: ${member.label}(${reason}, ${result.error})`;
       log.warn(`failover: ${member.label} exhausted (${result.error})${next ? ` → ${next.label}` : ' (last)'}`);
       bus.emitEvent({ identifier: workspace.id, kind: next ? 'notice' : 'error', label: msg });
 

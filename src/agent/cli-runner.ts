@@ -101,7 +101,11 @@ export function runCliTurn<T>(
       // rate_limit before auth: a spent quota is auto-recoverable (fail over), whereas
       // auth needs manual re-auth — don't misreport a usage limit as the latter.
       if (sawRateLimit) onEvent({ type: 'error', error: 'rate_limit' });
-      else if (sawAuth) onEvent({ type: 'error', error: 'auth' });
+      // Split auth: a turn that produced ZERO tokens never authenticated → it's a
+      // credential/login setup problem (login_required), NOT capacity exhaustion. A turn
+      // that ran (tokens > 0) and THEN hit auth is a mid-run session/account end (auth).
+      else if (sawAuth)
+        onEvent({ type: 'error', error: acc.inputTokens === 0 && acc.outputTokens === 0 ? 'login_required' : 'auth' });
       else if (timedOut) onEvent({ type: 'error', error: 'timeout' });
       else if (code !== 0) onEvent({ type: 'error', error: 'crashed', message: stderr.slice(-300) });
       log.info(`agent done code=${code} cost=$${acc.costUsd.toFixed(4)} tok=${acc.inputTokens}/${acc.outputTokens}`);
