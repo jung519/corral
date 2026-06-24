@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import About from './About.svelte';
   import Dashboard from './Dashboard.svelte';
   import History from './History.svelte';
   import Logs from './Logs.svelte';
@@ -9,6 +8,7 @@
   import Wizard from './Wizard.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
+  import { prefs } from './lib/prefs.svelte';
 
   let route = $state(location.hash);
 
@@ -29,9 +29,9 @@
     // while the window is focused. `approval` = decision needed; `error` = needs a look.
     const unsubNotify = api.subscribeEvents((e) => {
       if (!window.corral) return;
-      if (e.kind === 'approval') {
+      if (e.kind === 'approval' && prefs.notifyApproval) {
         void window.corral.notify(`🔔 ${t('notify.actionNeeded')}`, `${e.identifier}`);
-      } else if (e.kind === 'error') {
+      } else if (e.kind === 'error' && prefs.notifyError) {
         void window.corral.notify(`⚠️ ${t('notify.error')}`, `${e.identifier} — ${e.label}`);
       }
     });
@@ -49,7 +49,6 @@
     { hash: '#/history', key: 'nav.history' },
     { hash: '#/logs', key: 'nav.logs' },
     { hash: '#/settings', key: 'nav.settings' },
-    { hash: '#/about', key: 'nav.about' },
   ];
   function active(hash: string): boolean {
     if (hash === '#/') return route === '' || route === '#/' || route === '#';
@@ -78,8 +77,6 @@
         <Logs />
       {:else if route.startsWith('#/settings')}
         <Settings />
-      {:else if route.startsWith('#/about')}
-        <About />
       {:else}
         <Dashboard />
       {/if}
