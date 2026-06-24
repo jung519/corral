@@ -17,6 +17,8 @@
     "build:renderer": "pnpm -C renderer build",
     "build:desktop": "pnpm -C desktop build",
     "build:all": "pnpm build && pnpm build:renderer && pnpm build:desktop",
+    "app": "pnpm build:all && pnpm -C desktop start",
+    "app:run": "pnpm -C desktop start",
     "package": "pnpm build:all && pnpm -C desktop dist",
     "preinstall": "npx only-allow pnpm"
   },
