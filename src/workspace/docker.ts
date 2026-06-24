@@ -110,6 +110,14 @@ export class DockerWorkspace implements WorkspaceAdapter {
   }
 }
 
+/** Whether the Docker daemon is reachable — not just the CLI installed. A stopped
+ *  Docker Desktop makes `docker info` exit non-zero; checking up front lets the
+ *  orchestrator give a clear message instead of a cryptic image-build failure. */
+export async function dockerDaemonRunning(): Promise<boolean> {
+  const res = await run('docker', ['info', '--format', '{{.ServerVersion}}'], { timeoutMs: 8000 });
+  return res.code === 0 && res.stdout.trim().length > 0;
+}
+
 export function dockerOptionsFromConfig(cfg: WorkspaceConfig['docker'], imageOverride?: string): DockerBackendOptions {
   return {
     image: imageOverride ?? cfg?.image ?? 'corral-worker:latest',

@@ -53,6 +53,7 @@ import { PlanCritiqueOrchestrator } from './review/plan-critique.js';
 import { ReviewOrchestrator } from './review/orchestrator.js';
 import type { ReviewTarget } from './review/prompt.js';
 import { resolve } from 'node:path';
+import { dockerDaemonRunning } from './workspace/docker.js';
 import { ensureWorkerImage } from './workspace/image/index.js';
 
 /** Read-only reference/conventions repo clone path (under the workspace root). */
@@ -310,6 +311,16 @@ export class Orchestrator {
     const issue = await this.tracker.fetchIssueByIdentifier(identifier);
     if (!issue) return { ok: false, message: 'Issue not found.' };
     if (!this.limiter.tryAcquire(identifier)) return { ok: false, message: 'Concurrency limit reached.' };
+
+    // Docker backend needs a RUNNING daemon (not just the CLI). Check up front so a
+    // stopped Docker Desktop gives a clear message instead of a cryptic build failure.
+    if (this.config.workspace.backend === 'docker' && !(await dockerDaemonRunning())) {
+      this.limiter.release(identifier);
+      return {
+        ok: false,
+        message: 'Docker가 실행 중이 아닙니다. Docker Desktop을 켠 뒤 다시 시도하세요.',
+      };
+    }
 
     // Clone every configured repo side by side; the agent decides which to change.
     const repos = this.router.all();
