@@ -176,6 +176,10 @@ function runClaudeSetupToken(): Promise<{ ok: boolean; token?: string; error?: s
 
 // App name (menu bar, About, dock tooltip). Must be set before whenReady.
 app.setName('Corral');
+// …but Electron derives userData from the app name, so renaming would orphan all
+// existing config/secrets/state under a NEW dir. Pin userData to the historical
+// 'corral-desktop' location so the rename is cosmetic only.
+app.setPath('userData', join(app.getPath('appData'), 'corral-desktop'));
 
 app.whenReady().then(() => {
   // macOS dev: the dock icon comes from the bundle when packaged, but in `electron .`

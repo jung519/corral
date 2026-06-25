@@ -358,7 +358,7 @@
   {/if}
 
   <section>
-    {#if !embedded}<button class="close" onclick={() => (location.hash = '#/settings')}>✕ {t('wizard.exit')}</button>{/if}
+    {#if !embedded}<button class="close" onclick={() => (location.hash = '#/')}>✕ {t('wizard.exit')}</button>{/if}
     {#if step === 0}
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
