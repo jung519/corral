@@ -174,12 +174,11 @@ function runClaudeSetupToken(): Promise<{ ok: boolean; token?: string; error?: s
   });
 }
 
-// App name (menu bar, About, dock tooltip). Must be set before whenReady.
-app.setName('Corral');
-// …but Electron derives userData from the app name, so renaming would orphan all
-// existing config/secrets/state under a NEW dir. Pin userData to the historical
-// 'corral-desktop' location so the rename is cosmetic only.
-app.setPath('userData', join(app.getPath('appData'), 'corral-desktop'));
+// NB: do NOT app.setName('Corral'). Electron ties BOTH userData and safeStorage's
+// keychain entry ("<name> Safe Storage") to the app name — renaming orphans the
+// config dir AND makes existing encrypted secrets undecryptable (→ invalid tokens).
+// The "Corral" branding comes from the window title, the icon, and electron-builder's
+// productName (packaged app); the runtime name stays "corral-desktop".
 
 app.whenReady().then(() => {
   // macOS dev: the dock icon comes from the bundle when packaged, but in `electron .`
