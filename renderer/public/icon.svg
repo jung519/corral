@@ -1,0 +1,6 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <title>Corral</title>
+  <rect width="512" height="512" rx="114" fill="#0F172A"/>
+  <path d="M360 168 A132 132 0 1 0 360 344" fill="none" stroke="#FF6B5B" stroke-width="42" stroke-linecap="round"/>
+  <circle cx="300" cy="256" r="36" fill="#FF6B5B"/>
+</svg>

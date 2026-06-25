@@ -7,6 +7,7 @@
  */
 import { app, BrowserWindow, ipcMain, Notification } from 'electron';
 import { exec, execFile, spawn } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
@@ -39,11 +40,17 @@ function rendererUrl(hash: string): string {
 
 let win: BrowserWindow | undefined;
 
+/** Brand icon (coral C enclosure). Used for the dev dock icon and the Win/Linux
+ *  window icon; the packaged macOS icon comes from build/icon.icns via electron-builder. */
+const ICON_PNG = join(__dirname, '..', 'build', 'icon.png');
+
 function createWindow(): void {
   win = new BrowserWindow({
     width: 1100,
     height: 760,
-    backgroundColor: '#0d1117',
+    title: 'Corral',
+    backgroundColor: '#0F172A',
+    icon: existsSync(ICON_PNG) ? ICON_PNG : undefined,
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -167,7 +174,13 @@ function runClaudeSetupToken(): Promise<{ ok: boolean; token?: string; error?: s
   });
 }
 
+// App name (menu bar, About, dock tooltip). Must be set before whenReady.
+app.setName('Corral');
+
 app.whenReady().then(() => {
+  // macOS dev: the dock icon comes from the bundle when packaged, but in `electron .`
+  // it's the default Electron icon — set the brand icon explicitly so dev matches.
+  if (process.platform === 'darwin' && app.dock && existsSync(ICON_PNG)) app.dock.setIcon(ICON_PNG);
   registerIpc();
   createWindow();
   app.on('activate', () => {

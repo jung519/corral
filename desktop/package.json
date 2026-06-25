@@ -18,5 +18,21 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": ["electron", "esbuild"]
+  },
+  "build": {
+    "appId": "com.corral.app",
+    "productName": "Corral",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": ["dist/**/*", "preload.js"],
+    "extraResources": [{ "from": "../renderer/dist", "to": "renderer" }],
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.developer-tools"
+    },
+    "win": { "icon": "build/icon.png" },
+    "linux": { "icon": "build/icon.png" }
   }
 }
