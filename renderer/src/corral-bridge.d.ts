@@ -55,7 +55,11 @@ declare global {
         }): Promise<{ ok: boolean; detail?: string }>;
         reference(repo: string, token: string): Promise<{ ok: boolean; detail?: string }>;
       };
-      startOrchestrator(): Promise<{ ok: boolean; port: number }>;
+      startOrchestrator(): Promise<{ ok: boolean }>;
+      core: {
+        call(method: string, args?: Record<string, unknown>): Promise<unknown>;
+        onEvent(cb: (event: unknown) => void): () => void;
+      };
     };
   }
 }

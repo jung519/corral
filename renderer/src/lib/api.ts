@@ -1,78 +1,63 @@
+/**
+ * Control-plane client. Talks to the core over the Electron IPC bridge
+ * (`window.corral.core`) — there is NO HTTP server / port. Each function maps to one
+ * core method; `subscribeEvents` is the live bus-event stream.
+ */
 import type { Candidate, CommandResult, CorralEvent, HistoryRecord, StateResponse } from './types';
 
-/** When the renderer is loaded from file:// (Electron), relative URLs don't reach
- * the control plane — point them at the localhost server (CORS is enabled there). */
-export function apiBase(): string {
-  return typeof location !== 'undefined' && location.protocol === 'file:' ? 'http://localhost:4400' : '';
+function bridge() {
+  const c = typeof window !== 'undefined' ? window.corral : undefined;
+  if (!c) throw new Error('Corral desktop bridge unavailable');
+  return c;
 }
 
-async function post(path: string, body: unknown): Promise<CommandResult> {
-  const res = await fetch(apiBase() + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  return (await res.json()) as CommandResult;
+/** Request/response over the core IPC channel. */
+async function call<T>(method: string, args?: Record<string, unknown>): Promise<T> {
+  return (await bridge().core.call(method, args)) as T;
 }
 
-export async function getState(): Promise<StateResponse> {
-  return (await fetch(apiBase() + '/api/state')).json() as Promise<StateResponse>;
-}
-
-export async function getStatus(): Promise<{ configured: boolean }> {
-  return (await fetch(apiBase() + '/api/status')).json() as Promise<{ configured: boolean }>;
-}
-
-/** Whether Corral is configured. Prefers the Electron bridge (a file check that works
- * even when the control-plane server isn't running yet — e.g. on first run), and falls
- * back to the HTTP status in browser mode. Returns false on any failure. */
+/** Whether Corral is configured — a bridge file check (works before the core is up). */
 export async function isConfigured(): Promise<boolean> {
   try {
     if (typeof window !== 'undefined' && window.corral?.config) return await window.corral.config.exists();
-    return (await getStatus()).configured;
+    return false;
   } catch {
     return false;
   }
 }
 
+export async function getState(): Promise<StateResponse> {
+  return call<StateResponse>('state');
+}
+
 export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
-  const q = outcome ? `?outcome=${encodeURIComponent(outcome)}` : '';
-  const data = (await (await fetch(apiBase() + '/api/history' + q)).json()) as { records: HistoryRecord[] };
+  const data = await call<{ records: HistoryRecord[] }>('history', outcome ? { outcome } : undefined);
   return data.records ?? [];
 }
 
 export async function getCandidates(): Promise<Candidate[]> {
-  const data = (await (await fetch(apiBase() + '/api/candidates')).json()) as { candidates: Candidate[] };
+  const data = await call<{ candidates: Candidate[] }>('candidates');
   return data.candidates;
 }
 
-export const startIssue = (identifier: string): Promise<CommandResult> => post('/api/start', { identifier });
+export const startIssue = (identifier: string): Promise<CommandResult> => call('start', { identifier });
 export const completeIssue = (identifier: string, force = false): Promise<CommandResult> =>
-  post('/api/complete', { identifier, force });
-export const retryIssue = (identifier: string): Promise<CommandResult> => post('/api/retry', { identifier });
-export const removeIssue = (identifier: string): Promise<CommandResult> => post('/api/remove', { identifier });
-export const restartIssue = (identifier: string): Promise<CommandResult> => post('/api/restart', { identifier });
+  call('complete', { identifier, force });
+export const retryIssue = (identifier: string): Promise<CommandResult> => call('retry', { identifier });
+export const removeIssue = (identifier: string): Promise<CommandResult> => call('remove', { identifier });
+export const restartIssue = (identifier: string): Promise<CommandResult> => call('restart', { identifier });
 export const refineIssue = (identifier: string, focus: string): Promise<CommandResult> =>
-  post('/api/refine', { identifier, focus });
+  call('refine', { identifier, focus });
 export const approve = (id: string, selection?: string, text?: string): Promise<CommandResult> =>
-  post('/api/action', { id, type: 'approve', selection, text });
+  call('action', { id, type: 'approve', selection, text });
 export const feedback = (id: string, text: string): Promise<CommandResult> =>
-  post('/api/action', { id, type: 'feedback', text });
+  call('action', { id, type: 'feedback', text });
 
-export const setup = (input: {
-  config: string;
-  secrets: Array<{ service: string; account: string; value: string }>;
-}): Promise<CommandResult> => post('/api/setup', input);
-
-/** Subscribe to the SSE event stream; returns an unsubscribe fn. */
+/** Subscribe to the live event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {
-  const es = new EventSource(apiBase() + '/events');
-  es.onmessage = (m) => {
-    try {
-      onEvent(JSON.parse(m.data) as CorralEvent);
-    } catch {
-      /* ignore keep-alive / non-JSON */
-    }
-  };
-  return () => es.close();
+  try {
+    return bridge().core.onEvent((event) => onEvent(event as CorralEvent));
+  } catch {
+    return () => {};
+  }
 }

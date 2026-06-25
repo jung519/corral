@@ -27,7 +27,11 @@
       "buildResources": "build"
     },
     "files": ["dist/**/*", "preload.js"],
-    "extraResources": [{ "from": "../renderer/dist", "to": "renderer" }],
+    "extraResources": [
+      { "from": "../renderer/dist", "to": "renderer" },
+      { "from": "../dist", "to": "core/dist" },
+      { "from": "../WORKFLOW.md", "to": "core/WORKFLOW.md" }
+    ],
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools"

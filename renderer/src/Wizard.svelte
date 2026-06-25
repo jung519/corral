@@ -2,7 +2,6 @@
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
-  import * as api from './lib/api';
   import {
     buildConfigYaml,
     CORE_STATE_KEYS,
@@ -295,20 +294,12 @@
     }
     saving = true;
     try {
-      if (window.corral) {
-        // Write the config first so it always lands, even if a later step throws.
-        await window.corral.config.write(buildConfigYaml(s));
-        for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
-        // First-run brings the orchestrator up; an inline edit just persists config.
-        if (!embedded) await window.corral.startOrchestrator();
-      } else {
-        const out = await api.setup({ config: buildConfigYaml(s), secrets: secretsFor(s) });
-        if (!out.ok) {
-          error = out.message ?? 'Setup failed.';
-          saving = false;
-          return;
-        }
-      }
+      if (!window.corral) throw new Error('Corral desktop bridge unavailable');
+      // Write the config first so it always lands, even if a later step throws.
+      await window.corral.config.write(buildConfigYaml(s));
+      for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
+      // First-run brings the orchestrator up; an inline edit just persists config.
+      if (!embedded) await window.corral.startOrchestrator();
       // Keep the (non-secret) draft as the last-applied state so re-opening pre-fills.
       await saveDraft(s);
       if (embedded) {

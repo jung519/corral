@@ -10,8 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "dev": "tsx watch src/main.ts",
-    "start": "node dist/main.js",
+    "dev": "tsx watch src/ipc-main.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "build:renderer": "pnpm -C renderer build",

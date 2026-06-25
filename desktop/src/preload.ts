@@ -76,8 +76,19 @@ const api = {
     ): Promise<{ ok: boolean; properties?: Array<{ name: string; type: string; options: string[] }>; detail?: string }> =>
       ipcRenderer.invoke('notion:schema', token, dbId),
   },
-  /** Start the orchestrator child + reload into the dashboard. */
-  startOrchestrator: (): Promise<{ ok: boolean; port: number }> => ipcRenderer.invoke('orchestrator:start'),
+  /** After setup: respawn the core so it picks up the new config + secrets. */
+  startOrchestrator: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('orchestrator:start'),
+  /** Control plane over the core IPC channel (no HTTP port). `call` = request/response;
+   *  `onEvent` = the live bus-event stream (returns an unsubscribe fn). */
+  core: {
+    call: (method: string, args?: Record<string, unknown>): Promise<unknown> =>
+      ipcRenderer.invoke('core:call', method, args),
+    onEvent: (cb: (event: unknown) => void): (() => void) => {
+      const listener = (_e: unknown, event: unknown): void => cb(event);
+      ipcRenderer.on('core-event', listener);
+      return () => ipcRenderer.off('core-event', listener);
+    },
+  },
 };
 
 export type CorralBridge = typeof api;

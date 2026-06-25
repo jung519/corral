@@ -1,4 +1,4 @@
-/** Shapes mirrored from the control-plane API (src/server/dashboard.ts). */
+/** Shapes mirrored from the control-plane (src/ipc-host.ts). */
 
 export interface IssuePr {
   repoKey: string;

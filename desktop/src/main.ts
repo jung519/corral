@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
-import { orchestratorRunning, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
+import { callCore, restartOrchestrator, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
 import {
   fetchNotionSchema,
   type RepoTestInput,
@@ -24,9 +24,6 @@ import {
   validateGithub,
   validateNotion,
 } from './validators.js';
-
-/** Control-plane port the renderer talks to (kept in sync with the config default). */
-const CONTROL_PLANE_PORT = 4400;
 
 /** Renderer location: a Vite dev server in development, built files in production. */
 function rendererUrl(hash: string): string {
@@ -58,8 +55,10 @@ function createWindow(): void {
     },
   });
 
+  // Ensure the core (IPC control plane) is running whenever a window exists — covers
+  // first launch and macOS reopen-after-close. Idempotent (no-op if already up).
+  startOrchestrator();
   const firstRun = !configExists();
-  if (!firstRun) startOrchestrator();
   void win.loadURL(rendererUrl(firstRun ? '#/setup' : '#/'));
 }
 
@@ -91,11 +90,15 @@ function registerIpc(): void {
   ipcMain.handle('validate:github', (_e, token: string) => validateGithub(token));
   ipcMain.handle('validate:agent', (_e, provider: string, key: string) => validateAgent(provider, key));
 
+  // After setup (config + secrets just written): respawn the core so it picks up the
+  // new config and the freshly-saved keychain secrets (injected as env on spawn).
   ipcMain.handle('orchestrator:start', () => {
-    if (!orchestratorRunning()) startOrchestrator();
-    void win?.loadURL(rendererUrl('#/'));
-    return { ok: true, port: CONTROL_PLANE_PORT };
+    restartOrchestrator();
+    return { ok: true };
   });
+
+  // The renderer's control-plane calls + event stream, relayed over the core IPC channel.
+  ipcMain.handle('core:call', (_e, method: string, args?: Record<string, unknown>) => callCore(method, args));
 }
 
 /** Show an OS notification when human action is needed (approval / error). Suppressed
