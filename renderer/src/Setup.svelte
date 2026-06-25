@@ -33,10 +33,7 @@
   }
 
   onMount(() => {
-    void api
-      .getStatus()
-      .then((r) => (configured = r.configured))
-      .catch(() => (configured = undefined));
+    void api.isConfigured().then((c) => (configured = c));
     void refresh();
   });
 </script>
@@ -53,8 +50,6 @@
 {/snippet}
 
 <div class="view">
-  <h1>{t('settings.title')}</h1>
-
   {#if configured === false}
     <div class="card">
       <p class="note">{t('settings.notConfigured')}</p>
@@ -162,10 +157,6 @@
   .view {
     padding: 24px 28px;
     max-width: 820px;
-  }
-  h1 {
-    font-size: 18px;
-    margin: 0 0 6px;
   }
   h2 {
     font-size: 14px;

@@ -17,12 +17,9 @@
     window.addEventListener('hashchange', onHash);
     // First run lands on the wizard ONCE — but never traps: the user can close it
     // (→ dashboard, which shows a "set up" banner). We don't force the wizard.
-    api
-      .getStatus()
-      .then((s) => {
-        if (!s.configured && !location.hash.startsWith('#/setup')) location.hash = '#/setup';
-      })
-      .catch(() => {});
+    void api.isConfigured().then((configured) => {
+      if (!configured && !location.hash.startsWith('#/setup')) location.hash = '#/setup';
+    });
 
     // OS notifications when a human action is needed — fired app-wide (any tab) so a
     // pending approval doesn't sit unseen for hours. The main process suppresses these

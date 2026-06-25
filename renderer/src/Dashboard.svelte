@@ -28,10 +28,7 @@
 
   onMount(() => {
     void refresh();
-    void api
-      .getStatus()
-      .then((s) => (configured = s.configured))
-      .catch(() => {});
+    void api.isConfigured().then((c) => (configured = c));
     const unsub = api.subscribeEvents(() => void refresh());
     const poll = setInterval(() => void refresh(), 15000);
     return () => {

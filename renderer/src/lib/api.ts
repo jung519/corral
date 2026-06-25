@@ -23,6 +23,18 @@ export async function getStatus(): Promise<{ configured: boolean }> {
   return (await fetch(apiBase() + '/api/status')).json() as Promise<{ configured: boolean }>;
 }
 
+/** Whether Corral is configured. Prefers the Electron bridge (a file check that works
+ * even when the control-plane server isn't running yet — e.g. on first run), and falls
+ * back to the HTTP status in browser mode. Returns false on any failure. */
+export async function isConfigured(): Promise<boolean> {
+  try {
+    if (typeof window !== 'undefined' && window.corral?.config) return await window.corral.config.exists();
+    return (await getStatus()).configured;
+  } catch {
+    return false;
+  }
+}
+
 export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
   const q = outcome ? `?outcome=${encodeURIComponent(outcome)}` : '';
   const data = (await (await fetch(apiBase() + '/api/history' + q)).json()) as { records: HistoryRecord[] };
