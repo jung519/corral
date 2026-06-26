@@ -1,15 +1,23 @@
 /** Setup-wizard state → corral.yaml + the secret writes. Secrets never go into the
  * config — only CredentialRef pointers do. Repositories are a list (multi-repo);
- * each repo has its own key + description + credential (account = key). */
+ * each repo has its own key + description + credential (account = key).
+ *
+ * Credential model: every provider has ONE account (key + oauth) stored at
+ * `serviceFor(provider):default` / `:oauth`. Accounts are configured independently in
+ * the "에이전트 계정" panel; assignment (single agent / per-stage / fallbacks) only
+ * *references* a configured provider — it never carries its own credentials. */
 import { t } from './i18n.svelte';
 
 export type RepoProvider = 'github' | 'gitlab' | 'bitbucket';
 export type TrackerKind = 'notion' | 'github_issues' | 'jira';
+export type Provider = 'claude' | 'gemini' | 'gpt';
 
 /** Functionally required tracker stages (entry / working / terminal). */
 export const CORE_STATE_KEYS = ['planning', 'in_progress', 'done'] as const;
 /** Optional refinements; omitted → they collapse onto a core column (see schema). */
 export const OPTIONAL_STATE_KEYS = ['plan_review', 'in_review'] as const;
+
+export const PROVIDERS: Provider[] = ['claude', 'gemini', 'gpt'];
 
 export interface RepoEntry {
   provider: RepoProvider;
@@ -37,30 +45,37 @@ export function newRepo(): RepoEntry {
   };
 }
 
+/** One provider's independent account. `key` = API key (BYOK); `oauth` = subscription
+ *  token (claude setup-token) or base64 codex auth (gpt). Empty = rely on the CLI's own
+ *  login (local) or claude host-login mount (docker). Persisted to the keychain only. */
+export interface AccountCred {
+  key: string;
+  oauth: string;
+}
+
 /** One stage's agent in per-stage mode: provider + the model for that stage. */
 export interface StageAgent {
-  provider: WizardState['provider'];
+  provider: Provider;
   model: string;
 }
 
 /** A fallback agent: tried (in list order) when the agent above it is out of capacity.
- *  Always cli transport for now; carries its own credentials + per-stage models. */
+ *  References a configured provider (credentials come from that provider's account). */
 export interface FallbackEntry {
-  provider: WizardState['provider'];
-  key: string; // API key (BYOK) — optional for cli (own login)
-  oauthToken: string; // claude subscription token (claude only)
+  provider: Provider;
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
 }
 
 export interface WizardState {
-  provider: 'claude' | 'gemini' | 'gpt';
+  provider: Provider;
   transport: 'api' | 'cli';
-  agentKey: string;
-  /** Claude subscription token from `claude setup-token` — lets docker auth with no
-   * API key (subscription, not pay-per-use). Stored in the keychain, never in config. */
-  agentOauthToken: string;
+  /** Independent per-provider accounts (credentials). Keyed by provider. */
+  accounts: Record<Provider, AccountCred>;
+  /** Providers the user explicitly verified (CLI install/login check passed). Lets a
+   *  CLI agent count as "configured" without a stored token. Non-secret → kept in draft. */
+  cliVerified: Partial<Record<Provider, boolean>>;
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
@@ -70,8 +85,6 @@ export interface WizardState {
    *  single provider above runs every stage (with the per-stage models). */
   perStageAgents: boolean;
   stages: { planning: StageAgent; implementation: StageAgent; review: StageAgent };
-  /** Credentials per provider (per-stage mode shares one credential per provider). */
-  stageCred: Partial<Record<WizardState['provider'], { key: string; oauth: string }>>;
   repos: RepoEntry[];
   trackerKind: TrackerKind;
   notionDb: string;
@@ -104,12 +117,16 @@ export interface WizardState {
   referenceToken: string;
 }
 
+function emptyAccounts(): Record<Provider, AccountCred> {
+  return { claude: { key: '', oauth: '' }, gemini: { key: '', oauth: '' }, gpt: { key: '', oauth: '' } };
+}
+
 export function initialState(): WizardState {
   return {
     provider: 'claude',
     transport: 'cli',
-    agentKey: '',
-    agentOauthToken: '',
+    accounts: emptyAccounts(),
+    cliVerified: {},
     planningModel: 'opus',
     implementationModel: 'sonnet',
     reviewModel: 'opus',
@@ -120,7 +137,6 @@ export function initialState(): WizardState {
       implementation: { provider: 'claude', model: 'sonnet' },
       review: { provider: 'claude', model: 'opus' },
     },
-    stageCred: {},
     repos: [{ ...newRepo(), key: 'main' }],
     trackerKind: 'notion',
     notionDb: '',
@@ -149,20 +165,20 @@ export function initialState(): WizardState {
   };
 }
 
-export function serviceFor(provider: WizardState['provider']): string {
+export function serviceFor(provider: Provider): string {
   return { claude: 'anthropic', gemini: 'google', gpt: 'openai' }[provider];
 }
 
 // Use the CLIs' own version-agnostic tier aliases, never concrete version numbers
 // (those churn constantly and would go stale). Each CLI resolves the alias to its
 // current model: claude opus/sonnet/haiku, gemini pro/flash/flash-lite (also `auto`).
-export const MODELS: Record<WizardState['provider'], string[]> = {
+export const MODELS: Record<Provider, string[]> = {
   claude: ['opus', 'sonnet', 'haiku'],
   gemini: ['pro', 'flash', 'flash-lite'],
   gpt: ['gpt-5', 'gpt-5-mini', 'o4-mini'],
 };
 
-export function defaultModels(provider: WizardState['provider']): {
+export function defaultModels(provider: Provider): {
   planning: string;
   implementation: string;
   review: string;
@@ -172,13 +188,11 @@ export function defaultModels(provider: WizardState['provider']): {
   return { planning: first, implementation: m[1] ?? first, review: first };
 }
 
-/** A new fallback entry defaulting to the given provider's models (cli transport). */
-export function newFallback(provider: WizardState['provider'] = 'gemini'): FallbackEntry {
+/** A new fallback entry defaulting to the given provider's models. */
+export function newFallback(provider: Provider = 'gemini'): FallbackEntry {
   const d = defaultModels(provider);
   return {
     provider,
-    key: '',
-    oauthToken: '',
     planningModel: d.planning,
     implementationModel: d.implementation,
     reviewModel: d.review,
@@ -202,43 +216,69 @@ function vt(id: string, vars?: Record<string, string>): string {
  * (editing keeps the saved key). Default: nothing saved (first-run requires keys). */
 export type SecretSavedFn = (service: string, account: string) => boolean;
 
-/** Providers that can't run under the docker backend: gemini (no in-container token,
- *  no ~/.gemini mount). claude (oauth token / mount) and gpt (codex auth import / API
- *  key) ARE supported. Disallowed as primary OR fallback when the backend is docker. */
-function dockerBlocked(provider: string): boolean {
+// ───────────────────────────────────────── account / capability helpers
+//
+// "configured"  = the agent has a usable auth path → may be assigned to a role.
+// "runnable"    = the agent can actually execute under the *current backend*. Gemini
+//                 can be configured but never runs under docker (no in-container auth);
+//                 this is enforced at RUN time (warned in the UI, blocked in the core),
+//                 never by hiding the option.
+
+/** Gemini cannot run under the docker backend (no in-container token / ~/.gemini mount).
+ *  claude (oauth/mount) and gpt (codex auth import / API key) are supported. */
+export function dockerBlocked(provider: Provider): boolean {
   return provider === 'gemini';
 }
+
+/** Whether this provider can execute under the current backend. */
+export function runnableInBackend(s: WizardState, provider: Provider): boolean {
+  return !(s.backend === 'docker' && dockerBlocked(provider));
+}
+
+/** A stored or freshly-entered credential exists for this provider. */
+export function hasCred(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): boolean {
+  const a = s.accounts[p];
+  const svc = serviceFor(p);
+  return (
+    !!a.key.trim() || !!a.oauth.trim() || isSaved(svc, 'default') || isSaved(svc, 'oauth')
+  );
+}
+
+/** Does this provider have a usable auth path (so it may be assigned to a role)?
+ *  - a stored/entered credential, or
+ *  - cli transport on the local backend (the CLI brings its own login), or
+ *  - claude with the docker host-login mount, or
+ *  - the user verified the CLI (install/login check passed). */
+export function configured(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): boolean {
+  if (hasCred(s, p, isSaved)) return true;
+  if (s.transport === 'cli' && s.backend === 'local') return true;
+  if (p === 'claude' && s.backend === 'docker' && s.dockerMountLogin) return true;
+  return !!s.cliVerified[p];
+}
+
 /** Distinct providers used in per-stage mode (plan/build/review). */
-export function stageProviders(s: WizardState): Array<WizardState['provider']> {
+export function stageProviders(s: WizardState): Array<Provider> {
   return [...new Set([s.stages.planning.provider, s.stages.implementation.provider, s.stages.review.provider])];
 }
-export function dockerProviderConflict(s: WizardState): boolean {
-  if (s.backend !== 'docker') return false;
-  const providers = [s.provider, ...s.fallbacks.map((f) => f.provider)];
-  if (s.perStageAgents) providers.push(...stageProviders(s));
-  return providers.some(dockerBlocked);
+
+/** All providers referenced by the current assignment (primary/stages + fallbacks). */
+export function assignedProviders(s: WizardState): Array<Provider> {
+  const used = s.perStageAgents ? stageProviders(s) : [s.provider];
+  return [...new Set([...used, ...s.fallbacks.map((f) => f.provider)])];
+}
+
+/** Assigned providers that cannot run under the current backend (→ run-time block). */
+export function unrunnableAssigned(s: WizardState): Array<Provider> {
+  return assignedProviders(s).filter((p) => !runnableInBackend(s, p));
 }
 
 export function validateStep(step: number, s: WizardState, isSaved: SecretSavedFn = () => false): string {
   switch (step) {
     case 0:
-      if (dockerProviderConflict(s)) return vt('validate.geminiDocker');
-      if (s.transport === 'api' && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
-        return vt('validate.apiKeyApi');
-      // Docker has no auth source unless one of: host-login mount, an API key, or a
-      // subscription OAuth token (claude setup-token). Require at least one. In per-stage
-      // mode each provider carries its own credential — the runtime surfaces a clear
-      // login_required if one is missing, so we don't strictly gate here.
-      if (
-        !s.perStageAgents &&
-        s.backend === 'docker' &&
-        !s.dockerMountLogin &&
-        !s.agentKey.trim() &&
-        !isSaved(serviceFor(s.provider), 'default') &&
-        !s.agentOauthToken.trim() &&
-        !isSaved(serviceFor(s.provider), 'oauth')
-      )
-        return vt('validate.apiKeyDocker');
+      // Docker + Gemini is NOT blocked here — it can be configured; the run is cancelled
+      // at dispatch time with a clear message. Assignment dropdowns already disable
+      // providers that have no auth path at all (see `configured`).
+      if (s.transport === 'api' && !hasCred(s, s.provider, isSaved)) return vt('validate.apiKeyApi');
       return '';
     case 1: {
       if (s.repos.length === 0) return vt('validate.repoMin');
@@ -275,8 +315,6 @@ export function validateStep(step: number, s: WizardState, isSaved: SecretSavedF
       }
       return '';
     case 3:
-      // Workspace step: catch a docker+gemini combo even when the AI step isn't open.
-      if (dockerProviderConflict(s)) return vt('validate.geminiDocker');
       return '';
     case 4:
       if (!Number.isInteger(s.port) || s.port <= 0) return vt('validate.port');
@@ -356,46 +394,41 @@ function trackerYaml(s: WizardState): string[] {
   return lines;
 }
 
-/** YAML for agent.fallbacks (one ordered entry each). Credential accounts are unique
- *  per index (fb0, fb1, …) so multiple agents — even same provider — never collide. */
+/** Credential + oauth_credential pointers for a provider's shared account. */
+function credLines(provider: Provider, indent: string): string[] {
+  const svc = serviceFor(provider);
+  return [
+    `${indent}credential: { service: ${svc}, account: default }`,
+    `${indent}oauth_credential: { service: ${svc}, account: oauth }`,
+  ];
+}
+
+/** YAML for agent.fallbacks (one ordered entry each). Credentials come from the
+ *  provider's shared account (service:default / :oauth). */
 function fallbackYaml(s: WizardState): string[] {
   if (s.fallbacks.length === 0) return [];
   const lines = ['  fallbacks:'];
-  s.fallbacks.forEach((f, i) => {
-    const svc = serviceFor(f.provider);
-    lines.push(
-      `    - provider: ${f.provider}`,
-      '      transport: cli',
-      `      credential: { service: ${svc}, account: fb${i} }`,
-    );
-    if (f.provider === 'claude') lines.push(`      oauth_credential: { service: ${svc}, account: fb${i}-oauth }`);
+  for (const f of s.fallbacks) {
+    lines.push(`    - provider: ${f.provider}`, '      transport: cli', ...credLines(f.provider, '      '));
     lines.push(
       '      models:',
       `        planning: ${yamlStr(f.planningModel)}`,
       `        implementation: ${yamlStr(f.implementationModel)}`,
       `        review: ${yamlStr(f.reviewModel)}`,
     );
-  });
+  }
   return lines;
 }
 
-/** YAML for agent.stages (per-stage provider/model overrides). Credentials are keyed
- *  per provider (service:default / :oauth), shared across stages using that provider. */
+/** YAML for agent.stages (per-stage provider/model overrides). Credentials come from
+ *  the provider's shared account (service:default / :oauth). */
 function stageAgentYaml(s: WizardState): string[] {
   if (!s.perStageAgents) return [];
   const lines = ['  stages:'];
   for (const stage of ['planning', 'implementation', 'review'] as const) {
     const a = s.stages[stage];
-    const svc = serviceFor(a.provider);
-    lines.push(
-      `    ${stage}:`,
-      `      provider: ${a.provider}`,
-      '      transport: cli',
-      `      credential: { service: ${svc}, account: default }`,
-      `      oauth_credential: { service: ${svc}, account: oauth }`,
-      '      models:',
-      `        ${stage}: ${yamlStr(a.model)}`,
-    );
+    lines.push(`    ${stage}:`, `      provider: ${a.provider}`, '      transport: cli', ...credLines(a.provider, '      '));
+    lines.push('      models:', `        ${stage}: ${yamlStr(a.model)}`);
   }
   return lines;
 }
@@ -421,8 +454,7 @@ export function buildConfigYaml(s: WizardState): string {
     'agent:',
     `  provider: ${s.provider}`,
     `  transport: ${s.transport}`,
-    `  credential: { service: ${serviceFor(s.provider)}, account: default }`,
-    `  oauth_credential: { service: ${serviceFor(s.provider)}, account: oauth }`,
+    ...credLines(s.provider, '  '),
     '  models:',
     `    planning: ${yamlStr(s.planningModel)}`,
     `    implementation: ${yamlStr(s.implementationModel)}`,
@@ -451,16 +483,10 @@ const DRAFT_KEY = 'corral.wizard.draft';
  * live only in the OS keychain, never in localStorage). */
 function withoutSecrets(s: WizardState): WizardState {
   const clone: WizardState = JSON.parse(JSON.stringify(s));
-  clone.agentKey = '';
-  clone.agentOauthToken = '';
-  for (const f of clone.fallbacks) {
-    f.key = '';
-    f.oauthToken = '';
-  }
+  for (const p of PROVIDERS) clone.accounts[p] = { key: '', oauth: '' };
   clone.notionToken = '';
   clone.jiraToken = '';
   clone.referenceToken = '';
-  for (const p of Object.keys(clone.stageCred) as Array<WizardState['provider']>) clone.stageCred[p] = { key: '', oauth: '' };
   for (const r of clone.repos) r.token = '';
   return clone;
 }
@@ -488,7 +514,11 @@ export async function loadDraft(): Promise<WizardState | null> {
     const bridge = draftBridge();
     const raw = bridge ? await bridge.read() : localStorage.getItem(DRAFT_KEY);
     if (!raw) return null;
-    return { ...initialState(), ...(JSON.parse(raw) as Partial<WizardState>) };
+    const parsed = JSON.parse(raw) as Partial<WizardState>;
+    const merged = { ...initialState(), ...parsed };
+    // Accounts is a nested record — a partial/older draft may omit a provider.
+    merged.accounts = { ...emptyAccounts(), ...(parsed.accounts ?? {}) };
+    return merged;
   } catch {
     return null;
   }
@@ -504,28 +534,23 @@ export async function clearDraft(): Promise<void> {
   }
 }
 
-/** Secret refs (service/account) the wizard manages — to check keychain.has on load. */
+/** Secret refs (service/account) the wizard manages — to check keychain.has on load.
+ *  All three provider accounts are probed so the account panel can show "configured". */
 export function secretRefs(s: WizardState): Array<{ service: string; account: string }> {
   const refs: Array<{ service: string; account: string }> = [];
   for (const r of s.repos) if (r.key.trim()) refs.push({ service: r.provider, account: r.key });
   if (s.trackerKind === 'notion') refs.push({ service: 'notion', account: 'default' });
   else if (s.trackerKind === 'jira') refs.push({ service: 'jira', account: 'default' });
   if (s.referenceRepo.trim()) refs.push({ service: 'reference', account: 'default' });
-  refs.push({ service: serviceFor(s.provider), account: 'default' });
-  refs.push({ service: serviceFor(s.provider), account: 'oauth' });
-  if (s.perStageAgents)
-    for (const p of stageProviders(s)) {
-      refs.push({ service: serviceFor(p), account: 'default' });
-      refs.push({ service: serviceFor(p), account: 'oauth' });
-    }
-  s.fallbacks.forEach((f, i) => {
-    refs.push({ service: serviceFor(f.provider), account: `fb${i}` });
-    if (f.provider === 'claude') refs.push({ service: serviceFor(f.provider), account: `fb${i}-oauth` });
-  });
+  for (const p of PROVIDERS) {
+    refs.push({ service: serviceFor(p), account: 'default' });
+    refs.push({ service: serviceFor(p), account: 'oauth' });
+  }
   return refs;
 }
 
-/** Secrets to persist (service, account, value). Per-repo creds use account = key. */
+/** Secrets to persist (service, account, value). Per-repo creds use account = key;
+ *  per-provider accounts use service:default / :oauth. */
 export function secretsFor(s: WizardState): Array<{ service: string; account: string; value: string }> {
   const out: Array<{ service: string; account: string; value: string }> = [];
   for (const r of s.repos) out.push({ service: r.provider, account: r.key, value: r.token });
@@ -535,20 +560,11 @@ export function secretsFor(s: WizardState): Array<{ service: string; account: st
   if (s.referenceRepo.trim() && s.referenceToken.trim()) {
     out.push({ service: 'reference', account: 'default', value: s.referenceToken });
   }
-  if (s.agentKey.trim()) out.push({ service: serviceFor(s.provider), account: 'default', value: s.agentKey });
-  if (s.agentOauthToken.trim())
-    out.push({ service: serviceFor(s.provider), account: 'oauth', value: s.agentOauthToken });
-  if (s.perStageAgents)
-    for (const p of stageProviders(s)) {
-      const c = s.stageCred[p];
-      if (c?.key?.trim()) out.push({ service: serviceFor(p), account: 'default', value: c.key });
-      if (c?.oauth?.trim()) out.push({ service: serviceFor(p), account: 'oauth', value: c.oauth });
-    }
-  s.fallbacks.forEach((f, i) => {
-    if (f.key.trim()) out.push({ service: serviceFor(f.provider), account: `fb${i}`, value: f.key });
-    if (f.provider === 'claude' && f.oauthToken.trim())
-      out.push({ service: serviceFor(f.provider), account: `fb${i}-oauth`, value: f.oauthToken });
-  });
+  for (const p of PROVIDERS) {
+    const a = s.accounts[p];
+    if (a.key.trim()) out.push({ service: serviceFor(p), account: 'default', value: a.key });
+    if (a.oauth.trim()) out.push({ service: serviceFor(p), account: 'oauth', value: a.oauth });
+  }
   // Trim so a stray trailing space/newline from a paste never reaches the API.
   return out.map((x) => ({ ...x, value: x.value.trim() })).filter((x) => x.value);
 }

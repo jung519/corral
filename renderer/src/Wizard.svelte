@@ -4,22 +4,26 @@
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
     buildConfigYaml,
+    configured,
     CORE_STATE_KEYS,
     defaultModels,
     type FallbackEntry,
+    hasCred,
     initialState,
     loadDraft,
     MODELS,
     newFallback,
     newRepo,
     OPTIONAL_STATE_KEYS,
+    type Provider,
     type RepoProvider,
+    runnableInBackend,
     saveDraft,
     secretRefs,
     secretsFor,
     serviceFor,
-    stageProviders,
     type TrackerKind,
+    unrunnableAssigned,
     validateStep,
     type WizardState,
   } from './lib/wizard';
@@ -104,10 +108,6 @@
     s.reviewModel = d.review;
   }
 
-  // Only gemini can't run under docker (no in-container auth). claude (oauth/mount) and
-  // gpt (codex auth import / API key) are supported — disabled in the picker only here.
-  const dockerBlocksProvider = (id: WizardState['provider']) => s.backend === 'docker' && id === 'gemini';
-
   // ── Fallback agents (failover order) ──────────────────────────────────────
   function addFallback() {
     // Default a new fallback to a provider valid for the current backend.
@@ -123,17 +123,13 @@
     [next[i], next[j]] = [next[j], next[i]];
     s.fallbacks = next;
   }
-  function setFallbackProvider(f: FallbackEntry, p: WizardState['provider']) {
+  function setFallbackProvider(f: FallbackEntry, p: Provider) {
     f.provider = p;
     const d = defaultModels(p);
     f.planningModel = d.planning;
     f.implementationModel = d.implementation;
     f.reviewModel = d.review;
-    f.key = '';
-    f.oauthToken = '';
   }
-  // Providers selectable for a fallback (exclude still-gated ones).
-  const fallbackProviders = providers.filter((p) => !p.soon);
 
   // Non-sequential: jump to any step freely; validation is per-item (sidebar ✓) and
   // a full check at Finish (which jumps to the first invalid step).
@@ -156,80 +152,30 @@
   type TestState = { ok: boolean; detail?: string } | 'pending' | undefined;
   let test = $state<Record<string, TestState>>({});
 
-  async function testAgent() {
-    if (!window.corral || !s.agentKey) return;
-    test.agent = 'pending';
-    test.agent = await window.corral.validate.agent(s.provider, s.agentKey);
-  }
-
-  // Obtain a Claude subscription OAuth token via `claude setup-token` (opens the
-  // browser), then drop it into the field so it's saved with the section. No manual
-  // terminal copy/paste needed.
-  let setupTokenMsg = $state('');
-  async function runSetupToken() {
-    if (!window.corral) return;
-    setupTokenMsg = t('oauth.setupRunning');
-    try {
-      const r = await window.corral.claudeSetupToken();
-      if (r.ok && r.token) {
-        s.agentOauthToken = r.token;
-        setupTokenMsg = t('oauth.setupOk');
-      } else {
-        setupTokenMsg = `${t('oauth.setupFail')} ${r.error ?? ''}`.trim();
-      }
-    } catch (e) {
-      setupTokenMsg = `${t('oauth.setupFail')} ${String(e)}`.trim();
-    }
-  }
-
-  // Import the host codex login (~/.codex) so GPT can run in docker. Stored in the same
-  // oauth secret slot (openai:oauth) and injected into the worker container.
-  let codexAuthMsg = $state('');
-  async function importCodexAuth() {
-    if (!window.corral) return;
-    codexAuthMsg = t('codex.importing');
-    try {
-      const r = await window.corral.codexImportAuth();
-      if (r.ok && r.b64) {
-        s.agentOauthToken = r.b64; // saved to <provider>:oauth by secretsFor
-        codexAuthMsg = t('codex.importOk');
-      } else {
-        codexAuthMsg = `${t('codex.importFail')} ${r.error ?? ''}`.trim();
-      }
-    } catch (e) {
-      codexAuthMsg = `${t('codex.importFail')} ${String(e)}`.trim();
-    }
-  }
-
   // ── Per-stage agents ──────────────────────────────────────────────────────
   const STAGES = [
     { key: 'planning', label: 'pipe.plan' },
     { key: 'implementation', label: 'pipe.build' },
     { key: 'review', label: 'pipe.review' },
   ] as const;
-  const usedProviders = $derived(stageProviders(s));
-  const providerName = (p: WizardState['provider']) => providers.find((x) => x.id === p)?.name ?? p;
+  const providerName = (p: Provider) => providers.find((x) => x.id === p)?.name ?? p;
+  // A provider may be assigned to a role only if it has a usable auth path.
+  const isConfigured = (p: Provider) => configured(s, p, secretSaved);
 
-  function ensureCred(p: WizardState['provider']) {
-    if (!s.stageCred[p]) s.stageCred[p] = { key: '', oauth: '' };
-  }
-  // Keep a credential slot for every provider used by a stage.
-  $effect(() => {
-    if (s.perStageAgents) for (const p of usedProviders) ensureCred(p);
-  });
-  function setStageProvider(stage: (typeof STAGES)[number]['key'], p: WizardState['provider']) {
+  function setStageProvider(stage: (typeof STAGES)[number]['key'], p: Provider) {
     s.stages[stage].provider = p;
     s.stages[stage].model = defaultModels(p)[stage];
-    ensureCred(p);
   }
 
-  // Import an oauth-style credential for a stage provider (claude setup-token / codex
-  // login) into that provider's shared oauth slot.
-  let stageMsg = $state<Record<string, string>>({});
-  async function importStageOauth(p: 'claude' | 'gpt') {
+  // ── Per-account credentials ───────────────────────────────────────────────
+  // Per-account status line (CLI check result / oauth import result), keyed by provider.
+  let acctMsg = $state<Record<string, string>>({});
+
+  // Import an oauth-style credential into a provider's account (claude setup-token /
+  // codex login). Stored to <service>:oauth on save.
+  async function importOauth(p: 'claude' | 'gpt') {
     if (!window.corral) return;
-    ensureCred(p);
-    stageMsg[p] = t(p === 'claude' ? 'oauth.setupRunning' : 'codex.importing');
+    acctMsg[p] = t(p === 'claude' ? 'oauth.setupRunning' : 'codex.importing');
     try {
       let ok = false;
       let val: string | undefined;
@@ -244,23 +190,29 @@
         val = r.b64;
       }
       if (ok && val) {
-        s.stageCred[p]!.oauth = val;
-        stageMsg[p] = t(p === 'claude' ? 'oauth.setupOk' : 'codex.importOk');
+        s.accounts[p].oauth = val;
+        acctMsg[p] = t(p === 'claude' ? 'oauth.setupOk' : 'codex.importOk');
       } else {
-        stageMsg[p] = `✗ ${error ?? ''}`.trim();
+        acctMsg[p] = `✗ ${error ?? ''}`.trim();
       }
     } catch (e) {
-      stageMsg[p] = `✗ ${String(e)}`.trim();
+      acctMsg[p] = `✗ ${String(e)}`.trim();
     }
   }
 
-  // Check the provider's official CLI is installed (transport: cli). Install-only —
-  // login is provider-specific and not reliably checkable without a billed turn.
-  async function testCli() {
+  // Check a provider's official CLI is installed (transport: cli). Marks the provider
+  // verified so it counts as configured without a stored token. Install-only — login is
+  // provider-specific and not reliably checkable without a billed turn.
+  async function testCli(p: Provider) {
     if (!window.corral) return;
-    test.cli = 'pending';
-    const r = await window.corral.detectCli(s.provider);
-    test.cli = { ok: r.installed, detail: r.installed ? (r.version ?? t('cli.installed')) : t('cli.notInstalled') };
+    acctMsg[p] = t('status.testing');
+    const r = await window.corral.detectCli(p);
+    if (r.installed) {
+      s.cliVerified = { ...s.cliVerified, [p]: true };
+      acctMsg[p] = `✓ ${r.version ?? t('cli.installed')}`;
+    } else {
+      acctMsg[p] = `✗ ${t('cli.notInstalled')}`;
+    }
   }
   // Full connection test for one repo (checks the actual repo is reachable, not just the token).
   async function testRepo(i: number) {
@@ -311,9 +263,7 @@
     test.notion = await window.corral.validate.notion(s.notionToken);
   }
 
-  const agentPinged = $derived(typeof test.agent === 'object' && test.agent?.ok === true);
-  const keyHint = (p: WizardState['provider']) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-…');
-  const keyPlaceholder = $derived(keyHint(s.provider));
+  const keyHint = (p: Provider) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-…');
 
   // Notion schema → property/option dropdowns (no manual name typing).
   type NotionProp = { name: string; type: string; options: string[] };
@@ -428,24 +378,6 @@
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
 
-      <div class="providers">
-        {#each providers as p}
-          <button
-            class="provider"
-            class:sel={s.provider === p.id}
-            class:soon={p.soon || dockerBlocksProvider(p.id)}
-            disabled={p.soon || dockerBlocksProvider(p.id)}
-            onclick={() => !p.soon && !dockerBlocksProvider(p.id) && setProvider(p.id)}
-          >
-            <svg class="picon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
-            <span class="pname">{p.name}</span>
-            {#if p.soon}<span class="soon-tag">{t('badge.soon')}</span>
-            {:else if dockerBlocksProvider(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
-          </button>
-        {/each}
-      </div>
-      {#if s.backend === 'docker'}<p class="hint">{t('provider.dockerGeminiNote')}</p>{/if}
-
       <div class="transports">
         <button class="transport soon" disabled>
           <span class="radio"></span>{t('transport.api')} <span class="soon-tag">{t('badge.soon')}</span>
@@ -455,123 +387,91 @@
         </button>
       </div>
 
-      <label class="field"
-        ><span>{t('field.apiKey')}{s.transport === 'cli' && s.backend !== 'docker' ? t('field.apiKey.optionalCli') : ''}</span>
-        <div class="keyrow">
-          <input
-            type="password"
-            bind:value={s.agentKey}
-            placeholder={!s.agentKey && secretSaved(serviceFor(s.provider), 'default')
-              ? t('field.secretSaved')
-              : keyPlaceholder}
-            onblur={testAgent}
-          />
-          {@render badge(test.agent)}
-        </div></label
-      >
-      {#if s.transport === 'cli'}
-        <p class="hint">{t('cli.hint')}</p>
-        {#if hasBridge}
-          <div class="testrow">
-            <Button onclick={testCli}>{t('cli.check')}</Button>
-            {@render badge(test.cli)}
+      <!-- ── 1 · accounts (independent per-provider credentials) ── -->
+      <div class="sec-head"><span class="sec-no">1</span> {t('account.title')}</div>
+      <p class="hint">{t('account.hint')}</p>
+      <div class="acct-grid">
+        {#each providers as p}
+          <div class="acct-card" class:dim={!runnableInBackend(s, p.id)}>
+            <div class="acct-head">
+              <span class="acct-name">
+                <svg class="picon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
+                {p.name}
+              </span>
+              {#if !runnableInBackend(s, p.id)}
+                <span class="tag warn">{t('account.dockerNoRun')}</span>
+              {:else if hasCred(s, p.id, secretSaved)}
+                <span class="tag ok">✓ {t('account.set')}</span>
+              {:else if isConfigured(p.id)}
+                <span class="tag muted">{t('account.cliLogin')}</span>
+              {:else}
+                <span class="tag muted">{t('account.unset')}</span>
+              {/if}
+            </div>
+            <input
+              class="acct-key"
+              type="password"
+              bind:value={s.accounts[p.id].key}
+              placeholder={!s.accounts[p.id].key && secretSaved(serviceFor(p.id), 'default') ? t('field.secretSaved') : keyHint(p.id)}
+            />
+            {#if hasBridge}
+              <div class="acct-btns">
+                <Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>
+                {#if p.id === 'claude'}<Button onclick={() => importOauth('claude')}>{t('oauth.setupBtn')}</Button>{/if}
+                {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
+              </div>
+            {/if}
+            {#if (p.id === 'claude' || p.id === 'gpt') && !s.accounts[p.id].oauth && secretSaved(serviceFor(p.id), 'oauth')}
+              <p class="helper">{t('account.oauthSaved')}</p>
+            {/if}
+            {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
+            {#if acctMsg[p.id]}<p class="helper">{acctMsg[p.id]}</p>{/if}
           </div>
-        {/if}
-      {/if}
-      {#if agentPinged}<p class="helper">{t('agent.pingOk')}</p>{/if}
+        {/each}
+      </div>
 
-      {#if s.transport === 'cli' && s.provider === 'claude'}
-        <label class="field"
-          ><span>{t('field.oauthToken')}</span>
-          <input
-            type="password"
-            bind:value={s.agentOauthToken}
-            placeholder={!s.agentOauthToken && secretSaved(serviceFor(s.provider), 'oauth')
-              ? t('field.secretSaved')
-              : 'sk-ant-oat...'}
-          /></label
-        >
-        <p class="hint">{t('field.oauthToken.hint')}</p>
-        {#if hasBridge}
-          <div class="testrow">
-            <Button onclick={runSetupToken}>{t('oauth.setupBtn')}</Button>
-            {#if setupTokenMsg}<span class="helper">{setupTokenMsg}</span>{/if}
-          </div>
-        {/if}
-      {/if}
-
-      {#if s.transport === 'cli' && s.provider === 'gpt' && s.backend === 'docker'}
-        <p class="hint">
-          {t('codex.dockerHint')}
-          {#if secretSaved(serviceFor(s.provider), 'oauth') && !s.agentOauthToken}<strong>· {t('field.secretSaved')}</strong>{/if}
-        </p>
-        {#if hasBridge}
-          <div class="testrow">
-            <Button onclick={importCodexAuth}>{t('codex.importBtn')}</Button>
-            {#if codexAuthMsg}<span class="helper">{codexAuthMsg}</span>{/if}
-          </div>
-        {/if}
-      {/if}
-
+      <!-- ── 2 · assignment (pick from configured agents) ── -->
+      <div class="sec-head"><span class="sec-no">2</span> {t('assign.title')}</div>
       <label class="check"><input type="checkbox" bind:checked={s.perStageAgents} /> {t('stage.toggle')}</label>
       <p class="hint">{t('stage.toggleHint')}</p>
 
       {#if !s.perStageAgents}
-        <span class="lbl">{t('agent.modelsLabel')}</span>
+        <div class="stage-row">
+          <span class="stage-name">{t('assign.agent')}</span>
+          <select value={s.provider} onchange={(e) => setProvider(e.currentTarget.value as Provider)}>
+            {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
+          </select>
+        </div>
         <div class="three">
           <label class="field"
             ><span>{t('field.planningModel')}</span>
-            <select bind:value={s.planningModel}>
-              {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
-            </select></label
+            <select bind:value={s.planningModel}>{#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}</select></label
           >
           <label class="field"
             ><span>{t('field.implModel')}</span>
-            <select bind:value={s.implementationModel}>
-              {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
-            </select></label
+            <select bind:value={s.implementationModel}>{#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}</select></label
           >
           <label class="field"
             ><span>{t('field.reviewModel')}</span>
-            <select bind:value={s.reviewModel}>
-              {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
-            </select></label
+            <select bind:value={s.reviewModel}>{#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}</select></label
           >
         </div>
       {:else}
-        <span class="lbl">{t('stage.agentsLabel')}</span>
         {#each STAGES as st}
           <div class="stage-row">
             <span class="stage-name">{t(st.label)}</span>
-            <select value={s.stages[st.key].provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as WizardState['provider'])}>
-              {#each providers.filter((p) => !p.soon) as p}<option value={p.id}>{p.name}</option>{/each}
+            <select value={s.stages[st.key].provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as Provider)}>
+              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
             </select>
             <select bind:value={s.stages[st.key].model}>
               {#each MODELS[s.stages[st.key].provider] as m}<option value={m}>{m}</option>{/each}
             </select>
           </div>
         {/each}
+      {/if}
 
-        <span class="lbl">{t('stage.creds')}</span>
-        {#each usedProviders as p (p)}
-          {#if s.stageCred[p]}
-            <div class="stage-row">
-              <span class="stage-name">{providerName(p)}</span>
-              <input
-                type="password"
-                value={s.stageCred[p].key}
-                oninput={(e) => (ensureCred(p), (s.stageCred[p]!.key = e.currentTarget.value))}
-                placeholder={!s.stageCred[p].key && secretSaved(serviceFor(p), 'default') ? t('field.secretSaved') : t('stage.apiKeyOpt')}
-              />
-              {#if hasBridge && p === 'claude'}<Button onclick={() => importStageOauth('claude')}>{t('oauth.setupBtn')}</Button>{/if}
-              {#if hasBridge && p === 'gpt'}<Button onclick={() => importStageOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
-            </div>
-            {#if stageMsg[p]}<p class="helper">{stageMsg[p]}</p>{/if}
-            {#if (p === 'claude' || p === 'gpt') && !s.stageCred[p].oauth && secretSaved(serviceFor(p), 'oauth')}
-              <p class="helper">{providerName(p)}: {t('field.secretSaved')}</p>
-            {/if}
-          {/if}
-        {/each}
+      {#if unrunnableAssigned(s).length}
+        <p class="run-warn">⚠ {t('assign.runWarn').replace('{p}', unrunnableAssigned(s).map(providerName).join(', '))}</p>
       {/if}
 
       {#if s.transport === 'cli'}
@@ -580,67 +480,34 @@
         {#each s.fallbacks as f, i (i)}
           <div class="repo-card">
             <div class="repo-head">
-              <span class="repo-num">{i + 2}. {f.provider}</span>
+              <span class="repo-num">{i + 2}. {providerName(f.provider)}</span>
               <div class="reorder">
                 <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
                 <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
                 <button class="ghost-x" onclick={() => removeFallback(i)} title={t('repo.remove')}>✕</button>
               </div>
             </div>
-            <div class="transports tri">
-              {#each fallbackProviders as p}
-                <button
-                  class="transport"
-                  class:sel={f.provider === p.id}
-                  class:soon={dockerBlocksProvider(p.id)}
-                  disabled={dockerBlocksProvider(p.id)}
-                  onclick={() => !dockerBlocksProvider(p.id) && setFallbackProvider(f, p.id)}
-                >
-                  <span class="radio" class:on={f.provider === p.id}></span>{p.name}
-                  {#if dockerBlocksProvider(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
-                </button>
-              {/each}
+            <div class="stage-row">
+              <span class="stage-name">{t('assign.agent')}</span>
+              <select value={f.provider} onchange={(e) => setFallbackProvider(f, e.currentTarget.value as Provider)}>
+                {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
+              </select>
             </div>
-            <label class="field"
-              ><span>{t('field.apiKey')}{t('field.apiKey.optionalCli')}</span>
-              <input
-                type="password"
-                bind:value={f.key}
-                placeholder={!f.key && secretSaved(serviceFor(f.provider), `fb${i}`) ? t('field.secretSaved') : keyHint(f.provider)}
-              /></label
-            >
-            {#if f.provider === 'claude'}
-              <label class="field"
-                ><span>{t('field.oauthToken')}</span>
-                <input
-                  type="password"
-                  bind:value={f.oauthToken}
-                  placeholder={!f.oauthToken && secretSaved(serviceFor(f.provider), `fb${i}-oauth`)
-                    ? t('field.secretSaved')
-                    : 'sk-ant-oat…'}
-                /></label
-              >
-            {/if}
             <div class="three">
               <label class="field"
                 ><span>{t('field.planningModel')}</span>
-                <select bind:value={f.planningModel}>
-                  {#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}
-                </select></label
+                <select bind:value={f.planningModel}>{#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}</select></label
               >
               <label class="field"
                 ><span>{t('field.implModel')}</span>
-                <select bind:value={f.implementationModel}>
-                  {#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}
-                </select></label
+                <select bind:value={f.implementationModel}>{#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}</select></label
               >
               <label class="field"
                 ><span>{t('field.reviewModel')}</span>
-                <select bind:value={f.reviewModel}>
-                  {#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}
-                </select></label
+                <select bind:value={f.reviewModel}>{#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}</select></label
               >
             </div>
+            {#if !runnableInBackend(s, f.provider)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
           </div>
         {/each}
         <button class="add-repo" onclick={addFallback}>{t('agent.fallbackAdd')}</button>
@@ -1053,32 +920,7 @@
     color: var(--text-dim);
     margin: 0 0 22px;
   }
-  .providers {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-  .provider {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 10px;
-    padding: 22px 0;
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    color: var(--text-dim);
-  }
-  .provider.sel {
-    border: 2px solid var(--accent);
-    color: var(--text);
-  }
-  .provider .pname {
-    font-size: 15px;
-    font-weight: 500;
-  }
   /* Gated (not-yet-implemented) options — visible but unselectable. */
-  .provider.soon,
   .transport.soon {
     opacity: 0.45;
     cursor: not-allowed;
@@ -1184,10 +1026,95 @@
     font-size: 13px;
     color: var(--text-dim);
   }
-  .stage-row select,
-  .stage-row input {
+  .stage-row select {
     flex: 1;
     min-width: 0;
+  }
+  .sec-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    margin: 22px 0 4px;
+  }
+  .sec-no {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--accent-text);
+    font-size: 12px;
+  }
+  .acct-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin: 10px 0 4px;
+  }
+  .acct-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 12px;
+  }
+  .acct-card.dim {
+    opacity: 0.85;
+  }
+  .acct-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 6px;
+  }
+  .acct-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 500;
+  }
+  .acct-key {
+    width: 100%;
+    margin-bottom: 8px;
+  }
+  .acct-btns {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tag {
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 20px;
+    white-space: nowrap;
+  }
+  .tag.ok {
+    color: var(--success);
+    background: color-mix(in srgb, var(--success) 16%, transparent);
+  }
+  .tag.warn {
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 16%, transparent);
+  }
+  .tag.muted {
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+  }
+  .warn-text {
+    color: var(--warning);
+  }
+  .run-warn {
+    font-size: 12px;
+    color: var(--warning);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning) 40%, transparent);
+    border-radius: var(--radius);
+    padding: 8px 10px;
+    margin: 4px 0 10px;
   }
   .states {
     display: grid;

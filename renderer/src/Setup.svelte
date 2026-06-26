@@ -5,7 +5,16 @@
   import PipelineSummary from './PipelineSummary.svelte';
   import Wizard from './Wizard.svelte';
   import { editNav } from './lib/nav.svelte';
-  import { CORE_STATE_KEYS, loadDraft, OPTIONAL_STATE_KEYS, secretRefs, serviceFor, type WizardState } from './lib/wizard';
+  import {
+    CORE_STATE_KEYS,
+    loadDraft,
+    OPTIONAL_STATE_KEYS,
+    type Provider,
+    PROVIDERS,
+    secretRefs,
+    serviceFor,
+    type WizardState,
+  } from './lib/wizard';
 
   let configured = $state<boolean | undefined>(undefined);
   let s = $state<WizardState | null>(null);
@@ -16,6 +25,10 @@
   const secret = (service: string, account: string) =>
     isSaved(service, account) ? `●●●● ${t('settings.saved')}` : t('settings.notSet');
   const langLabel = (c: string) => (c === 'ko' ? '한국어' : c === 'en' ? 'English' : c);
+  const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', gemini: 'Gemini', gpt: 'GPT' };
+  // An account is "configured" once any credential (key or oauth) is stored for it.
+  const acctState = (p: Provider) =>
+    isSaved(serviceFor(p), 'default') || isSaved(serviceFor(p), 'oauth') ? t('account.set') : t('account.unset');
 
   async function refresh() {
     const draft = await loadDraft();
@@ -74,14 +87,22 @@
       {#if editing === 'ai'}
         <Wizard embedded section="ai" {onDone} />
       {:else}
-        {@render row(t('repo.provider'), s.provider)}
         {@render row('Transport', s.transport)}
         {@render row(t('field.language'), langLabel(s.language))}
-        {@render row(t('agent.modelsLabel'), `${s.planningModel} · ${s.implementationModel} · ${s.reviewModel}`)}
-        {@render row(t('field.apiKey'), secret(serviceFor(s.provider), 'default'))}
-        {#if s.provider === 'claude'}{@render row(t('field.oauthToken'), secret(serviceFor(s.provider), 'oauth'))}{/if}
+        {@render row(t('account.title'), '')}
+        {#each PROVIDERS as p}
+          {@render row(`  ${PROVIDER_LABEL[p]}`, acctState(p))}
+        {/each}
+        {@render row(t('assign.title'), '')}
+        {#if s.perStageAgents}
+          {@render row(`  ${t('pipe.plan')}`, `${PROVIDER_LABEL[s.stages.planning.provider]} · ${s.stages.planning.model}`)}
+          {@render row(`  ${t('pipe.build')}`, `${PROVIDER_LABEL[s.stages.implementation.provider]} · ${s.stages.implementation.model}`)}
+          {@render row(`  ${t('pipe.review')}`, `${PROVIDER_LABEL[s.stages.review.provider]} · ${s.stages.review.model}`)}
+        {:else}
+          {@render row(`  ${t('assign.agent')}`, `${PROVIDER_LABEL[s.provider]} · ${s.planningModel}/${s.implementationModel}/${s.reviewModel}`)}
+        {/if}
         {#each s.fallbacks ?? [] as f, i}
-          {@render row(`${t('agent.fallbackLabel')} ${i + 2}`, `${f.provider} · ${f.planningModel}/${f.implementationModel}/${f.reviewModel}`)}
+          {@render row(`  ${t('agent.fallbackLabel')} ${i + 2}`, `${PROVIDER_LABEL[f.provider]} · ${f.planningModel}/${f.implementationModel}/${f.reviewModel}`)}
         {/each}
       {/if}
     </div>
