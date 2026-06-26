@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
+  import PipelineSummary from './PipelineSummary.svelte';
   import Wizard from './Wizard.svelte';
   import { CORE_STATE_KEYS, loadDraft, OPTIONAL_STATE_KEYS, secretRefs, serviceFor, type WizardState } from './lib/wizard';
 
@@ -56,6 +57,7 @@
       <div class="actions"><button class="primary" onclick={() => (location.hash = '#/setup')}>{t('settings.setup')}</button></div>
     </div>
   {:else if s}
+    <PipelineSummary {s} />
     <p class="hint">{t('settings.summaryHint')}</p>
 
     <div class="card">
