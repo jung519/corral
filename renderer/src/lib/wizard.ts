@@ -230,6 +230,12 @@ export function dockerBlocked(provider: Provider): boolean {
   return provider === 'gemini';
 }
 
+/** Only claude has an API (BYOK) transport adapter today — gemini/gpt are CLI-only.
+ *  (See agentTransports registry: claude:api is the only api cell registered.) */
+export function apiSupported(provider: Provider): boolean {
+  return provider === 'claude';
+}
+
 /** Whether this provider can execute under the current backend. */
 export function runnableInBackend(s: WizardState, provider: Provider): boolean {
   return !(s.backend === 'docker' && dockerBlocked(provider));
@@ -250,8 +256,10 @@ export function hasCred(s: WizardState, p: Provider, isSaved: SecretSavedFn = ()
  *  - claude with the docker host-login mount, or
  *  - the user verified the CLI (install/login check passed). */
 export function configured(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): boolean {
+  // API mode needs an actual key, and only claude has an api adapter.
+  if (s.transport === 'api') return apiSupported(p) && hasCred(s, p, isSaved);
   if (hasCred(s, p, isSaved)) return true;
-  if (s.transport === 'cli' && s.backend === 'local') return true;
+  if (s.backend === 'local') return true;
   if (p === 'claude' && s.backend === 'docker' && s.dockerMountLogin) return true;
   return !!s.cliVerified[p];
 }

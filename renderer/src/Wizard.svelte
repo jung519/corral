@@ -3,6 +3,7 @@
   import Button from './lib/Button.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
+    apiSupported,
     buildConfigYaml,
     configured,
     CORE_STATE_KEYS,
@@ -69,7 +70,9 @@
     if (draft) s = draft;
     // Coerce any still-gated provider a stale draft/config might hold back to a working one.
     if (providers.find((p) => p.id === s.provider)?.soon) setProvider('claude');
-    if (s.transport === 'api') s.transport = 'cli';
+    // API transport only has a claude adapter — fall back to its CLI if a non-claude
+    // agent was somehow left on API.
+    if (s.transport === 'api' && !apiSupported(s.provider)) s.transport = 'cli';
     // Host-login mount doesn't work on macOS (login is in the Keychain, not ~/.claude),
     // so a fresh macOS setup defaults to the API-key path instead.
     if (!draft && window.corral?.platform === 'darwin') s.dockerMountLogin = false;
@@ -378,27 +381,40 @@
       <h1>{t('step.ai')}</h1>
       <p class="subtitle">{t('step0.subtitle')}</p>
 
+      <!-- ── 1 · transport ── -->
+      <div class="sec-head"><span class="sec-no">1</span> {t('transport.title')}</div>
       <div class="transports">
-        <button class="transport soon" disabled>
-          <span class="radio"></span>{t('transport.api')} <span class="soon-tag">{t('badge.soon')}</span>
+        <button
+          class="transport"
+          class:sel={s.transport === 'api'}
+          onclick={() => {
+            s.transport = 'api';
+            if (!apiSupported(s.provider)) setProvider('claude');
+          }}
+        >
+          <span class="radio" class:on={s.transport === 'api'}></span>{t('transport.api')}
         </button>
         <button class="transport" class:sel={s.transport === 'cli'} onclick={() => (s.transport = 'cli')}>
           <span class="radio" class:on={s.transport === 'cli'}></span>{t('transport.cli')}
         </button>
       </div>
+      {#if s.transport === 'api'}<p class="hint">{t('transport.apiNote')}</p>{/if}
 
-      <!-- ── 1 · accounts (independent per-provider credentials) ── -->
-      <div class="sec-head"><span class="sec-no">1</span> {t('account.title')}</div>
+      <!-- ── 2 · accounts (independent per-provider credentials) ── -->
+      <div class="sec-head"><span class="sec-no">2</span> {t('account.title')}</div>
       <p class="hint">{t('account.hint')}</p>
       <div class="acct-grid">
         {#each providers as p}
-          <div class="acct-card" class:dim={!runnableInBackend(s, p.id)}>
+          {@const apiUnsupported = s.transport === 'api' && !apiSupported(p.id)}
+          <div class="acct-card" class:dim={!runnableInBackend(s, p.id) || apiUnsupported}>
             <div class="acct-head">
               <span class="acct-name">
                 <svg class="picon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
                 {p.name}
               </span>
-              {#if !runnableInBackend(s, p.id)}
+              {#if apiUnsupported}
+                <span class="tag muted">{t('account.apiNo')}</span>
+              {:else if !runnableInBackend(s, p.id)}
                 <span class="tag warn">{t('account.dockerNoRun')}</span>
               {:else if hasCred(s, p.id, secretSaved)}
                 <span class="tag ok">✓ {t('account.set')}</span>
@@ -411,27 +427,32 @@
             <input
               class="acct-key"
               type="password"
+              disabled={apiUnsupported}
               bind:value={s.accounts[p.id].key}
               placeholder={!s.accounts[p.id].key && secretSaved(serviceFor(p.id), 'default') ? t('field.secretSaved') : keyHint(p.id)}
             />
-            {#if hasBridge}
+            {#if hasBridge && s.transport === 'cli'}
               <div class="acct-btns">
                 <Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>
                 {#if p.id === 'claude'}<Button onclick={() => importOauth('claude')}>{t('oauth.setupBtn')}</Button>{/if}
                 {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
               </div>
             {/if}
-            {#if (p.id === 'claude' || p.id === 'gpt') && !s.accounts[p.id].oauth && secretSaved(serviceFor(p.id), 'oauth')}
-              <p class="helper">{t('account.oauthSaved')}</p>
+            {#if apiUnsupported}
+              <p class="helper warn-text">{t('account.apiNoHint')}</p>
+            {:else}
+              {#if (p.id === 'claude' || p.id === 'gpt') && !s.accounts[p.id].oauth && secretSaved(serviceFor(p.id), 'oauth')}
+                <p class="helper">{t('account.oauthSaved')}</p>
+              {/if}
+              {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
+              {#if acctMsg[p.id]}<p class="helper">{acctMsg[p.id]}</p>{/if}
             {/if}
-            {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
-            {#if acctMsg[p.id]}<p class="helper">{acctMsg[p.id]}</p>{/if}
           </div>
         {/each}
       </div>
 
-      <!-- ── 2 · assignment (pick from configured agents) ── -->
-      <div class="sec-head"><span class="sec-no">2</span> {t('assign.title')}</div>
+      <!-- ── 3 · assignment (pick from configured agents) ── -->
+      <div class="sec-head"><span class="sec-no">3</span> {t('assign.title')}</div>
       <label class="check"><input type="checkbox" bind:checked={s.perStageAgents} /> {t('stage.toggle')}</label>
       <p class="hint">{t('stage.toggleHint')}</p>
 
@@ -475,12 +496,13 @@
       {/if}
 
       {#if s.transport === 'cli'}
-        <span class="lbl">{t('agent.fallbackLabel')}</span>
+        <!-- ── 4 · fallbacks ── -->
+        <div class="sec-head"><span class="sec-no">4</span> {t('agent.fallbackLabel')}</div>
         <p class="hint">{t('agent.fallbackHint')}</p>
         {#each s.fallbacks as f, i (i)}
           <div class="repo-card">
             <div class="repo-head">
-              <span class="repo-num">{i + 2}. {providerName(f.provider)}</span>
+              <span class="repo-num">#{i + 2} · {providerName(f.provider)}</span>
               <div class="reorder">
                 <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
                 <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
@@ -919,20 +941,6 @@
   .subtitle {
     color: var(--text-dim);
     margin: 0 0 22px;
-  }
-  /* Gated (not-yet-implemented) options — visible but unselectable. */
-  .transport.soon {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-  .soon-tag {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    padding: 1px 7px;
-    color: var(--text-dim);
   }
   .transports {
     display: grid;
