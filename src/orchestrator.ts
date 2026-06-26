@@ -658,6 +658,17 @@ export class Orchestrator {
 
   // ───────────────────────────────────────────────────── dispatch helper
 
+  /** The provider that can't execute under the current backend for `stage`, or null.
+   *  gemini has no in-container auth under docker, so a stage routed to it is cancelled
+   *  at dispatch (it may be *configured*, just not runnable). Fallbacks are for capacity
+   *  exhaustion, not backend incompatibility, so only the stage's primary provider counts. */
+  private unrunnableStageProvider(stage: AgentStage): string | null {
+    if (this.config.workspace.backend !== 'docker') return null;
+    const a = this.config.agent;
+    const provider = a.stages?.[stage]?.provider ?? a.provider;
+    return provider === 'gemini' ? provider : null;
+  }
+
   private async dispatch(
     rt: IssueRuntime,
     issue: Issue,
@@ -688,6 +699,19 @@ export class Orchestrator {
         reference_path: this.referencePath(),
       });
       await this.wipeOutputs(handle);
+      // Run-time backend guard: a provider assigned to this stage that can't execute under
+      // the current backend (gemini under docker) is cancelled here with a clear message,
+      // instead of failing cryptically mid-build. Configurable in setup, blocked at run.
+      const blocked = this.unrunnableStageProvider(stage);
+      if (blocked) {
+        const msg = `${blocked}는 현재 Docker 백엔드에서 실행할 수 없습니다 — 워크스페이스를 로컬로 바꾸거나 이 단계를 다른 provider로 배치하세요.`;
+        rt.phase = 'auth_error_waiting';
+        rt.stuck = true;
+        this.store.upsert(rt);
+        bus.emitEvent({ identifier: rt.identifier, kind: 'error', phase: rt.phase, label: `❌ ${msg}` });
+        await this.channel.notify(rt.identifier, `❌ ${msg}`);
+        return { ok: false, costUsd: 0, inputTokens: 0, outputTokens: 0, exitCode: null, error: 'incompatible' };
+      }
       const a = this.config.agent;
       const result = await this.agent.run(handle, issue, {
         stage,

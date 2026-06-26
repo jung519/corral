@@ -178,8 +178,10 @@ export interface AgentRunResult {
    * - `auth`: authenticated then the session/account ended mid-run (failover-eligible).
    * - `rate_limit` / `budget`: out of capacity (failover-eligible).
    * - `timeout` / `crashed`: transient/bug — retried on the same agent.
+   * - `incompatible`: the assigned provider can't run under the current backend
+   *   (e.g. gemini under docker) — cancelled before dispatch, NOT failover-eligible.
    */
-  error?: 'timeout' | 'auth' | 'login_required' | 'crashed' | 'budget' | 'rate_limit';
+  error?: 'timeout' | 'auth' | 'login_required' | 'crashed' | 'budget' | 'rate_limit' | 'incompatible';
   exitCode: number | null;
 }
 
