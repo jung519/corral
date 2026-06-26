@@ -218,9 +218,22 @@ export const AgentSchema = AgentRoutingSchema.extend({
    *  account ended → rate_limit/auth/budget), the orchestrator advances to the next
    *  one. Empty = single-agent (no failover). */
   fallbacks: z.array(AgentRoutingSchema).default([]),
+  /** Optional per-stage agent overrides (e.g. plan=Gemini, build=Claude, review=GPT).
+   *  A stage without an override uses the base agent above (with its fallbacks). */
+  stages: z
+    .object({
+      planning: AgentRoutingSchema.optional(),
+      implementation: AgentRoutingSchema.optional(),
+      review: AgentRoutingSchema.optional(),
+    })
+    .optional(),
 }).superRefine((agent, ctx) => {
   requireApiCredential(agent, ctx, ['credential']);
   agent.fallbacks.forEach((fb, i) => requireApiCredential(fb, ctx, ['fallbacks', i, 'credential']));
+  for (const stage of ['planning', 'implementation', 'review'] as const) {
+    const o = agent.stages?.[stage];
+    if (o) requireApiCredential(o, ctx, ['stages', stage, 'credential']);
+  }
 });
 
 // ─────────────────────────────────────────────────────────── axis 4: workspace

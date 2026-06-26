@@ -89,7 +89,7 @@ export class ReviewOrchestrator {
     const log = logger.child(issue.identifier);
     try {
       const result = await this.agent.run(handle, issue, {
-        stage: 'planning',
+        stage: 'review',
         workflow: '', // self-contained; must not clobber the main workflow guide
         prompt: reviewRoundPrompt(issue, round, targets, this.profile, referencePath),
         continueSession: false, // fresh, independent perspective

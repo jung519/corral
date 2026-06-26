@@ -1009,7 +1009,7 @@ export class Orchestrator {
         diffStats,
       );
       await this.uploadDiff(rt, issue, changed);
-      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'planning');
+      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review');
       if (!consolidate.ok) return null;
       const review = await this.readOutput(handle, SCRATCH.pendingReview);
       if (!review) {

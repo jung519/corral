@@ -69,6 +69,8 @@ critique was addressed). Do not modify code.
 The prompt starts with a feedback marker. Revise `.corral/pending_plan.md` accordingly and stop.
 
 ### C — Implementation (after plan approval)
+First read the approved plan at `.corral/pending_plan.md` and implement exactly that — a
+different agent may have written it, so rely on the file, not memory of the planning chat.
 {% if reference_path %}Before writing any code, (re)check the skills/conventions repo at
 `{{ reference_path }}` and follow its rules as you implement.
 {% endif %}For EACH repo you need to change:

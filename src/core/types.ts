@@ -148,7 +148,7 @@ export interface RepositoryAdapter {
 
 // ─────────────────────────────────────────────────────────────── axis 3: agent
 
-export type AgentStage = 'planning' | 'implementation';
+export type AgentStage = 'planning' | 'implementation' | 'review';
 
 export interface AgentRunOptions {
   stage: AgentStage;

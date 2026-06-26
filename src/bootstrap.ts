@@ -4,6 +4,7 @@
  * relevant action fails later with an auth error, so the app always boots. */
 import { FailoverAgent, type FailoverMember } from './agent/failover.js';
 import { createAgent } from './agent/index.js';
+import { StageRoutingAgent } from './agent/stage-router.js';
 import { channels } from './channel/index.js';
 import { loadConfig } from './config/loader.js';
 import type { AgentRoutingConfig, Config } from './config/schema.js';
@@ -67,7 +68,21 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
   const fallbacks = await Promise.all(
     config.agent.fallbacks.map((f, i) => buildMember(f, `${f.provider}:${f.transport} #${i + 2}`)),
   );
-  const agent = fallbacks.length ? new FailoverAgent([primary, ...fallbacks]) : primary.adapter;
+  const baseAgent = fallbacks.length ? new FailoverAgent([primary, ...fallbacks]) : primary.adapter;
+
+  // Per-stage overrides → route each stage to its own agent (plan/build/review can be
+  // different providers). Stages without an override use the base agent (with fallbacks).
+  const stageAgent = async (stage: 'planning' | 'implementation' | 'review'): Promise<AgentAdapter> => {
+    const o = config.agent.stages?.[stage];
+    return o ? (await buildMember(o, `${o.provider}:${o.transport} (${stage})`)).adapter : baseAgent;
+  };
+  const agent = config.agent.stages
+    ? new StageRoutingAgent({
+        planning: await stageAgent('planning'),
+        implementation: await stageAgent('implementation'),
+        review: await stageAgent('review'),
+      })
+    : baseAgent;
 
   const channel = deps.channel ?? channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
 
