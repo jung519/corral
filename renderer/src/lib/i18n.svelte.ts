@@ -418,7 +418,7 @@ const ko: Dict = {
   'pipe.tracker': '트래커',
   'pipe.repos': '저장소',
   'pipe.skills': '스킬',
-  'pipe.plan': '검토',
+  'pipe.plan': '계획',
   'pipe.build': '구현',
   'pipe.review': '리뷰',
   'pipe.model': '모델',

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { t } from './lib/i18n.svelte';
+  import { editSection } from './lib/nav.svelte';
   import type { WizardState } from './lib/wizard';
 
   let { s }: { s: WizardState } = $props();
@@ -17,14 +18,15 @@
   const skillValue = $derived(s.referenceRepo.trim() ? s.referenceRepo.split('/').pop() || s.referenceRepo : t('pipe.none'));
   const provider = $derived(PROVIDER[s.provider]);
 
-  // input nodes (sources the agents consume) + the per-stage agent nodes.
+  // input nodes (sources the agents consume) + the per-stage agent nodes. `section` is
+  // the Setup section a node opens for editing when clicked.
   const nodes = $derived([
-    { kind: 'in', icon: '📋', label: t('pipe.tracker'), value: TRACKER[s.trackerKind], title: '' },
-    { kind: 'in', icon: '📦', label: t('pipe.repos'), value: repoValue, title: '' },
-    { kind: 'in', icon: '📚', label: t('pipe.skills'), value: skillValue, title: s.referenceRepo },
-    { kind: 'ag', icon: '🔍', label: t('pipe.plan'), value: provider, title: `${t('pipe.model')}: ${s.planningModel}` },
-    { kind: 'ag', icon: '🔧', label: t('pipe.build'), value: provider, title: `${t('pipe.model')}: ${s.implementationModel}` },
-    { kind: 'ag', icon: '✅', label: t('pipe.review'), value: provider, title: `${t('pipe.model')}: ${s.reviewModel}` },
+    { kind: 'in', section: 'tracker', icon: '📋', label: t('pipe.tracker'), value: TRACKER[s.trackerKind], title: '' },
+    { kind: 'in', section: 'repo', icon: '📦', label: t('pipe.repos'), value: repoValue, title: '' },
+    { kind: 'in', section: 'repo', icon: '📚', label: t('pipe.skills'), value: skillValue, title: s.referenceRepo },
+    { kind: 'ag', section: 'ai', icon: '🔍', label: t('pipe.plan'), value: provider, title: `${t('pipe.model')}: ${s.planningModel}` },
+    { kind: 'ag', section: 'ai', icon: '🔧', label: t('pipe.build'), value: provider, title: `${t('pipe.model')}: ${s.implementationModel}` },
+    { kind: 'ag', section: 'ai', icon: '✅', label: t('pipe.review'), value: provider, title: `${t('pipe.model')}: ${s.reviewModel}` },
   ]);
 
   const chips = $derived(
@@ -43,11 +45,11 @@
       {#if i > 0}
         <svg class="sep" class:accent={n.kind === 'ag'} viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6" /></svg>
       {/if}
-      <div class="node" title={n.title}>
+      <button class="node" title={n.title} onclick={() => editSection(n.section)}>
         <span class="ico">{n.icon}</span>
         <span class="lbl">{n.label}</span>
         <span class="val" class:ag={n.kind === 'ag'}>{n.value}</span>
-      </div>
+      </button>
     {/each}
   </div>
 
@@ -79,6 +81,13 @@
     border-radius: 10px;
     background: var(--surface-2);
     border: 1px solid var(--border);
+    cursor: pointer;
+    font: inherit;
+    color: var(--text);
+  }
+  .node:hover {
+    border-color: var(--accent);
+    background: var(--surface);
   }
   .ico {
     font-size: 18px;

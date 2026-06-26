@@ -2,12 +2,14 @@
   import { onMount } from 'svelte';
   import ApprovalCard from './ApprovalCard.svelte';
   import PhaseBar from './PhaseBar.svelte';
+  import PipelineSummary from './PipelineSummary.svelte';
   import Button from './lib/Button.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import { phaseActivity, phaseColor, phaseLabelKey } from './lib/phase';
   import { toast } from './lib/toast.svelte';
   import type { Candidate, CorralEvent, StateResponse } from './lib/types';
+  import { loadDraft, type WizardState } from './lib/wizard';
 
   let view: StateResponse = $state({ issues: [], pending: [], events: [] });
   let live: CorralEvent[] = $state([]);
@@ -15,6 +17,7 @@
   let showCandidates = $state(false);
   let online = $state(false);
   let configured = $state<boolean | undefined>(undefined);
+  let draft = $state<WizardState | null>(null);
 
   async function refresh() {
     try {
@@ -29,6 +32,7 @@
   onMount(() => {
     void refresh();
     void api.isConfigured().then((c) => (configured = c));
+    void loadDraft().then((d) => (draft = d));
     const unsub = api.subscribeEvents(() => void refresh());
     const poll = setInterval(() => void refresh(), 15000);
     return () => {
@@ -96,6 +100,8 @@
       <span>{t('dash.setupNeeded')}</span>
       <button class="primary" onclick={() => (location.hash = '#/setup')}>{t('dash.setupBtn')}</button>
     </div>
+  {:else if draft}
+    <PipelineSummary s={draft} />
   {/if}
 
   {#if view.pending.length > 0}

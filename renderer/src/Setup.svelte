@@ -4,6 +4,7 @@
   import * as api from './lib/api';
   import PipelineSummary from './PipelineSummary.svelte';
   import Wizard from './Wizard.svelte';
+  import { editNav } from './lib/nav.svelte';
   import { CORE_STATE_KEYS, loadDraft, OPTIONAL_STATE_KEYS, secretRefs, serviceFor, type WizardState } from './lib/wizard';
 
   let configured = $state<boolean | undefined>(undefined);
@@ -36,6 +37,14 @@
   onMount(() => {
     void api.isConfigured().then((c) => (configured = c));
     void refresh();
+  });
+
+  // A pipeline node (here or on the dashboard) asked to edit a section — open it.
+  $effect(() => {
+    if (editNav.section) {
+      editing = editNav.section;
+      editNav.section = '';
+    }
   });
 </script>
 
