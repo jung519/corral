@@ -20,7 +20,7 @@ const en: Dict = {
   'validate.apiKeyDocker':
     'The Docker backend needs a credential: a subscription token (claude setup-token), an API key, or the host-login mount (Linux only).',
   'validate.geminiDocker':
-    'Gemini cannot run under the Docker backend (its CLI has no in-container auth). Remove the Gemini agent or switch the workspace to Local.',
+    'Gemini and GPT can’t run under the Docker backend yet (no in-container auth). Use Claude for Docker, or switch the workspace to Local.',
   'validate.repoMin': 'Add at least one repository.',
   'validate.repoKeyNeeded': 'Every repository needs a key.',
   'validate.repoKeyDup': 'Duplicate repository key "{key}".',
@@ -55,7 +55,7 @@ const en: Dict = {
   'field.oauthToken.hint':
     'From `claude setup-token` (requires a Claude subscription). Lets Docker authenticate with no API key — works on macOS, no billing. Recommended for the Docker backend.',
   'provider.dockerNo': 'no Docker',
-  'provider.dockerGeminiNote': 'Gemini is unavailable on the Docker backend (its CLI has no in-container auth). Use Claude, or switch the workspace to Local.',
+  'provider.dockerGeminiNote': 'Gemini and GPT are unavailable on the Docker backend yet (no in-container auth). Use Claude, or switch the workspace to Local.',
   'oauth.setupBtn': 'Get token (claude setup-token)',
   'oauth.setupRunning': 'Opening browser… complete the login, then the token is filled in automatically.',
   'oauth.setupOk': '✓ Token obtained — saved on Save.',
@@ -251,7 +251,7 @@ const ko: Dict = {
   'validate.apiKeyDocker':
     'Docker 백엔드에는 인증 수단이 필요합니다: 구독 토큰(claude setup-token), API 키, 또는 호스트 로그인 마운트(Linux 전용) 중 하나.',
   'validate.geminiDocker':
-    'Gemini는 Docker 백엔드에서 사용할 수 없습니다(CLI가 컨테이너 내 인증 수단이 없음). Gemini 에이전트를 제거하거나 워크스페이스를 로컬로 바꾸세요.',
+    'Gemini·GPT는 아직 Docker 백엔드에서 사용할 수 없습니다(컨테이너 내 인증 미지원). Docker는 Claude를 쓰거나 워크스페이스를 로컬로 바꾸세요.',
   'validate.repoMin': '저장소를 하나 이상 추가하세요.',
   'validate.repoKeyNeeded': '모든 저장소에 키가 필요합니다.',
   'validate.repoKeyDup': '저장소 키 "{key}"가 중복됩니다.',
@@ -286,7 +286,7 @@ const ko: Dict = {
   'field.oauthToken.hint':
     '`claude setup-token` 출력값(Claude 구독 필요). API 키 없이 Docker에서 인증됩니다 — macOS에서도 동작, 종량 과금 없음. Docker 백엔드에 권장.',
   'provider.dockerNo': 'Docker 불가',
-  'provider.dockerGeminiNote': 'Gemini는 Docker 백엔드에서 사용할 수 없습니다(CLI가 컨테이너 내 인증 수단이 없음). Claude를 쓰거나 워크스페이스를 로컬로 바꾸세요.',
+  'provider.dockerGeminiNote': 'Gemini·GPT는 아직 Docker 백엔드에서 사용할 수 없습니다(컨테이너 내 인증 미지원). Claude를 쓰거나 워크스페이스를 로컬로 바꾸세요.',
   'oauth.setupBtn': '토큰 발급 (claude setup-token)',
   'oauth.setupRunning': '브라우저를 엽니다… 로그인을 완료하면 토큰이 자동으로 입력됩니다.',
   'oauth.setupOk': '✓ 토큰 발급 완료 — 저장 시 함께 저장됩니다.',

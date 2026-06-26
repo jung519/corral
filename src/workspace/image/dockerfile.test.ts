@@ -66,6 +66,7 @@ describe('cliPackagesForProviders', () => {
       '@anthropic-ai/claude-code',
       '@google/gemini-cli',
     ]);
-    expect(cliPackagesForProviders(['gpt'])).toEqual(['@anthropic-ai/claude-code']); // unknown → default
+    expect(cliPackagesForProviders(['gpt'])).toEqual(['@openai/codex']); // gpt → codex
+    expect(cliPackagesForProviders(['bogus'])).toEqual(['@anthropic-ai/claude-code']); // unknown → default
   });
 });

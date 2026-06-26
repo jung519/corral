@@ -53,6 +53,9 @@ export function runCliTurn<T>(
       cwd: spawnSpec.cwd,
       env: spawnSpec.env,
       signal: spec.signal,
+      // Close stdin (none of the CLIs take piped input) — codex `exec` otherwise blocks
+      // reading stdin; claude/gemini ignore it. stdout/stderr stay piped for parsing.
+      stdio: ['ignore', 'pipe', 'pipe'],
     });
     const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
     let sawAuth = false;

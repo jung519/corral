@@ -15,6 +15,7 @@ export const DEFAULT_AGENT_CLI = '@anthropic-ai/claude-code';
 export const AGENT_CLI_PACKAGES: Record<string, string> = {
   claude: DEFAULT_AGENT_CLI,
   gemini: '@google/gemini-cli',
+  gpt: '@openai/codex',
 };
 
 export interface RenderDockerfileOptions {

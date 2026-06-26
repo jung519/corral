@@ -37,12 +37,12 @@
     return (m && SECTION_STEP[m[1] ?? '']) ?? 0;
   }
 
-  // Only claude is implemented; gemini/gpt are gated until their adapters land so the
-  // wizard can never produce a config that fails to boot.
+  // claude / gemini / gpt(codex) transports are all implemented. `soon` gates a provider
+  // whose adapter isn't ready yet (none currently).
   const providers: Array<{ id: WizardState['provider']; name: string; icon: string; soon?: boolean }> = [
     { id: 'claude', name: 'Claude', icon: '<path d="M12 3v18M3 12h18M6 6l12 12M18 6 6 18"/>' },
     { id: 'gemini', name: 'Gemini', icon: '<path d="M12 3l7 9-7 9-7-9z"/>' },
-    { id: 'gpt', name: 'GPT', icon: '<circle cx="12" cy="12" r="8"/>', soon: true },
+    { id: 'gpt', name: 'GPT', icon: '<circle cx="12" cy="12" r="8"/>' },
   ];
 
   let s: WizardState = $state(initialState());
@@ -103,9 +103,10 @@
     s.reviewModel = d.review;
   }
 
-  // Gemini's CLI can't authenticate inside a container (no injectable token, no
-  // ~/.gemini mount), so it's disallowed under the docker backend — disabled in the UI.
-  const dockerBlocksGemini = (id: WizardState['provider']) => s.backend === 'docker' && id === 'gemini';
+  // gemini (no in-container token) and gpt/codex (docker auth wired in a later phase)
+  // can't run under the docker backend yet — disabled in the picker.
+  const dockerBlocksProvider = (id: WizardState['provider']) =>
+    s.backend === 'docker' && (id === 'gemini' || id === 'gpt');
 
   // ── Fallback agents (failover order) ──────────────────────────────────────
   function addFallback() {
@@ -359,14 +360,14 @@
           <button
             class="provider"
             class:sel={s.provider === p.id}
-            class:soon={p.soon || dockerBlocksGemini(p.id)}
-            disabled={p.soon || dockerBlocksGemini(p.id)}
-            onclick={() => !p.soon && !dockerBlocksGemini(p.id) && setProvider(p.id)}
+            class:soon={p.soon || dockerBlocksProvider(p.id)}
+            disabled={p.soon || dockerBlocksProvider(p.id)}
+            onclick={() => !p.soon && !dockerBlocksProvider(p.id) && setProvider(p.id)}
           >
             <svg class="picon" width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6">{@html p.icon}</svg>
             <span class="pname">{p.name}</span>
             {#if p.soon}<span class="soon-tag">{t('badge.soon')}</span>
-            {:else if dockerBlocksGemini(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
+            {:else if dockerBlocksProvider(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
           </button>
         {/each}
       </div>
@@ -466,12 +467,12 @@
                 <button
                   class="transport"
                   class:sel={f.provider === p.id}
-                  class:soon={dockerBlocksGemini(p.id)}
-                  disabled={dockerBlocksGemini(p.id)}
-                  onclick={() => !dockerBlocksGemini(p.id) && setFallbackProvider(f, p.id)}
+                  class:soon={dockerBlocksProvider(p.id)}
+                  disabled={dockerBlocksProvider(p.id)}
+                  onclick={() => !dockerBlocksProvider(p.id) && setFallbackProvider(f, p.id)}
                 >
                   <span class="radio" class:on={f.provider === p.id}></span>{p.name}
-                  {#if dockerBlocksGemini(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
+                  {#if dockerBlocksProvider(p.id)}<span class="soon-tag">{t('provider.dockerNo')}</span>{/if}
                 </button>
               {/each}
             </div>

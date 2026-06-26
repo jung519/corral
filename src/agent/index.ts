@@ -9,6 +9,7 @@ import { Registry } from '../core/registry.js';
 import type { AgentAdapter, WorkspaceIO } from '../core/types.js';
 import { ClaudeApiTransport } from './claude-api.js';
 import { ClaudeCliTransport } from './claude-cli.js';
+import { CodexCliTransport } from './codex-cli.js';
 import { GeminiCliTransport } from './gemini-cli.js';
 import { GenericAgent } from './generic.js';
 import type { AgentTransport } from './types.js';
@@ -28,7 +29,7 @@ export const agentTransports = new Registry<{ kind: string }, AgentTransport, Ag
 agentTransports.register('claude:cli', (_config, ctx) => new ClaudeCliTransport(ctx.apiKey, ctx.oauthToken));
 agentTransports.register('claude:api', (_config, ctx) => new ClaudeApiTransport(ctx.apiKey));
 agentTransports.register('gemini:cli', (_config, ctx) => new GeminiCliTransport(ctx.apiKey));
-// gpt:cli (codex) is added in a later milestone.
+agentTransports.register('gpt:cli', (_config, ctx) => new CodexCliTransport(ctx.apiKey));
 
 export function createAgent(config: AgentRoutingConfig, ctx: AgentTransportCtx): AgentAdapter {
   const transport = agentTransports.create({ kind: `${config.provider}:${config.transport}` }, ctx);
