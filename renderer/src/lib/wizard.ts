@@ -230,16 +230,15 @@ export function dockerBlocked(provider: Provider): boolean {
   return provider === 'gemini';
 }
 
-/** Providers with a working API (BYOK) transport. Only gpt:api runs the shared agentic
- *  loop today; claude:api / gemini:api are still stubs, so they stay CLI-only until
- *  their clients land. (Mirror of the agentTransports registry.) */
-const API_PROVIDERS = new Set<Provider>(['gpt']);
+/** Providers with a working API (BYOK) transport. All three run the shared agentic loop
+ *  (api-loop.ts) directly. (Mirror of the agentTransports registry.) */
+const API_PROVIDERS = new Set<Provider>(['claude', 'gemini', 'gpt']);
 export function apiSupported(provider: Provider): boolean {
   return API_PROVIDERS.has(provider);
 }
 /** First provider that supports the API transport (for coercing on transport switch). */
 export function firstApiProvider(): Provider {
-  return PROVIDERS.find((p) => apiSupported(p)) ?? 'gpt';
+  return PROVIDERS.find((p) => apiSupported(p)) ?? 'claude';
 }
 
 /** Whether this provider can execute under the current backend. */
