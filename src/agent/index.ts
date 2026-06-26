@@ -2,8 +2,9 @@
  * `${provider}:${transport}`); createAgent wraps the selected transport in a
  * provider-neutral GenericAgent.
  *
- * The working path is the CLI transport (spawns the user's installed CLI, BYOK via
- * API key). The raw-HTTP `api` transport is a stub (see claude-api.ts). */
+ * The cli transports spawn the user's installed CLI (BYOK via API key / subscription).
+ * The raw-HTTP `api` transports run the shared agentic loop (api-loop.ts) directly:
+ * gpt:api is implemented (openai-api.ts); claude:api / gemini:api are still stubs. */
 import type { AgentRoutingConfig } from '../config/schema.js';
 import { Registry } from '../core/registry.js';
 import type { AgentAdapter, WorkspaceIO } from '../core/types.js';
@@ -12,6 +13,7 @@ import { ClaudeCliTransport } from './claude-cli.js';
 import { CodexCliTransport } from './codex-cli.js';
 import { GeminiCliTransport } from './gemini-cli.js';
 import { GenericAgent } from './generic.js';
+import { OpenAiApiTransport } from './openai-api.js';
 import type { AgentTransport } from './types.js';
 
 export interface AgentTransportCtx {
@@ -31,6 +33,7 @@ agentTransports.register('claude:api', (_config, ctx) => new ClaudeApiTransport(
 agentTransports.register('gemini:cli', (_config, ctx) => new GeminiCliTransport(ctx.apiKey));
 // gpt docker auth reuses the oauth slot: oauthToken carries the base64 ~/.codex/auth.json.
 agentTransports.register('gpt:cli', (_config, ctx) => new CodexCliTransport(ctx.apiKey, ctx.oauthToken));
+agentTransports.register('gpt:api', (_config, ctx) => new OpenAiApiTransport(ctx.apiKey));
 
 export function createAgent(config: AgentRoutingConfig, ctx: AgentTransportCtx): AgentAdapter {
   const transport = agentTransports.create({ kind: `${config.provider}:${config.transport}` }, ctx);

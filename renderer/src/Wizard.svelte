@@ -7,6 +7,7 @@
     buildConfigYaml,
     configured,
     CORE_STATE_KEYS,
+    firstApiProvider,
     defaultModels,
     type FallbackEntry,
     hasCred,
@@ -389,7 +390,7 @@
           class:sel={s.transport === 'api'}
           onclick={() => {
             s.transport = 'api';
-            if (!apiSupported(s.provider)) setProvider('claude');
+            if (!apiSupported(s.provider)) setProvider(firstApiProvider());
           }}
         >
           <span class="radio" class:on={s.transport === 'api'}></span>{t('transport.api')}
