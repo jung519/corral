@@ -16,7 +16,14 @@
     return `${name} · ${s.repos.length}`;
   });
   const skillValue = $derived(s.referenceRepo.trim() ? s.referenceRepo.split('/').pop() || s.referenceRepo : t('pipe.none'));
-  const provider = $derived(PROVIDER[s.provider]);
+
+  // Per-stage agent: its own provider+model when per-stage mode is on, else the single
+  // provider with that stage's model.
+  function agent(stage: 'planning' | 'implementation' | 'review'): { provider: string; model: string } {
+    if (s.perStageAgents) return { provider: PROVIDER[s.stages[stage].provider], model: s.stages[stage].model };
+    const model = stage === 'planning' ? s.planningModel : stage === 'implementation' ? s.implementationModel : s.reviewModel;
+    return { provider: PROVIDER[s.provider], model };
+  }
 
   // input nodes (sources the agents consume) + the per-stage agent nodes. `section` is
   // the Setup section a node opens for editing when clicked.
@@ -24,9 +31,9 @@
     { kind: 'in', section: 'tracker', icon: '📋', label: t('pipe.tracker'), value: TRACKER[s.trackerKind], title: '' },
     { kind: 'in', section: 'repo', icon: '📦', label: t('pipe.repos'), value: repoValue, title: '' },
     { kind: 'in', section: 'repo', icon: '📚', label: t('pipe.skills'), value: skillValue, title: s.referenceRepo },
-    { kind: 'ag', section: 'ai', icon: '🔍', label: t('pipe.plan'), value: provider, title: `${t('pipe.model')}: ${s.planningModel}` },
-    { kind: 'ag', section: 'ai', icon: '🔧', label: t('pipe.build'), value: provider, title: `${t('pipe.model')}: ${s.implementationModel}` },
-    { kind: 'ag', section: 'ai', icon: '✅', label: t('pipe.review'), value: provider, title: `${t('pipe.model')}: ${s.reviewModel}` },
+    { kind: 'ag', section: 'ai', icon: '🔍', label: t('pipe.plan'), value: agent('planning').provider, title: `${t('pipe.model')}: ${agent('planning').model}` },
+    { kind: 'ag', section: 'ai', icon: '🔧', label: t('pipe.build'), value: agent('implementation').provider, title: `${t('pipe.model')}: ${agent('implementation').model}` },
+    { kind: 'ag', section: 'ai', icon: '✅', label: t('pipe.review'), value: agent('review').provider, title: `${t('pipe.model')}: ${agent('review').model}` },
   ]);
 
   const chips = $derived(

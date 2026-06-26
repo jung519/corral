@@ -37,6 +37,12 @@ export function newRepo(): RepoEntry {
   };
 }
 
+/** One stage's agent in per-stage mode: provider + the model for that stage. */
+export interface StageAgent {
+  provider: WizardState['provider'];
+  model: string;
+}
+
 /** A fallback agent: tried (in list order) when the agent above it is out of capacity.
  *  Always cli transport for now; carries its own credentials + per-stage models. */
 export interface FallbackEntry {
@@ -60,6 +66,12 @@ export interface WizardState {
   reviewModel: string;
   /** Ordered fallback agents (failover when the one above is out of capacity). */
   fallbacks: FallbackEntry[];
+  /** When on, each stage (plan/build/review) uses its own provider + model. Off → the
+   *  single provider above runs every stage (with the per-stage models). */
+  perStageAgents: boolean;
+  stages: { planning: StageAgent; implementation: StageAgent; review: StageAgent };
+  /** Credentials per provider (per-stage mode shares one credential per provider). */
+  stageCred: Partial<Record<WizardState['provider'], { key: string; oauth: string }>>;
   repos: RepoEntry[];
   trackerKind: TrackerKind;
   notionDb: string;
@@ -102,6 +114,13 @@ export function initialState(): WizardState {
     implementationModel: 'sonnet',
     reviewModel: 'opus',
     fallbacks: [],
+    perStageAgents: false,
+    stages: {
+      planning: { provider: 'claude', model: 'opus' },
+      implementation: { provider: 'claude', model: 'sonnet' },
+      review: { provider: 'claude', model: 'opus' },
+    },
+    stageCred: {},
     repos: [{ ...newRepo(), key: 'main' }],
     trackerKind: 'notion',
     notionDb: '',
@@ -189,8 +208,15 @@ export type SecretSavedFn = (service: string, account: string) => boolean;
 function dockerBlocked(provider: string): boolean {
   return provider === 'gemini';
 }
+/** Distinct providers used in per-stage mode (plan/build/review). */
+export function stageProviders(s: WizardState): Array<WizardState['provider']> {
+  return [...new Set([s.stages.planning.provider, s.stages.implementation.provider, s.stages.review.provider])];
+}
 export function dockerProviderConflict(s: WizardState): boolean {
-  return s.backend === 'docker' && (dockerBlocked(s.provider) || s.fallbacks.some((f) => dockerBlocked(f.provider)));
+  if (s.backend !== 'docker') return false;
+  const providers = [s.provider, ...s.fallbacks.map((f) => f.provider)];
+  if (s.perStageAgents) providers.push(...stageProviders(s));
+  return providers.some(dockerBlocked);
 }
 
 export function validateStep(step: number, s: WizardState, isSaved: SecretSavedFn = () => false): string {
@@ -200,8 +226,11 @@ export function validateStep(step: number, s: WizardState, isSaved: SecretSavedF
       if (s.transport === 'api' && !s.agentKey.trim() && !isSaved(serviceFor(s.provider), 'default'))
         return vt('validate.apiKeyApi');
       // Docker has no auth source unless one of: host-login mount, an API key, or a
-      // subscription OAuth token (claude setup-token). Require at least one.
+      // subscription OAuth token (claude setup-token). Require at least one. In per-stage
+      // mode each provider carries its own credential — the runtime surfaces a clear
+      // login_required if one is missing, so we don't strictly gate here.
       if (
+        !s.perStageAgents &&
         s.backend === 'docker' &&
         !s.dockerMountLogin &&
         !s.agentKey.trim() &&
@@ -350,6 +379,27 @@ function fallbackYaml(s: WizardState): string[] {
   return lines;
 }
 
+/** YAML for agent.stages (per-stage provider/model overrides). Credentials are keyed
+ *  per provider (service:default / :oauth), shared across stages using that provider. */
+function stageAgentYaml(s: WizardState): string[] {
+  if (!s.perStageAgents) return [];
+  const lines = ['  stages:'];
+  for (const stage of ['planning', 'implementation', 'review'] as const) {
+    const a = s.stages[stage];
+    const svc = serviceFor(a.provider);
+    lines.push(
+      `    ${stage}:`,
+      `      provider: ${a.provider}`,
+      '      transport: cli',
+      `      credential: { service: ${svc}, account: default }`,
+      `      oauth_credential: { service: ${svc}, account: oauth }`,
+      '      models:',
+      `        ${stage}: ${yamlStr(a.model)}`,
+    );
+  }
+  return lines;
+}
+
 export function buildConfigYaml(s: WizardState): string {
   const profile = ['profile:', `  language: ${yamlStr(s.language)}`, `  stack: ${yamlStr(s.stack)}`];
   if (s.referenceRepo.trim()) {
@@ -377,6 +427,7 @@ export function buildConfigYaml(s: WizardState): string {
     `    planning: ${yamlStr(s.planningModel)}`,
     `    implementation: ${yamlStr(s.implementationModel)}`,
     `    review: ${yamlStr(s.reviewModel)}`,
+    ...stageAgentYaml(s),
     ...fallbackYaml(s),
     '',
     'workspace:',
@@ -409,6 +460,7 @@ function withoutSecrets(s: WizardState): WizardState {
   clone.notionToken = '';
   clone.jiraToken = '';
   clone.referenceToken = '';
+  for (const p of Object.keys(clone.stageCred) as Array<WizardState['provider']>) clone.stageCred[p] = { key: '', oauth: '' };
   for (const r of clone.repos) r.token = '';
   return clone;
 }
@@ -461,6 +513,11 @@ export function secretRefs(s: WizardState): Array<{ service: string; account: st
   if (s.referenceRepo.trim()) refs.push({ service: 'reference', account: 'default' });
   refs.push({ service: serviceFor(s.provider), account: 'default' });
   refs.push({ service: serviceFor(s.provider), account: 'oauth' });
+  if (s.perStageAgents)
+    for (const p of stageProviders(s)) {
+      refs.push({ service: serviceFor(p), account: 'default' });
+      refs.push({ service: serviceFor(p), account: 'oauth' });
+    }
   s.fallbacks.forEach((f, i) => {
     refs.push({ service: serviceFor(f.provider), account: `fb${i}` });
     if (f.provider === 'claude') refs.push({ service: serviceFor(f.provider), account: `fb${i}-oauth` });
@@ -481,6 +538,12 @@ export function secretsFor(s: WizardState): Array<{ service: string; account: st
   if (s.agentKey.trim()) out.push({ service: serviceFor(s.provider), account: 'default', value: s.agentKey });
   if (s.agentOauthToken.trim())
     out.push({ service: serviceFor(s.provider), account: 'oauth', value: s.agentOauthToken });
+  if (s.perStageAgents)
+    for (const p of stageProviders(s)) {
+      const c = s.stageCred[p];
+      if (c?.key?.trim()) out.push({ service: serviceFor(p), account: 'default', value: c.key });
+      if (c?.oauth?.trim()) out.push({ service: serviceFor(p), account: 'oauth', value: c.oauth });
+    }
   s.fallbacks.forEach((f, i) => {
     if (f.key.trim()) out.push({ service: serviceFor(f.provider), account: `fb${i}`, value: f.key });
     if (f.provider === 'claude' && f.oauthToken.trim())

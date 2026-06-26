@@ -18,6 +18,7 @@
     secretRefs,
     secretsFor,
     serviceFor,
+    stageProviders,
     type TrackerKind,
     validateStep,
     type WizardState,
@@ -199,6 +200,60 @@
       codexAuthMsg = `${t('codex.importFail')} ${String(e)}`.trim();
     }
   }
+
+  // ── Per-stage agents ──────────────────────────────────────────────────────
+  const STAGES = [
+    { key: 'planning', label: 'pipe.plan' },
+    { key: 'implementation', label: 'pipe.build' },
+    { key: 'review', label: 'pipe.review' },
+  ] as const;
+  const usedProviders = $derived(stageProviders(s));
+  const providerName = (p: WizardState['provider']) => providers.find((x) => x.id === p)?.name ?? p;
+
+  function ensureCred(p: WizardState['provider']) {
+    if (!s.stageCred[p]) s.stageCred[p] = { key: '', oauth: '' };
+  }
+  // Keep a credential slot for every provider used by a stage.
+  $effect(() => {
+    if (s.perStageAgents) for (const p of usedProviders) ensureCred(p);
+  });
+  function setStageProvider(stage: (typeof STAGES)[number]['key'], p: WizardState['provider']) {
+    s.stages[stage].provider = p;
+    s.stages[stage].model = defaultModels(p)[stage];
+    ensureCred(p);
+  }
+
+  // Import an oauth-style credential for a stage provider (claude setup-token / codex
+  // login) into that provider's shared oauth slot.
+  let stageMsg = $state<Record<string, string>>({});
+  async function importStageOauth(p: 'claude' | 'gpt') {
+    if (!window.corral) return;
+    ensureCred(p);
+    stageMsg[p] = t(p === 'claude' ? 'oauth.setupRunning' : 'codex.importing');
+    try {
+      let ok = false;
+      let val: string | undefined;
+      let error: string | undefined;
+      if (p === 'claude') {
+        const r = await window.corral.claudeSetupToken();
+        ({ ok, error } = r);
+        val = r.token;
+      } else {
+        const r = await window.corral.codexImportAuth();
+        ({ ok, error } = r);
+        val = r.b64;
+      }
+      if (ok && val) {
+        s.stageCred[p]!.oauth = val;
+        stageMsg[p] = t(p === 'claude' ? 'oauth.setupOk' : 'codex.importOk');
+      } else {
+        stageMsg[p] = `✗ ${error ?? ''}`.trim();
+      }
+    } catch (e) {
+      stageMsg[p] = `✗ ${String(e)}`.trim();
+    }
+  }
+
   // Check the provider's official CLI is installed (transport: cli). Install-only —
   // login is provider-specific and not reliably checkable without a billed turn.
   async function testCli() {
@@ -458,27 +513,66 @@
         {/if}
       {/if}
 
-      <span class="lbl">{t('agent.modelsLabel')}</span>
-      <div class="three">
-        <label class="field"
-          ><span>{t('field.planningModel')}</span>
-          <select bind:value={s.planningModel}>
-            {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
-          </select></label
-        >
-        <label class="field"
-          ><span>{t('field.implModel')}</span>
-          <select bind:value={s.implementationModel}>
-            {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
-          </select></label
-        >
-        <label class="field"
-          ><span>{t('field.reviewModel')}</span>
-          <select bind:value={s.reviewModel}>
-            {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
-          </select></label
-        >
-      </div>
+      <label class="check"><input type="checkbox" bind:checked={s.perStageAgents} /> {t('stage.toggle')}</label>
+      <p class="hint">{t('stage.toggleHint')}</p>
+
+      {#if !s.perStageAgents}
+        <span class="lbl">{t('agent.modelsLabel')}</span>
+        <div class="three">
+          <label class="field"
+            ><span>{t('field.planningModel')}</span>
+            <select bind:value={s.planningModel}>
+              {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
+            </select></label
+          >
+          <label class="field"
+            ><span>{t('field.implModel')}</span>
+            <select bind:value={s.implementationModel}>
+              {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
+            </select></label
+          >
+          <label class="field"
+            ><span>{t('field.reviewModel')}</span>
+            <select bind:value={s.reviewModel}>
+              {#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}
+            </select></label
+          >
+        </div>
+      {:else}
+        <span class="lbl">{t('stage.agentsLabel')}</span>
+        {#each STAGES as st}
+          <div class="stage-row">
+            <span class="stage-name">{t(st.label)}</span>
+            <select value={s.stages[st.key].provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as WizardState['provider'])}>
+              {#each providers.filter((p) => !p.soon) as p}<option value={p.id}>{p.name}</option>{/each}
+            </select>
+            <select bind:value={s.stages[st.key].model}>
+              {#each MODELS[s.stages[st.key].provider] as m}<option value={m}>{m}</option>{/each}
+            </select>
+          </div>
+        {/each}
+
+        <span class="lbl">{t('stage.creds')}</span>
+        {#each usedProviders as p (p)}
+          {#if s.stageCred[p]}
+            <div class="stage-row">
+              <span class="stage-name">{providerName(p)}</span>
+              <input
+                type="password"
+                value={s.stageCred[p].key}
+                oninput={(e) => (ensureCred(p), (s.stageCred[p]!.key = e.currentTarget.value))}
+                placeholder={!s.stageCred[p].key && secretSaved(serviceFor(p), 'default') ? t('field.secretSaved') : t('stage.apiKeyOpt')}
+              />
+              {#if hasBridge && p === 'claude'}<Button onclick={() => importStageOauth('claude')}>{t('oauth.setupBtn')}</Button>{/if}
+              {#if hasBridge && p === 'gpt'}<Button onclick={() => importStageOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
+            </div>
+            {#if stageMsg[p]}<p class="helper">{stageMsg[p]}</p>{/if}
+            {#if (p === 'claude' || p === 'gpt') && !s.stageCred[p].oauth && secretSaved(serviceFor(p), 'oauth')}
+              <p class="helper">{providerName(p)}: {t('field.secretSaved')}</p>
+            {/if}
+          {/if}
+        {/each}
+      {/if}
 
       {#if s.transport === 'cli'}
         <span class="lbl">{t('agent.fallbackLabel')}</span>
@@ -1077,6 +1171,23 @@
     display: grid;
     grid-template-columns: 1fr 1fr 1fr;
     gap: 14px;
+  }
+  .stage-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  .stage-name {
+    width: 64px;
+    flex: 0 0 auto;
+    font-size: 13px;
+    color: var(--text-dim);
+  }
+  .stage-row select,
+  .stage-row input {
+    flex: 1;
+    min-width: 0;
   }
   .states {
     display: grid;
