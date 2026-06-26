@@ -38,6 +38,9 @@ const api = {
    *  (opens the browser; returns the token or an error/URL tail). */
   claudeSetupToken: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
     ipcRenderer.invoke('claude:setup-token'),
+  /** Import the host codex login (~/.codex/auth.json, base64) for docker injection. */
+  codexImportAuth: (): Promise<{ ok: boolean; b64?: string; error?: string }> =>
+    ipcRenderer.invoke('codex:import-auth'),
   /** Show an OS notification (human action needed). No-op while the window is focused. */
   notify: (title: string, body: string): Promise<void> => ipcRenderer.invoke('notify', title, body),
   /** Verify a token/key before writing config (wizard "Test" buttons). */

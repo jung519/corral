@@ -183,11 +183,11 @@ function vt(id: string, vars?: Record<string, string>): string {
  * (editing keeps the saved key). Default: nothing saved (first-run requires keys). */
 export type SecretSavedFn = (service: string, account: string) => boolean;
 
-/** Providers that can't run under the docker backend yet: gemini (no in-container
- *  token, no ~/.gemini mount) and gpt/codex (docker auth wired in a later phase).
- *  Disallowed as primary OR fallback when the backend is docker. */
+/** Providers that can't run under the docker backend: gemini (no in-container token,
+ *  no ~/.gemini mount). claude (oauth token / mount) and gpt (codex auth import / API
+ *  key) ARE supported. Disallowed as primary OR fallback when the backend is docker. */
 function dockerBlocked(provider: string): boolean {
-  return provider === 'gemini' || provider === 'gpt';
+  return provider === 'gemini';
 }
 export function dockerProviderConflict(s: WizardState): boolean {
   return s.backend === 'docker' && (dockerBlocked(s.provider) || s.fallbacks.some((f) => dockerBlocked(f.provider)));

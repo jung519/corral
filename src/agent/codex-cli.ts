@@ -28,7 +28,12 @@ export class CodexCliTransport implements AgentTransport {
   /** Last codex thread id per issue (workspace.id) — to resume the exact session. */
   private readonly threadByIssue = new Map<string, string>();
 
-  constructor(private readonly apiKey: string | null) {}
+  constructor(
+    private readonly apiKey: string | null,
+    /** Base64 of the host ~/.codex/auth.json (subscription login) for DOCKER injection
+     *  — the codex equivalent of Claude's CLAUDE_CODE_OAUTH_TOKEN. Null → API key path. */
+    private readonly codexAuthB64: string | null = null,
+  ) {}
 
   async preflight(): Promise<PreflightResult> {
     return { ok: true, detail: 'relying on an installed & logged-in codex CLI (~/.codex)' };
@@ -54,12 +59,33 @@ export class CodexCliTransport implements AgentTransport {
     if (spec.handle.backend === 'local') {
       return { command: 'codex', args, cwd: spec.handle.workdir, env: this.localEnv() };
     }
-    // docker: run inside the container as the worker user. (Auth into the container is
-    // added in the docker phase — mount ~/.codex or `codex login --with-api-key`.)
-    const codexCmd = ['codex', ...args.map(shq)].join(' ');
+    // docker: run inside the container as the worker user, authenticating first.
+    // Subscription: inject the host auth.json (base64) → ~/.codex/auth.json.
+    // API key: `codex login --with-api-key` (codex doesn't read OPENAI_API_KEY at exec).
+    const inner = ['codex', ...args.map(shq)].join(' ');
+    const envArgs: string[] = [];
+    let prelude = '';
+    if (this.codexAuthB64) {
+      envArgs.push('-e', `CODEX_AUTH_B64=${this.codexAuthB64}`);
+      prelude = 'mkdir -p "$HOME/.codex" && printf %s "$CODEX_AUTH_B64" | base64 -d > "$HOME/.codex/auth.json" && ';
+    } else if (this.apiKey) {
+      envArgs.push('-e', `OPENAI_API_KEY=${this.apiKey}`);
+      prelude = 'printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null 2>&1 && ';
+    }
     return {
       command: 'docker',
-      args: ['exec', '--user', WORKER_USER, '-w', spec.handle.workdir, containerName(spec.handle), 'bash', '-lc', codexCmd],
+      args: [
+        'exec',
+        '--user',
+        WORKER_USER,
+        '-w',
+        spec.handle.workdir,
+        ...envArgs,
+        containerName(spec.handle),
+        'bash',
+        '-lc',
+        prelude + inner,
+      ],
       env: this.localEnv(),
     };
   }

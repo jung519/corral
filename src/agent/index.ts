@@ -29,7 +29,8 @@ export const agentTransports = new Registry<{ kind: string }, AgentTransport, Ag
 agentTransports.register('claude:cli', (_config, ctx) => new ClaudeCliTransport(ctx.apiKey, ctx.oauthToken));
 agentTransports.register('claude:api', (_config, ctx) => new ClaudeApiTransport(ctx.apiKey));
 agentTransports.register('gemini:cli', (_config, ctx) => new GeminiCliTransport(ctx.apiKey));
-agentTransports.register('gpt:cli', (_config, ctx) => new CodexCliTransport(ctx.apiKey));
+// gpt docker auth reuses the oauth slot: oauthToken carries the base64 ~/.codex/auth.json.
+agentTransports.register('gpt:cli', (_config, ctx) => new CodexCliTransport(ctx.apiKey, ctx.oauthToken));
 
 export function createAgent(config: AgentRoutingConfig, ctx: AgentTransportCtx): AgentAdapter {
   const transport = agentTransports.create({ kind: `${config.provider}:${config.transport}` }, ctx);

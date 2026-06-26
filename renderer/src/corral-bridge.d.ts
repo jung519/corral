@@ -24,6 +24,7 @@ declare global {
       detectDocker(): Promise<{ available: boolean; version?: string }>;
       detectCli(provider: string): Promise<{ installed: boolean; version?: string }>;
       claudeSetupToken(): Promise<{ ok: boolean; token?: string; error?: string }>;
+      codexImportAuth(): Promise<{ ok: boolean; b64?: string; error?: string }>;
       notify(title: string, body: string): Promise<void>;
       validate: {
         notion(token: string): Promise<{ ok: boolean; detail?: string }>;

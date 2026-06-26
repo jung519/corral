@@ -103,10 +103,9 @@
     s.reviewModel = d.review;
   }
 
-  // gemini (no in-container token) and gpt/codex (docker auth wired in a later phase)
-  // can't run under the docker backend yet — disabled in the picker.
-  const dockerBlocksProvider = (id: WizardState['provider']) =>
-    s.backend === 'docker' && (id === 'gemini' || id === 'gpt');
+  // Only gemini can't run under docker (no in-container auth). claude (oauth/mount) and
+  // gpt (codex auth import / API key) are supported — disabled in the picker only here.
+  const dockerBlocksProvider = (id: WizardState['provider']) => s.backend === 'docker' && id === 'gemini';
 
   // ── Fallback agents (failover order) ──────────────────────────────────────
   function addFallback() {
@@ -179,6 +178,25 @@
       }
     } catch (e) {
       setupTokenMsg = `${t('oauth.setupFail')} ${String(e)}`.trim();
+    }
+  }
+
+  // Import the host codex login (~/.codex) so GPT can run in docker. Stored in the same
+  // oauth secret slot (openai:oauth) and injected into the worker container.
+  let codexAuthMsg = $state('');
+  async function importCodexAuth() {
+    if (!window.corral) return;
+    codexAuthMsg = t('codex.importing');
+    try {
+      const r = await window.corral.codexImportAuth();
+      if (r.ok && r.b64) {
+        s.agentOauthToken = r.b64; // saved to <provider>:oauth by secretsFor
+        codexAuthMsg = t('codex.importOk');
+      } else {
+        codexAuthMsg = `${t('codex.importFail')} ${r.error ?? ''}`.trim();
+      }
+    } catch (e) {
+      codexAuthMsg = `${t('codex.importFail')} ${String(e)}`.trim();
     }
   }
   // Check the provider's official CLI is installed (transport: cli). Install-only —
@@ -423,6 +441,19 @@
           <div class="testrow">
             <Button onclick={runSetupToken}>{t('oauth.setupBtn')}</Button>
             {#if setupTokenMsg}<span class="helper">{setupTokenMsg}</span>{/if}
+          </div>
+        {/if}
+      {/if}
+
+      {#if s.transport === 'cli' && s.provider === 'gpt' && s.backend === 'docker'}
+        <p class="hint">
+          {t('codex.dockerHint')}
+          {#if secretSaved(serviceFor(s.provider), 'oauth') && !s.agentOauthToken}<strong>· {t('field.secretSaved')}</strong>{/if}
+        </p>
+        {#if hasBridge}
+          <div class="testrow">
+            <Button onclick={importCodexAuth}>{t('codex.importBtn')}</Button>
+            {#if codexAuthMsg}<span class="helper">{codexAuthMsg}</span>{/if}
           </div>
         {/if}
       {/if}

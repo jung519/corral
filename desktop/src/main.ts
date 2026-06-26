@@ -7,7 +7,8 @@
  */
 import { app, BrowserWindow, ipcMain, Notification } from 'electron';
 import { exec, execFile, spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
@@ -80,6 +81,7 @@ function registerIpc(): void {
   ipcMain.handle('docker:detect', () => detectDocker());
   ipcMain.handle('cli:detect', (_e, provider: string) => detectCli(provider));
   ipcMain.handle('claude:setup-token', () => runClaudeSetupToken());
+  ipcMain.handle('codex:import-auth', () => importCodexAuth());
   ipcMain.handle('notify', (_e, title: string, body: string) => showNotification(title, body));
 
   ipcMain.handle('validate:notion', (_e, token: string) => validateNotion(token));
@@ -185,6 +187,23 @@ app.setName('Corral');
 // to the name — after this rename, existing encrypted tokens must be re-entered once
 // (they re-encrypt under the new "Corral" key); config itself is untouched.
 app.setPath('userData', join(app.getPath('appData'), 'corral-desktop'));
+
+/** Import the host's codex login (~/.codex/auth.json) so it can be injected into a
+ *  docker worker for GPT. Codex auth is a FILE (oauth tokens + key), so unlike Claude
+ *  it mounts/injects cleanly on macOS. Returns the file base64-encoded for the keychain. */
+function importCodexAuth(): { ok: boolean; b64?: string; error?: string } {
+  const path = join(homedir(), '.codex', 'auth.json');
+  if (!existsSync(path)) {
+    return { ok: false, error: '호스트에 codex 로그인이 없습니다. 먼저 `codex login`으로 로그인하세요.' };
+  }
+  try {
+    const raw = readFileSync(path);
+    if (!raw.length) return { ok: false, error: 'auth.json이 비어 있습니다.' };
+    return { ok: true, b64: raw.toString('base64') };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
 
 app.whenReady().then(() => {
   // macOS dev: the dock icon comes from the bundle when packaged, but in `electron .`
