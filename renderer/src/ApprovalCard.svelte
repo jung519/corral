@@ -15,15 +15,12 @@
   // initializer) avoids the state_referenced_locally warning.
   let chosen = $state<string | undefined>(undefined);
   const selection = $derived(chosen ?? action.options?.[0]);
-  let notes = $state('');
   let showQa = $state(false);
 
+  // Plain accept-as-is. Free-text (change requests, approve-with-instructions, questions,
+  // answering the agent) all live in the "질문·논의" popup now.
   function approve() {
-    return onApprove(action.id, action.options ? selection : undefined, notes.trim() || undefined);
-  }
-  function requestChanges() {
-    if (!notes.trim()) return;
-    return onFeedback(action.id, notes.trim());
+    return onApprove(action.id, action.options ? selection : undefined);
   }
 </script>
 
@@ -53,17 +50,14 @@
     </div>
   {/if}
 
-  <textarea rows="2" placeholder={t('card.notes')} bind:value={notes}></textarea>
-
   <div class="actions">
     <Button class="primary" onclick={approve}>{t('card.approve')}</Button>
-    <Button onclick={requestChanges} disabled={!notes.trim()}>{t('card.requestChanges')}</Button>
     <Button onclick={() => (showQa = true)}>{t('qa.openBtn')}</Button>
   </div>
 </div>
 
 {#if showQa}
-  <QuestionPopup {action} {onFeedback} onClose={() => (showQa = false)} />
+  <QuestionPopup {action} {selection} {onFeedback} {onApprove} onClose={() => (showQa = false)} />
 {/if}
 
 <style>
@@ -222,9 +216,6 @@
   .options label.selected {
     border-color: var(--accent);
     color: var(--accent-text);
-  }
-  textarea {
-    margin-bottom: 10px;
   }
   .actions {
     display: flex;

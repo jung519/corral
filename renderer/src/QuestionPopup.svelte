@@ -6,14 +6,19 @@
 
   interface Props {
     action: PendingAction;
+    /** The plan option currently selected on the card (carried into "approve with notes"). */
+    selection?: string;
     onClose: () => void;
     onFeedback: (id: string, text: string) => unknown | Promise<unknown>;
+    onApprove: (id: string, selection?: string, notes?: string) => unknown | Promise<unknown>;
   }
-  let { action, onClose, onFeedback }: Props = $props();
+  let { action, selection, onClose, onFeedback, onApprove }: Props = $props();
 
   // Agent-question cards: the popup ANSWERS the agent (feedback). Plan/review cards: the
-  // popup asks the agent read-only questions about the result.
+  // popup asks the agent read-only questions and routes change-requests / approve-with-
+  // instructions to the agent. Approve-with-notes only matters on plan-like cards.
   const isQuestion = $derived(action.kind === 'question');
+  const isPlan = $derived(['plan', 'pr_plan', 'fix_plan'].includes(action.kind));
 
   type Msg = { role: 'you' | 'agent'; text: string };
   let thread = $state<Msg[]>([]);
@@ -42,6 +47,31 @@
     busy = true;
     try {
       await onFeedback(action.id, txt);
+      onClose();
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Send the composer text as a change request → the agent re-reviews / re-plans.
+  async function requestChanges() {
+    const txt = input.trim();
+    if (!txt || busy) return;
+    busy = true;
+    try {
+      await onFeedback(action.id, txt);
+      onClose();
+    } finally {
+      busy = false;
+    }
+  }
+
+  // Approve, passing the composer text as extra instructions (plan-like cards).
+  async function approveWithNotes() {
+    if (busy) return;
+    busy = true;
+    try {
+      await onApprove(action.id, action.options ? selection : undefined, input.trim() || undefined);
       onClose();
     } finally {
       busy = false;
@@ -91,6 +121,8 @@
         <Button class="primary" onclick={sendAnswer} disabled={busy || !input.trim()}>{t('qa.sendAnswer')}</Button>
       {:else}
         <Button class="primary" onclick={ask} disabled={busy || !input.trim()}>{busy ? t('qa.asking') : t('qa.ask')}</Button>
+        <Button onclick={requestChanges} disabled={busy || !input.trim()}>{t('qa.requestChanges')}</Button>
+        {#if isPlan}<Button onclick={approveWithNotes} disabled={busy}>{t('qa.approveWithNotes')}</Button>{/if}
       {/if}
       <Button onclick={onClose}>{t('qa.close')}</Button>
     </div>
