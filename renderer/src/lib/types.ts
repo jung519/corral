@@ -82,4 +82,5 @@ export interface HistoryRecord {
   models: { planning: string; implementation: string; review: string };
   agentProvider: string;
   failoverUsed?: boolean;
+  qa?: { q: string; a: string; ts: number; phase?: string }[];
 }

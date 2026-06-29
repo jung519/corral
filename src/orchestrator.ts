@@ -194,6 +194,7 @@ export class Orchestrator {
       },
       agentProvider: this.config.agent.provider,
       failoverUsed,
+      qa: rt.qa?.length ? rt.qa : undefined,
     };
   }
 
@@ -699,6 +700,9 @@ export class Orchestrator {
       });
       const answer = parts.join('').trim();
       if (!res.ok && !answer) return { ok: false, message: 'The agent could not answer — try rephrasing.' };
+      // Persist the exchange (issues.json survives restarts; flushed into history on archive).
+      rt.qa = [...(rt.qa ?? []), { q: question.trim(), a: answer || '(no answer)', ts: Date.now(), phase: isReview ? 'review' : 'plan' }];
+      this.store.upsert(rt);
       return { ok: true, answer: answer || '(no answer)' };
     } finally {
       this.busy.delete(identifier);

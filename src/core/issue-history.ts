@@ -12,6 +12,7 @@
  */
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import type { QaEntry } from './issue-state.js';
 import { logger } from './logger.js';
 
 export const HISTORY_SCHEMA_VERSION = 1;
@@ -62,6 +63,9 @@ export interface HistoryRecord {
   models: { planning: string; implementation: string; review: string };
   agentProvider: string; // provider that actually ran (after any failover)
   failoverUsed?: boolean;
+
+  /** Read-only Q&A the human had with the agent about the plan/review (if any). */
+  qa?: QaEntry[];
 }
 
 export interface HistoryListOpts {

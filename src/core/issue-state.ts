@@ -22,6 +22,18 @@ export interface IssuePr {
   url?: string;
 }
 
+/** One read-only Q&A exchange the human had with the agent about a pending result. */
+export interface QaEntry {
+  /** The user's question. */
+  q: string;
+  /** The agent's answer. */
+  a: string;
+  /** Epoch ms when answered. */
+  ts: number;
+  /** Phase the question was asked about (review / plan). */
+  phase?: string;
+}
+
 export interface IssueRuntime {
   identifier: string;
   /** Primary/hint repo key (display + routing hint); work may span several repos. */
@@ -42,6 +54,8 @@ export interface IssueRuntime {
   prSince?: string;
   /** Current pending approval id. */
   approvalId?: string;
+  /** Read-only Q&A exchanges with the agent during this issue (saved into history). */
+  qa?: QaEntry[];
   /**
    * Set when a restart interrupted an active phase (implementing/review_fixing)
    * and left it without a card. Surfaces the retry affordance so the run can be

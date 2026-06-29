@@ -112,6 +112,17 @@
                   </span>
                 {/if}
               </div>
+              {#if r.qa?.length}
+                <div class="qa">
+                  <div class="qa-head">{t('history.qa')} · {r.qa.length}</div>
+                  {#each r.qa as x (x.ts)}
+                    <div class="qa-item">
+                      <div class="qa-q"><b>Q</b> {x.q}</div>
+                      <div class="qa-a"><b>A</b> {x.a}</div>
+                    </div>
+                  {/each}
+                </div>
+              {/if}
             </div>
           {/if}
         </div>
@@ -306,5 +317,34 @@
   }
   .facts a {
     color: var(--accent);
+  }
+  .qa {
+    margin-top: 12px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .qa-head {
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .qa-item {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .qa-q b,
+  .qa-a b {
+    color: var(--accent);
+    margin-right: 4px;
+  }
+  .qa-a {
+    color: var(--text-dim);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
   }
 </style>
