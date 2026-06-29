@@ -117,11 +117,19 @@
   .body :global(h1) {
     font-size: 16px;
   }
+  /* Section headers (## Summary / Findings / Conclusion): clear top gap + underline. */
   .body :global(h2) {
     font-size: 15px;
+    margin-top: 20px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border);
   }
+  /* Each finding (### [SEVERITY] …): accent bar so findings read as distinct blocks. */
   .body :global(h3) {
     font-size: 14px;
+    margin-top: 18px;
+    padding-left: 8px;
+    border-left: 3px solid var(--accent);
   }
   .body :global(h4) {
     font-size: 13.5px;
@@ -129,11 +137,12 @@
   }
   .body :global(ul),
   .body :global(ol) {
-    margin: 0 0 10px;
+    margin: 0 0 12px;
     padding-left: 20px;
   }
   .body :global(li) {
-    margin: 4px 0;
+    margin: 5px 0;
+    line-height: 1.55;
   }
   .body :global(li > p) {
     margin: 0;

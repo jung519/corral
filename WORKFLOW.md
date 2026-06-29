@@ -88,6 +88,35 @@ static-gate command is a BLOCKER. Consolidate everything into `.corral/pending_r
 and write the unresolved counts as JSON to `.corral/review_status.json`:
 `{"blocker": N, "suggestion": N, "nit": N}`.
 
+Write `pending_review.md` in this EXACT scannable layout. A human reads it in a small panel,
+so readability is critical: put a blank line between every block, and put every fact on its
+own bullet — NEVER write a multi-sentence paragraph that runs together into a wall of text.
+
+```md
+## Summary
+<one or two sentences: overall verdict and the counts>
+
+## Findings
+### [BLOCKER] <short title>
+- Location: `path/to/file.ts:line`
+- Issue: <one short sentence>
+- Why / Fix: <one short sentence; split anything longer across extra bullets>
+
+### [SUGGESTION] <short title>
+- Location: `path/to/file.ts:line`
+- Issue: <one short sentence>
+- Why / Fix: <one short sentence>
+
+## Conclusion
+<blockers, if any, and the recommended next step — one or two lines>
+```
+
+Layout rules: one `###` block per finding, ordered BLOCKER → SUGGESTION → NIT; a blank line
+between every finding; one short sentence per bullet (split long reasoning across bullets,
+never one dense paragraph); omit the `## Findings` section entirely if there are none. Section
+headings and the bullet labels may be written in the output language; keep the severity labels
+(BLOCKER/SUGGESTION/NIT), file paths, and code identifiers in English.
+
 ### Apply review fixes
 (Only when the orchestrator explicitly asks — auto-fix is off by default.) Apply the BLOCKER
 and SUGGESTION fixes from `.corral/pending_review.md`, commit (in the relevant repo subdir),
