@@ -11,6 +11,7 @@
  * works before any real key runs.
  */
 import type { WorkspaceHandle, WorkspaceIO } from '../core/types.js';
+import { priceFor } from './pricing.js';
 import type { AgentEvent, AgentErrorKind, AgentProviderId, AgentTurnSpec, PreflightResult } from './types.js';
 
 /** A tool the model may call. `parameters` is a JSON Schema object. */
@@ -340,15 +341,24 @@ export async function runApiAgent(
   const tools = effectiveTools(spec.allowedTools);
 
   const maxTurns = spec.maxTurns && spec.maxTurns > 0 ? spec.maxTurns : 60;
+  const maxBudget = spec.maxBudgetUsd && spec.maxBudgetUsd > 0 ? spec.maxBudgetUsd : 0;
   let exitCode: number | null = 0;
+  let costUsd = 0; // cumulative — GenericAgent takes the latest costUsd as the run total
 
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       if (spec.signal?.aborted) throw new DOMException('aborted', 'AbortError');
+      // Stop before starting another paid turn once the budget is spent (failover-eligible).
+      if (maxBudget && costUsd >= maxBudget) {
+        onEvent({ type: 'error', error: 'budget', message: `budget $${maxBudget.toFixed(2)} reached ($${costUsd.toFixed(2)} spent)` });
+        exitCode = null;
+        break;
+      }
       const res = await client.send(messages, tools, spec.model, turnSignal(spec));
-      // Per-turn token deltas (GenericAgent sums them); cost is left to the caller's
-      // budgeting — BYOK pricing varies by model and isn't tracked here yet (Phase 3).
-      onEvent({ type: 'usage', inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: 0 });
+      // Per-turn token deltas (GenericAgent sums them); cumulative cost (GenericAgent keeps
+      // the latest as the run total). Pricing is approximate — see pricing.ts.
+      costUsd += priceFor(client.provider, spec.model, res.inputTokens, res.outputTokens);
+      onEvent({ type: 'usage', inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd });
       if (res.text) onEvent({ type: 'text', text: res.text });
       if (res.toolCalls.length === 0) break; // no tool calls → the model is done
 

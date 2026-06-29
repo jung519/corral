@@ -112,6 +112,23 @@ describe('runApiAgent', () => {
     expect(events.at(-1)).toEqual({ type: 'done', exitCode: null });
   });
 
+  it('stops with a budget error once maxBudgetUsd is spent', async () => {
+    // gpt fallback price is $1.25/1M input; 1M input tokens per turn → ~$1.25/turn.
+    const burn: ChatTurn = { text: '', toolCalls: [{ id: 't', name: 'bash', args: { command: 'true' } }], inputTokens: 1_000_000, outputTokens: 0 };
+    const client = new ScriptedClient([burn, burn, burn]);
+    const exec = vi.fn(async () => ({ stdout: '', stderr: '', code: 0 }));
+    const { events, onEvent } = collect();
+
+    await runApiAgent(client, spec({ io: fakeIo(exec), maxBudgetUsd: 1 }), onEvent);
+
+    expect(exec).toHaveBeenCalledOnce(); // only the first paid turn ran; budget stopped turn 2
+    expect(events.some((e) => e.type === 'error' && e.error === 'budget')).toBe(true);
+    expect(events.at(-1)).toEqual({ type: 'done', exitCode: null });
+    // The usage event carries cumulative cost (not zero anymore).
+    const usage = events.find((e) => e.type === 'usage');
+    expect(usage && usage.type === 'usage' && usage.costUsd).toBeCloseTo(1.25);
+  });
+
   it('stops at the turn cap when the model never stops calling tools', async () => {
     const looping: ChatTurn = {
       text: '',
