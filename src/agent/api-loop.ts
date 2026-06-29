@@ -46,15 +46,61 @@ export interface ChatTurn {
   outputTokens: number;
 }
 
+/** Options for one `send`: cancellation + a streaming text callback. */
+export interface SendOptions {
+  signal?: AbortSignal;
+  /** Invoked with each text fragment as it streams in, for the live timeline. */
+  onText?: (delta: string) => void;
+}
+
 /** A provider's HTTP chat client — translates the neutral conversation/tool model to and
  *  from the provider's wire format. The only provider-specific surface. */
 export interface ChatClient {
   readonly provider: AgentProviderId;
   /** Key present / reachable — checked before the loop runs. */
   preflight(): Promise<PreflightResult>;
-  /** One assistant turn given the conversation + available tools. Throws ApiHttpError on
-   *  a non-2xx response so the loop can classify auth / rate-limit / crash. */
-  send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, signal?: AbortSignal): Promise<ChatTurn>;
+  /** One assistant turn given the conversation + available tools. Streams text fragments
+   *  through `opts.onText` and returns the assembled turn. Throws ApiHttpError on a non-2xx
+   *  response (retryable) or a mid-stream failure (status 0, non-retryable). */
+  send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, opts?: SendOptions): Promise<ChatTurn>;
+}
+
+/** Yield the JSON payload of each `data:` line from a Server-Sent-Events response. Skips
+ *  `[DONE]` sentinels and blank lines; the caller JSON-parses (tolerating fragments). */
+export async function* sseData(res: Response, signal?: AbortSignal): AsyncGenerator<string> {
+  if (!res.body) return;
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    for (;;) {
+      if (signal?.aborted) throw new DOMException('aborted', 'AbortError');
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        const line = buf.slice(0, nl).trim();
+        buf = buf.slice(nl + 1);
+        if (line.startsWith('data:')) {
+          const data = line.slice(5).trim();
+          if (data && data !== '[DONE]') yield data;
+        }
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+/** Parse a JSON object string, tolerating empty/malformed tool-call argument fragments. */
+export function parseJsonObject(raw: string): Record<string, unknown> {
+  try {
+    const v = JSON.parse(raw || '{}');
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
 }
 
 /** Thrown by clients on a non-2xx HTTP response; carries the status for classification and
@@ -386,12 +432,18 @@ export async function runApiAgent(
         exitCode = null;
         break;
       }
-      const res = await sendWithRetry(client, messages, tools, spec);
+      // Stream text fragments to the live timeline as they arrive. If the client streamed
+      // (called onText), don't re-emit the assembled text; otherwise emit it once.
+      let streamed = false;
+      const res = await sendWithRetry(client, messages, tools, spec, (delta) => {
+        streamed = true;
+        onEvent({ type: 'text', text: delta });
+      });
       // Per-turn token deltas (GenericAgent sums them); cumulative cost (GenericAgent keeps
       // the latest as the run total). Pricing is approximate — see pricing.ts.
       costUsd += priceFor(client.provider, spec.model, res.inputTokens, res.outputTokens);
       onEvent({ type: 'usage', inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd });
-      if (res.text) onEvent({ type: 'text', text: res.text });
+      if (res.text && !streamed) onEvent({ type: 'text', text: res.text });
       if (res.toolCalls.length === 0) break; // no tool calls → the model is done
 
       messages.push({ role: 'assistant', content: res.text, toolCalls: res.toolCalls });
@@ -454,11 +506,18 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
 }
 
 /** One `client.send`, retrying transient failures with exponential backoff (honoring
- *  Retry-After). A fresh per-turn timeout signal is built for each attempt. */
-async function sendWithRetry(client: ChatClient, messages: NeutralMessage[], tools: ToolDef[], spec: AgentTurnSpec): Promise<ChatTurn> {
+ *  Retry-After). A fresh per-turn timeout signal is built for each attempt. Only failures
+ *  BEFORE the response body streams are retryable (mid-stream errors throw status 0). */
+async function sendWithRetry(
+  client: ChatClient,
+  messages: NeutralMessage[],
+  tools: ToolDef[],
+  spec: AgentTurnSpec,
+  onText: (delta: string) => void,
+): Promise<ChatTurn> {
   for (let attempt = 1; ; attempt++) {
     try {
-      return await client.send(messages, tools, spec.model, turnSignal(spec));
+      return await client.send(messages, tools, spec.model, { signal: turnSignal(spec), onText });
     } catch (e) {
       if (spec.signal?.aborted || attempt >= MAX_ATTEMPTS || !isRetryable(e)) throw e;
       await sleep(backoffDelay(attempt, e), spec.signal);

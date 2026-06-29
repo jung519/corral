@@ -8,8 +8,11 @@ import {
   type ChatClient,
   type ChatTurn,
   type NeutralMessage,
+  parseJsonObject,
   parseRetryAfter,
   runApiAgent,
+  type SendOptions,
+  sseData,
   type ToolDef,
 } from './api-loop.js';
 import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from './types.js';
@@ -51,7 +54,7 @@ export class OpenAiChatClient implements ChatClient {
     return { ok: true };
   }
 
-  async send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, signal?: AbortSignal): Promise<ChatTurn> {
+  async send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, opts?: SendOptions): Promise<ChatTurn> {
     const res = await fetch(ENDPOINT, {
       method: 'POST',
       headers: { 'content-type': 'application/json', authorization: `Bearer ${this.apiKey}` },
@@ -60,34 +63,50 @@ export class OpenAiChatClient implements ChatClient {
         messages: toOpenAiMessages(messages),
         tools: toOpenAiTools(tools),
         tool_choice: 'auto',
+        stream: true,
+        stream_options: { include_usage: true },
       }),
-      signal,
+      signal: opts?.signal,
     });
     if (!res.ok) {
       throw new ApiHttpError(res.status, `OpenAI ${res.status}: ${(await res.text()).slice(0, 500)}`, parseRetryAfter(res.headers.get('retry-after')));
     }
-    const body = (await res.json()) as {
-      choices?: { message?: { content?: string | null; tool_calls?: OpenAiToolCall[] } }[];
-      usage?: { prompt_tokens?: number; completion_tokens?: number };
-    };
-    const msg = body.choices?.[0]?.message;
-    const toolCalls = (msg?.tool_calls ?? []).map((c) => ({ id: c.id, name: c.function.name, args: parseArgs(c.function.arguments) }));
-    return {
-      text: msg?.content ?? '',
-      toolCalls,
-      inputTokens: body.usage?.prompt_tokens ?? 0,
-      outputTokens: body.usage?.completion_tokens ?? 0,
-    };
-  }
-}
-
-/** Tool-call arguments arrive as a JSON string; tolerate malformed output. */
-function parseArgs(raw: string): Record<string, unknown> {
-  try {
-    const v = JSON.parse(raw);
-    return v && typeof v === 'object' ? (v as Record<string, unknown>) : {};
-  } catch {
-    return {};
+    // tool_calls stream as fragments keyed by index — accumulate name + arguments string.
+    const acc = new Map<number, { id: string; name: string; args: string }>();
+    let text = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    try {
+      for await (const data of sseData(res, opts?.signal)) {
+        const chunk = JSON.parse(data) as {
+          choices?: { delta?: { content?: string; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
+          usage?: { prompt_tokens?: number; completion_tokens?: number };
+        };
+        const delta = chunk.choices?.[0]?.delta;
+        if (delta?.content) {
+          text += delta.content;
+          opts?.onText?.(delta.content);
+        }
+        for (const tc of delta?.tool_calls ?? []) {
+          const slot = acc.get(tc.index) ?? { id: '', name: '', args: '' };
+          if (tc.id) slot.id = tc.id;
+          if (tc.function?.name) slot.name = tc.function.name;
+          if (tc.function?.arguments) slot.args += tc.function.arguments;
+          acc.set(tc.index, slot);
+        }
+        if (chunk.usage) {
+          inputTokens = chunk.usage.prompt_tokens ?? inputTokens;
+          outputTokens = chunk.usage.completion_tokens ?? outputTokens;
+        }
+      }
+    } catch (e) {
+      if (e instanceof ApiHttpError) throw e;
+      throw new ApiHttpError(0, `OpenAI stream error: ${e instanceof Error ? e.message : String(e)}`);
+    }
+    const toolCalls = [...acc.values()]
+      .filter((s) => s.name)
+      .map((s) => ({ id: s.id || `call_${s.name}`, name: s.name, args: parseJsonObject(s.args) }));
+    return { text, toolCalls, inputTokens, outputTokens };
   }
 }
 

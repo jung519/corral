@@ -10,6 +10,8 @@ import {
   type NeutralMessage,
   parseRetryAfter,
   runApiAgent,
+  type SendOptions,
+  sseData,
   type ToolDef,
 } from './api-loop.js';
 import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from './types.js';
@@ -87,9 +89,9 @@ export class GeminiChatClient implements ChatClient {
     return { ok: true };
   }
 
-  async send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, signal?: AbortSignal): Promise<ChatTurn> {
+  async send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, opts?: SendOptions): Promise<ChatTurn> {
     const { system, contents } = toGemini(messages);
-    const res = await fetch(`${BASE}/${resolveModel(model)}:generateContent`, {
+    const res = await fetch(`${BASE}/${resolveModel(model)}:streamGenerateContent?alt=sse`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey ?? '' },
       body: JSON.stringify({
@@ -97,24 +99,40 @@ export class GeminiChatClient implements ChatClient {
         contents,
         tools: [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: toGeminiSchema(t.parameters) })) }],
       }),
-      signal,
+      signal: opts?.signal,
     });
     if (!res.ok) throw new ApiHttpError(res.status, `Gemini ${res.status}: ${(await res.text()).slice(0, 500)}`, parseRetryAfter(res.headers.get('retry-after')));
-    const body = (await res.json()) as {
-      candidates?: { content?: { parts?: Part[] } }[];
-      usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
-    };
-    const parts = body.candidates?.[0]?.content?.parts ?? [];
+    const fnCalls: { name: string; args?: Record<string, unknown> }[] = [];
+    let text = '';
+    let inputTokens = 0;
+    let outputTokens = 0;
+    try {
+      for await (const data of sseData(res, opts?.signal)) {
+        const chunk = JSON.parse(data) as {
+          candidates?: { content?: { parts?: Part[] } }[];
+          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+        };
+        for (const p of chunk.candidates?.[0]?.content?.parts ?? []) {
+          if (typeof p.text === 'string') {
+            text += p.text;
+            opts?.onText?.(p.text);
+          }
+          if (p.functionCall) fnCalls.push(p.functionCall);
+        }
+        if (chunk.usageMetadata) {
+          inputTokens = chunk.usageMetadata.promptTokenCount ?? inputTokens;
+          outputTokens = chunk.usageMetadata.candidatesTokenCount ?? outputTokens;
+        }
+      }
+    } catch (e) {
+      if (e instanceof ApiHttpError) throw e;
+      throw new ApiHttpError(0, `Gemini stream error: ${e instanceof Error ? e.message : String(e)}`);
+    }
     return {
-      text: parts
-        .filter((p) => typeof p.text === 'string')
-        .map((p) => p.text)
-        .join(''),
-      toolCalls: parts
-        .filter((p): p is Part & { functionCall: { name: string; args?: Record<string, unknown> } } => !!p.functionCall)
-        .map((p, i) => ({ id: `gem_${i}_${p.functionCall.name}`, name: p.functionCall.name, args: p.functionCall.args ?? {} })),
-      inputTokens: body.usageMetadata?.promptTokenCount ?? 0,
-      outputTokens: body.usageMetadata?.candidatesTokenCount ?? 0,
+      text,
+      toolCalls: fnCalls.map((fc, i) => ({ id: `gem_${i}_${fc.name}`, name: fc.name, args: fc.args ?? {} })),
+      inputTokens,
+      outputTokens,
     };
   }
 }

@@ -114,6 +114,24 @@ describe('runApiAgent', () => {
     expect(events.at(-1)).toEqual({ type: 'done', exitCode: null });
   });
 
+  it('forwards streamed text deltas live and does not re-emit the assembled text', async () => {
+    const client: ChatClient = {
+      provider: 'gpt',
+      preflight: async () => ({ ok: true }),
+      send: async (_m, _t, _model, opts) => {
+        opts?.onText?.('hel');
+        opts?.onText?.('lo');
+        return { text: 'hello', toolCalls: [], inputTokens: 1, outputTokens: 1 };
+      },
+    };
+    const { events, onEvent } = collect();
+
+    await runApiAgent(client, spec(), onEvent);
+
+    const texts = events.flatMap((e) => (e.type === 'text' ? [e.text] : []));
+    expect(texts).toEqual(['hel', 'lo']); // the streamed deltas, not a duplicate 'hello'
+  });
+
   it('retries a transient 5xx then succeeds', async () => {
     let calls = 0;
     const client: ChatClient = {
