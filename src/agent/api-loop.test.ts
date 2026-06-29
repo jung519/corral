@@ -7,6 +7,7 @@ import {
   effectiveTools,
   executeTool,
   type NeutralMessage,
+  parseRetryAfter,
   runApiAgent,
   TOOLS,
   type ToolContext,
@@ -110,6 +111,26 @@ describe('runApiAgent', () => {
 
     expect(events.some((e) => e.type === 'error' && e.error === 'rate_limit')).toBe(true);
     expect(events.at(-1)).toEqual({ type: 'done', exitCode: null });
+  });
+
+  it('retries a transient 5xx then succeeds', async () => {
+    let calls = 0;
+    const client: ChatClient = {
+      provider: 'gpt',
+      preflight: async () => ({ ok: true }),
+      send: async () => {
+        calls++;
+        if (calls === 1) throw new ApiHttpError(503, 'unavailable');
+        return { text: 'done', toolCalls: [], inputTokens: 1, outputTokens: 1 };
+      },
+    };
+    const { events, onEvent } = collect();
+
+    await runApiAgent(client, spec(), onEvent);
+
+    expect(calls).toBe(2); // first failed, retry succeeded
+    expect(events.some((e) => e.type === 'error')).toBe(false);
+    expect(events.at(-1)).toEqual({ type: 'done', exitCode: 0 });
   });
 
   it('stops with a budget error once maxBudgetUsd is spent', async () => {
@@ -256,5 +277,14 @@ describe('safety (Phase 2)', () => {
     expect(effectiveTools(['read', 'edit']).map((t) => t.name)).toEqual(['read', 'edit']);
     expect(effectiveTools(['WebFetch', 'Glob'])).toHaveLength(TOOLS.length); // names match nothing → ignored
     expect(effectiveTools()).toHaveLength(TOOLS.length);
+  });
+});
+
+describe('parseRetryAfter', () => {
+  it('parses seconds, ignores invalid / missing', () => {
+    expect(parseRetryAfter('2')).toBe(2000);
+    expect(parseRetryAfter('0')).toBe(0);
+    expect(parseRetryAfter(null)).toBeUndefined();
+    expect(parseRetryAfter('not-a-number')).toBeUndefined();
   });
 });

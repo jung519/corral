@@ -8,6 +8,7 @@ import {
   type ChatClient,
   type ChatTurn,
   type NeutralMessage,
+  parseRetryAfter,
   runApiAgent,
   type ToolDef,
 } from './api-loop.js';
@@ -63,7 +64,7 @@ export class OpenAiChatClient implements ChatClient {
       signal,
     });
     if (!res.ok) {
-      throw new ApiHttpError(res.status, `OpenAI ${res.status}: ${(await res.text()).slice(0, 500)}`);
+      throw new ApiHttpError(res.status, `OpenAI ${res.status}: ${(await res.text()).slice(0, 500)}`, parseRetryAfter(res.headers.get('retry-after')));
     }
     const body = (await res.json()) as {
       choices?: { message?: { content?: string | null; tool_calls?: OpenAiToolCall[] } }[];

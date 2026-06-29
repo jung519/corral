@@ -57,15 +57,26 @@ export interface ChatClient {
   send(messages: NeutralMessage[], tools: ToolDef[], model: string | undefined, signal?: AbortSignal): Promise<ChatTurn>;
 }
 
-/** Thrown by clients on a non-2xx HTTP response; carries the status for classification. */
+/** Thrown by clients on a non-2xx HTTP response; carries the status for classification and
+ *  an optional Retry-After hint (ms) honored by the retry backoff. */
 export class ApiHttpError extends Error {
   constructor(
     readonly status: number,
     message: string,
+    readonly retryAfterMs?: number,
   ) {
     super(message);
     this.name = 'ApiHttpError';
   }
+}
+
+/** Parse an HTTP `Retry-After` header (seconds or HTTP date) to milliseconds. */
+export function parseRetryAfter(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const secs = Number(header);
+  if (Number.isFinite(secs)) return Math.max(0, secs * 1000);
+  const date = Date.parse(header);
+  return Number.isFinite(date) ? Math.max(0, date - Date.now()) : undefined;
 }
 
 const obj = (properties: Record<string, unknown>, required: string[]): Record<string, unknown> => ({
@@ -354,7 +365,7 @@ export async function runApiAgent(
         exitCode = null;
         break;
       }
-      const res = await client.send(messages, tools, spec.model, turnSignal(spec));
+      const res = await sendWithRetry(client, messages, tools, spec);
       // Per-turn token deltas (GenericAgent sums them); cumulative cost (GenericAgent keeps
       // the latest as the run total). Pricing is approximate — see pricing.ts.
       costUsd += priceFor(client.provider, spec.model, res.inputTokens, res.outputTokens);
@@ -383,4 +394,51 @@ function turnSignal(spec: AgentTurnSpec): AbortSignal | undefined {
   const timeout = spec.turnTimeoutMs && spec.turnTimeoutMs > 0 ? AbortSignal.timeout(spec.turnTimeoutMs) : undefined;
   if (spec.signal && timeout) return AbortSignal.any([spec.signal, timeout]);
   return spec.signal ?? timeout;
+}
+
+// ── retry / backoff (transient HTTP failures) ──────────────────────────────
+const MAX_ATTEMPTS = 3; // 1 try + 2 retries
+const BASE_DELAY_MS = 200;
+const MAX_DELAY_MS = 8_000;
+
+/** Retry transient failures only: 429 + 5xx, and network errors with no status. A timeout
+ *  or explicit cancellation (AbortError) is intentional and never retried. */
+function isRetryable(e: unknown): boolean {
+  if (e instanceof DOMException && e.name === 'AbortError') return false;
+  if (e instanceof ApiHttpError) return e.status === 429 || e.status >= 500;
+  return true; // fetch network error / unknown transient
+}
+
+function backoffDelay(attempt: number, e: unknown): number {
+  const base = Math.min(BASE_DELAY_MS * 2 ** (attempt - 1), MAX_DELAY_MS);
+  const jittered = base + Math.random() * base * 0.25;
+  const retryAfter = e instanceof ApiHttpError ? e.retryAfterMs : undefined;
+  return retryAfter ? Math.max(jittered, retryAfter) : jittered;
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t);
+        reject(new DOMException('aborted', 'AbortError'));
+      },
+      { once: true },
+    );
+  });
+}
+
+/** One `client.send`, retrying transient failures with exponential backoff (honoring
+ *  Retry-After). A fresh per-turn timeout signal is built for each attempt. */
+async function sendWithRetry(client: ChatClient, messages: NeutralMessage[], tools: ToolDef[], spec: AgentTurnSpec): Promise<ChatTurn> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await client.send(messages, tools, spec.model, turnSignal(spec));
+    } catch (e) {
+      if (spec.signal?.aborted || attempt >= MAX_ATTEMPTS || !isRetryable(e)) throw e;
+      await sleep(backoffDelay(attempt, e), spec.signal);
+    }
+  }
 }

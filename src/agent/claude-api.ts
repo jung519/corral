@@ -8,6 +8,7 @@ import {
   type ChatClient,
   type ChatTurn,
   type NeutralMessage,
+  parseRetryAfter,
   runApiAgent,
   type ToolDef,
 } from './api-loop.js';
@@ -90,7 +91,7 @@ export class AnthropicChatClient implements ChatClient {
       }),
       signal,
     });
-    if (!res.ok) throw new ApiHttpError(res.status, `Anthropic ${res.status}: ${(await res.text()).slice(0, 500)}`);
+    if (!res.ok) throw new ApiHttpError(res.status, `Anthropic ${res.status}: ${(await res.text()).slice(0, 500)}`, parseRetryAfter(res.headers.get('retry-after')));
     const body = (await res.json()) as {
       content?: ({ type: 'text'; text: string } | { type: 'tool_use'; id: string; name: string; input: Record<string, unknown> })[];
       usage?: { input_tokens?: number; output_tokens?: number };
