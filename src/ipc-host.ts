@@ -85,6 +85,8 @@ async function dispatch(method: string, a: Record<string, unknown>, deps: IpcHos
       return o ? await o.restartIssue(id()) : NOT_CONFIGURED;
     case 'refine':
       return o ? await o.refinePlan(id(), String(a.focus ?? '')) : NOT_CONFIGURED;
+    case 'ask':
+      return o ? await o.answerQuestion(String(a.identifier ?? ''), String(a.question ?? '')) : NOT_CONFIGURED;
     case 'action': {
       const ok =
         a.type === 'approve'

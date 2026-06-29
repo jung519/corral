@@ -1,6 +1,7 @@
 <script lang="ts">
   import { t } from './lib/i18n.svelte';
   import Button from './lib/Button.svelte';
+  import QuestionPopup from './QuestionPopup.svelte';
   import type { PendingAction } from './lib/types';
 
   interface Props {
@@ -15,6 +16,7 @@
   let chosen = $state<string | undefined>(undefined);
   const selection = $derived(chosen ?? action.options?.[0]);
   let notes = $state('');
+  let showQa = $state(false);
 
   function approve() {
     return onApprove(action.id, action.options ? selection : undefined, notes.trim() || undefined);
@@ -56,8 +58,13 @@
   <div class="actions">
     <Button class="primary" onclick={approve}>{t('card.approve')}</Button>
     <Button onclick={requestChanges} disabled={!notes.trim()}>{t('card.requestChanges')}</Button>
+    <Button onclick={() => (showQa = true)}>{t('qa.openBtn')}</Button>
   </div>
 </div>
+
+{#if showQa}
+  <QuestionPopup {action} {onFeedback} onClose={() => (showQa = false)} />
+{/if}
 
 <style>
   .card {

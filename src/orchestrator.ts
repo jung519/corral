@@ -656,6 +656,56 @@ export class Orchestrator {
     return { ok: true };
   }
 
+  /**
+   * Read-only Q&A about a pending result (plan/review). Dispatches a side turn against the
+   * live workspace — the agent re-reads the code to give a grounded answer — WITHOUT
+   * touching the result document or the issue's phase. The answer is reconstructed from the
+   * agent's streamed text (no file write), and the API path is restricted to read tools.
+   * Available only while the action is pending (the workspace clone is still alive).
+   */
+  async answerQuestion(identifier: string, question: string): Promise<{ ok: boolean; answer?: string; message?: string }> {
+    const rt = this.store.get(identifier);
+    if (!rt) return { ok: false, message: 'Not an in-flight issue.' };
+    if (!question.trim()) return { ok: false, message: 'Enter a question.' };
+    const handle = this.handles.get(identifier);
+    if (!handle) return { ok: false, message: 'Workspace closed — questions are only available while the action is pending.' };
+    if (this.busy.has(identifier)) return { ok: false, message: 'The agent is busy — try again in a moment.' };
+    const issue = await this.tracker.fetchIssueByIdentifier(identifier).catch(() => null);
+    if (!issue) return { ok: false, message: 'Issue not found.' };
+    const isReview = rt.phase.includes('review');
+    const doc = (await this.readOutput(handle, isReview ? SCRATCH.pendingReview : SCRATCH.pendingPlan)) ?? '';
+    const prompt = questionPrompt(isReview ? 'review' : 'plan', doc, question.trim());
+
+    // The agent answers in its streamed text; capture those activity events (read-only —
+    // no file is written, so the result document can't be touched).
+    const TEXT_PREFIX = '💬 ';
+    const parts: string[] = [];
+    const unsub = bus.subscribe((e) => {
+      if (e.identifier === identifier && e.kind === 'activity' && e.label.startsWith(TEXT_PREFIX)) {
+        parts.push(e.label.slice(TEXT_PREFIX.length));
+      }
+    });
+    this.busy.add(identifier);
+    try {
+      const a = this.config.agent;
+      const res = await this.agent.run(handle, issue, {
+        stage: isReview ? 'review' : 'planning',
+        workflow: '', // side run — don't overwrite the guide or wipe the result
+        prompt,
+        continueSession: true,
+        turnTimeoutMs: a.turn_timeout_ms,
+        maxTurns: a.max_turns,
+        allowedTools: ['read', 'ls', 'grep'], // read-only (enforced on the api transport)
+      });
+      const answer = parts.join('').trim();
+      if (!res.ok && !answer) return { ok: false, message: 'The agent could not answer — try rephrasing.' };
+      return { ok: true, answer: answer || '(no answer)' };
+    } finally {
+      this.busy.delete(identifier);
+      unsub();
+    }
+  }
+
   // ───────────────────────────────────────────────────── dispatch helper
 
   /** The provider that can't execute under the current backend for `stage`, or null.
@@ -1345,6 +1395,22 @@ export class Orchestrator {
 function oneLineErr(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.replace(/\s+/g, ' ').trim().slice(0, 200);
+}
+
+/** Prompt for a read-only clarification turn about a pending plan/review. */
+function questionPrompt(kind: 'plan' | 'review', doc: string, question: string): string {
+  return [
+    `The human is reading your ${kind} for this issue and has a QUESTION about it.`,
+    `This is a READ-ONLY clarification: do NOT modify, create, stage, or commit any file, and do NOT change the ${kind}. Just answer.`,
+    `Ground your answer in the actual code (read the files you need to be precise) and the ${kind} document below.`,
+    `Reply with a concise, direct answer in the same language as the document.`,
+    '',
+    `=== YOUR ${kind.toUpperCase()} ===`,
+    doc || '(document unavailable — answer from the code)',
+    '',
+    '=== QUESTION ===',
+    question,
+  ].join('\n');
 }
 
 /** Single-quote a string for safe interpolation into a shell command (repo keys can
