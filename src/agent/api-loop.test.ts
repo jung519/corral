@@ -4,6 +4,7 @@ import {
   ApiHttpError,
   type ChatClient,
   type ChatTurn,
+  compactMessages,
   effectiveTools,
   executeTool,
   type NeutralMessage,
@@ -277,6 +278,38 @@ describe('safety (Phase 2)', () => {
     expect(effectiveTools(['read', 'edit']).map((t) => t.name)).toEqual(['read', 'edit']);
     expect(effectiveTools(['WebFetch', 'Glob'])).toHaveLength(TOOLS.length); // names match nothing → ignored
     expect(effectiveTools()).toHaveLength(TOOLS.length);
+  });
+});
+
+describe('compactMessages', () => {
+  it('keeps system + task + a clean tail and notes the trimmed count', () => {
+    const msgs: NeutralMessage[] = [
+      { role: 'system', content: 'SYS' },
+      { role: 'user', content: 'TASK' },
+    ];
+    // 10 rounds of assistant(tool) + tool result.
+    for (let i = 0; i < 10; i++) {
+      msgs.push({ role: 'assistant', content: '', toolCalls: [{ id: `c${i}`, name: 'bash', args: { command: 'true' } }] });
+      msgs.push({ role: 'tool', content: `out${i}`, toolCallId: `c${i}` });
+    }
+    const out = compactMessages(msgs, 'TASK', 4);
+
+    expect(out[0]).toEqual({ role: 'system', content: 'SYS' });
+    expect(out[1]!.role).toBe('user');
+    expect(out[1]!.content).toContain('TASK');
+    expect(out[1]!.content).toMatch(/\d+ earlier step/);
+    // Tail must start at a round boundary (assistant), never a dangling tool result.
+    expect(out[2]!.role).toBe('assistant');
+    expect(out.length).toBeLessThan(msgs.length);
+  });
+
+  it('leaves a short conversation untouched', () => {
+    const msgs: NeutralMessage[] = [
+      { role: 'system', content: 'SYS' },
+      { role: 'user', content: 'TASK' },
+      { role: 'assistant', content: 'hi', toolCalls: [] },
+    ];
+    expect(compactMessages(msgs, 'TASK', 8)).toBe(msgs);
   });
 });
 

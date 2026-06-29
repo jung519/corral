@@ -207,6 +207,27 @@ function bashPolicy(command: string): string | null {
   return null;
 }
 
+// ── context compaction ─────────────────────────────────────────────────────
+// Each turn resends the whole history, so a long run eventually overflows the model's
+// context (→ a hard API error). When the last turn's input grew past the threshold, drop
+// the middle of the conversation, keeping the system prompt, the task, and the recent tail.
+// State lives in files (.corral/*), so the agent can re-read anything it trimmed.
+const COMPACT_THRESHOLD_TOKENS = 150_000;
+const COMPACT_KEEP_TAIL = 8;
+
+/** Trim the middle of a long conversation. Keeps messages[0] (system) and a single user
+ *  message rebuilt from the original task + a trim note, then the tail starting at a clean
+ *  round boundary (an assistant message) so tool_use/tool_result pairing stays valid. */
+export function compactMessages(messages: NeutralMessage[], prompt: string, keepTail = COMPACT_KEEP_TAIL): NeutralMessage[] {
+  if (messages.length <= keepTail + 3) return messages;
+  let cut = Math.max(2, messages.length - keepTail);
+  while (cut < messages.length && messages[cut]!.role !== 'assistant') cut++;
+  const dropped = cut - 2;
+  if (cut >= messages.length || dropped <= 0) return messages;
+  const note = `${prompt}\n\n[note: ${dropped} earlier step(s) were trimmed to fit the context window. Re-read files with the read tool if you need their contents.]`;
+  return [messages[0]!, { role: 'user', content: note }, ...messages.slice(cut)];
+}
+
 /** Restrict the offered toolset to `allowed` when set. If the allowlist names none of our
  *  tools (e.g. it's a CLI-style list), it's ignored rather than locking the agent out. */
 export function effectiveTools(allowed?: string[]): ToolDef[] {
@@ -344,7 +365,7 @@ export async function runApiAgent(
   }
 
   const system = spec.workflow.trim() ? `${SYSTEM_GUIDE}\n\n# Operating guide\n${spec.workflow}` : SYSTEM_GUIDE;
-  const messages: NeutralMessage[] = [
+  let messages: NeutralMessage[] = [
     { role: 'system', content: system },
     { role: 'user', content: spec.prompt },
   ];
@@ -379,6 +400,8 @@ export async function runApiAgent(
         const output = await executeTool(call.name, call.args, ctx);
         messages.push({ role: 'tool', content: output.slice(0, MAX_TOOL_OUTPUT), toolCallId: call.id });
       }
+      // Trim the history before the next (full-resend) turn if it has grown too large.
+      if (res.inputTokens > COMPACT_THRESHOLD_TOKENS) messages = compactMessages(messages, spec.prompt);
     }
   } catch (e) {
     const { kind, message } = classify(e);

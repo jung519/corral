@@ -85,7 +85,8 @@ export class AnthropicChatClient implements ChatClient {
       body: JSON.stringify({
         model: resolveModel(model),
         max_tokens: MAX_TOKENS,
-        system,
+        // Cache the (large, stable) system prompt so repeated turns only pay to read it once.
+        system: system ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : undefined,
         messages: msgs,
         tools: tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters })),
       }),

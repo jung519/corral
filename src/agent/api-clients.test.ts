@@ -62,7 +62,8 @@ describe('AnthropicChatClient', () => {
       usage: { input_tokens: 20, output_tokens: 9 },
     });
     const turn = await new AnthropicChatClient('k').send(convo, [BASH_TOOL], 'sonnet');
-    expect(lastBody.system).toBe('GUIDE');
+    expect(lastBody.system[0].text).toBe('GUIDE'); // hoisted into a cached text block
+    expect(lastBody.system[0].cache_control).toEqual({ type: 'ephemeral' });
     expect(lastBody.model).toBe('claude-sonnet-4-5'); // alias resolved
     const toolResultMsgs = lastBody.messages.filter((m: any) => m.content.some((b: any) => b.type === 'tool_result'));
     expect(toolResultMsgs).toHaveLength(1); // both results coalesced
