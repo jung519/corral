@@ -400,6 +400,7 @@
         </button>
       </div>
       {#if s.transport === 'api'}<p class="hint">{t('transport.apiNote')}</p>{/if}
+      {#if s.transport === 'api' && s.backend === 'local'}<p class="run-warn">⚠ {t('transport.apiLocalWarn')}</p>{/if}
 
       <!-- ── 2 · accounts (independent per-provider credentials) ── -->
       <div class="sec-head"><span class="sec-no">2</span> {t('account.title')}</div>

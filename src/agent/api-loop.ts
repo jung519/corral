@@ -164,8 +164,44 @@ function normPath(p: unknown): string {
     .replace(/^\.\//, '');
 }
 
+/** Normalize and confine a path to the workspace: reject absolute / home / `..`-escaping
+ *  paths so the file tools can't read or clobber outside the clone. Returns null if unsafe. */
+function safeRelPath(p: unknown, fallback?: string): string | null {
+  const s = normPath(p) || (fallback ?? '');
+  if (!s) return null;
+  if (s.startsWith('/') || s.startsWith('~')) return null;
+  if (s.split('/').some((seg) => seg === '..')) return null;
+  return s;
+}
+
 function shq(s: string): string {
   return `'${s.replace(/'/g, `'\\''`)}'`;
+}
+
+/** Heuristic denylist for the `bash` tool. NOT a sandbox — a guardrail against the most
+ *  destructive footguns (recursive deletes of root/home, fork bombs, disk writes, privilege
+ *  escalation, curl|sh). The docker backend is the real isolation; this protects local. */
+const BASH_DENY: { re: RegExp; reason: string }[] = [
+  { re: /\brm\s+(-[a-z]*\s+)*-?[rf]{1,2}\b[^|&;]*\s(\/|~|\$HOME|\/\*|\.)\s*($|[|&;])/i, reason: 'recursive delete of /, ~, or the workspace root' },
+  { re: /:\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:/, reason: 'fork bomb' },
+  { re: /\bmkfs\b|\bdd\b[^|&;]*\bof=\/dev\/|>\s*\/dev\/(sd|nvme|disk)/i, reason: 'raw disk / device write' },
+  { re: /\b(shutdown|reboot|halt|poweroff)\b/i, reason: 'host power control' },
+  { re: /\bsudo\b/i, reason: 'privilege escalation (sudo)' },
+  { re: /\b(curl|wget)\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/i, reason: 'pipe-to-shell of remote content' },
+  { re: /\bchmod\s+-R\s+0?777\s+\//i, reason: 'world-writable chmod of root' },
+];
+function bashPolicy(command: string): string | null {
+  for (const { re, reason } of BASH_DENY) if (re.test(command)) return reason;
+  return null;
+}
+
+/** Restrict the offered toolset to `allowed` when set. If the allowlist names none of our
+ *  tools (e.g. it's a CLI-style list), it's ignored rather than locking the agent out. */
+export function effectiveTools(allowed?: string[]): ToolDef[] {
+  if (!allowed || allowed.length === 0) return TOOLS;
+  const set = new Set(allowed.map((s) => s.toLowerCase()));
+  const kept = TOOLS.filter((t) => set.has(t.name));
+  return kept.length ? kept : TOOLS;
 }
 
 function countOccurrences(haystack: string, needle: string): number {
@@ -196,7 +232,8 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
   try {
     switch (name) {
       case 'read': {
-        const path = normPath(args.path);
+        const path = safeRelPath(args.path);
+        if (!path) return `error: invalid or escaping path: ${String(args.path)}`;
         const content = await io.readFile(handle, path);
         if (content === null) return `error: file not found: ${path}`;
         readState.add(path);
@@ -210,15 +247,16 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
         return clampOutput(numbered + note);
       }
       case 'write': {
-        const path = normPath(args.path);
-        if (!path) return 'error: path is required';
+        const path = safeRelPath(args.path);
+        if (!path) return `error: invalid or escaping path: ${String(args.path)}`;
         const content = String(args.content ?? '');
         await io.writeFile(handle, path, content);
         readState.add(path);
         return `wrote ${path} (${content.split('\n').length} lines)`;
       }
       case 'edit': {
-        const path = normPath(args.path);
+        const path = safeRelPath(args.path);
+        if (!path) return `error: invalid or escaping path: ${String(args.path)}`;
         if (!readState.has(path)) return `error: read ${path} before editing it.`;
         const content = await io.readFile(handle, path);
         if (content === null) return `error: file not found: ${path}`;
@@ -236,20 +274,24 @@ export async function executeTool(name: string, args: Record<string, unknown>, c
         return `edited ${path} (${replaceAll ? count : 1} replacement${replaceAll && count > 1 ? 's' : ''})`;
       }
       case 'ls': {
-        const path = normPath(args.path) || '.';
+        const path = safeRelPath(args.path, '.');
+        if (!path) return `error: invalid or escaping path: ${String(args.path)}`;
         const entries = await io.list(handle, path);
         return clampOutput(entries.join('\n')) || '(empty)';
       }
       case 'grep': {
         const pattern = String(args.pattern ?? '');
         if (!pattern) return 'error: pattern is required';
-        const path = normPath(args.path) || '.';
+        const path = safeRelPath(args.path, '.');
+        if (!path) return `error: invalid or escaping path: ${String(args.path)}`;
         const r = await io.exec(handle, `grep -rnIE --color=never -e ${shq(pattern)} ${shq(path)} 2>/dev/null || true`);
         return clampOutput(r.stdout) || '(no matches)';
       }
       case 'bash': {
         const command = String(args.command ?? '');
         if (!command.trim()) return 'error: command is required';
+        const blocked = bashPolicy(command);
+        if (blocked) return `error: blocked by safety policy (${blocked}). Run this yourself if you intended it; the agent won't.`;
         const r = await io.exec(handle, command);
         return clampOutput(`exit=${r.code}\n--- stdout ---\n${r.stdout}\n--- stderr ---\n${r.stderr}`);
       }
@@ -295,6 +337,7 @@ export async function runApiAgent(
     { role: 'user', content: spec.prompt },
   ];
   const ctx: ToolContext = { io: spec.io, handle: spec.handle, readState: new Set<string>() };
+  const tools = effectiveTools(spec.allowedTools);
 
   const maxTurns = spec.maxTurns && spec.maxTurns > 0 ? spec.maxTurns : 60;
   let exitCode: number | null = 0;
@@ -302,7 +345,7 @@ export async function runApiAgent(
   try {
     for (let turn = 0; turn < maxTurns; turn++) {
       if (spec.signal?.aborted) throw new DOMException('aborted', 'AbortError');
-      const res = await client.send(messages, TOOLS, spec.model, turnSignal(spec));
+      const res = await client.send(messages, tools, spec.model, turnSignal(spec));
       // Per-turn token deltas (GenericAgent sums them); cost is left to the caller's
       // budgeting — BYOK pricing varies by model and isn't tracked here yet (Phase 3).
       onEvent({ type: 'usage', inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd: 0 });
