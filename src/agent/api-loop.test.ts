@@ -1,6 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { WorkspaceHandle, WorkspaceIO } from '../core/types.js';
-import { ApiHttpError, type ChatClient, type ChatTurn, type NeutralMessage, runApiAgent, type ToolDef } from './api-loop.js';
+import {
+  ApiHttpError,
+  type ChatClient,
+  type ChatTurn,
+  executeTool,
+  type NeutralMessage,
+  runApiAgent,
+  type ToolContext,
+  type ToolDef,
+} from './api-loop.js';
 import type { AgentEvent, AgentTurnSpec } from './types.js';
 
 const handle = { id: 'iss-1' } as WorkspaceHandle;
@@ -116,5 +125,89 @@ describe('runApiAgent', () => {
 
     expect(exec).toHaveBeenCalledTimes(2);
     expect(events.at(-1)).toEqual({ type: 'done', exitCode: 0 });
+  });
+});
+
+function memIo(files: Record<string, string> = {}, exec: WorkspaceIO['exec'] = async () => ({ stdout: '', stderr: '', code: 0 })) {
+  const store = new Map(Object.entries(files));
+  const io: WorkspaceIO = {
+    readFile: async (_h, p) => (store.has(p) ? store.get(p)! : null),
+    writeFile: async (_h, p, c) => {
+      store.set(p, c);
+    },
+    exists: async (_h, p) => store.has(p),
+    list: async () => [...store.keys()],
+    getDiff: async () => '',
+    exec,
+  };
+  return { io, store };
+}
+const ctx = (io: WorkspaceIO): ToolContext => ({ io, handle, readState: new Set<string>() });
+
+describe('executeTool', () => {
+  it('read returns numbered, paginated lines and marks the file read', async () => {
+    const { io } = memIo({ 'a.txt': 'l1\nl2\nl3\nl4\nl5' });
+    const c = ctx(io);
+    const out = await executeTool('read', { path: 'a.txt', offset: 2, limit: 2 }, c);
+    expect(out).toContain('2\tl2');
+    expect(out).toContain('3\tl3');
+    expect(out).not.toContain('l5');
+    expect(out).toContain('lines 2-3 of 5');
+    expect(c.readState.has('a.txt')).toBe(true);
+  });
+
+  it('read on a missing file errors and does not mark it read', async () => {
+    const c = ctx(memIo().io);
+    expect(await executeTool('read', { path: 'nope.txt' }, c)).toContain('file not found');
+    expect(c.readState.size).toBe(0);
+  });
+
+  it('write creates the file and marks it read', async () => {
+    const { io, store } = memIo();
+    const c = ctx(io);
+    await executeTool('write', { path: 'new.txt', content: 'hi\nthere' }, c);
+    expect(store.get('new.txt')).toBe('hi\nthere');
+    expect(c.readState.has('new.txt')).toBe(true);
+  });
+
+  it('edit refuses a file that was not read first', async () => {
+    const { io } = memIo({ 'a.txt': 'foo' });
+    expect(await executeTool('edit', { path: 'a.txt', old_string: 'foo', new_string: 'bar' }, ctx(io))).toContain('read a.txt before editing');
+  });
+
+  it('edit replaces a unique match after a read', async () => {
+    const { io, store } = memIo({ 'a.txt': 'alpha beta' });
+    const c = ctx(io);
+    await executeTool('read', { path: 'a.txt' }, c);
+    const out = await executeTool('edit', { path: 'a.txt', old_string: 'beta', new_string: 'gamma' }, c);
+    expect(out).toContain('edited a.txt');
+    expect(store.get('a.txt')).toBe('alpha gamma');
+  });
+
+  it('edit rejects an ambiguous match unless replace_all', async () => {
+    const { io, store } = memIo({ 'a.txt': 'x x x' });
+    const c = ctx(io);
+    await executeTool('read', { path: 'a.txt' }, c);
+    expect(await executeTool('edit', { path: 'a.txt', old_string: 'x', new_string: 'y' }, c)).toContain('matches 3 places');
+    await executeTool('edit', { path: 'a.txt', old_string: 'x', new_string: 'y', replace_all: true }, c);
+    expect(store.get('a.txt')).toBe('y y y');
+  });
+
+  it('edit errors when old_string is absent', async () => {
+    const { io } = memIo({ 'a.txt': 'foo' });
+    const c = ctx(io);
+    await executeTool('read', { path: 'a.txt' }, c);
+    expect(await executeTool('edit', { path: 'a.txt', old_string: 'zzz', new_string: 'q' }, c)).toContain('not found');
+  });
+
+  it('grep shells out and bash reports exit + output; unknown tool errors', async () => {
+    const exec = vi.fn(async (_h: WorkspaceHandle, cmd: string) =>
+      cmd.startsWith('grep') ? { stdout: 'a.txt:1:hit', stderr: '', code: 0 } : { stdout: 'built', stderr: '', code: 0 },
+    );
+    const { io } = memIo({}, exec);
+    const c = ctx(io);
+    expect(await executeTool('grep', { pattern: 'hit' }, c)).toContain('a.txt:1:hit');
+    expect(await executeTool('bash', { command: 'make' }, c)).toContain('built');
+    expect(await executeTool('bogus', {}, c)).toContain('not a supported tool');
   });
 });
