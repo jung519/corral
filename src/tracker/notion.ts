@@ -19,6 +19,7 @@ import type {
   Attachment,
   AttachmentKind,
   BotIdentity,
+  CandidatePage,
   Issue,
   IssueState,
   TrackerAdapter,
@@ -170,15 +171,43 @@ export class NotionTracker implements TrackerAdapter {
     return { or: scope.values.map((v) => ({ property: scope.property, [key]: { [op]: v } })) };
   }
 
-  async fetchCandidateIssues(): Promise<Issue[]> {
+  /** Notion query filter for candidate issues (active status + optional scope). */
+  private async candidateFilter(): Promise<Record<string, unknown>> {
     const statusProp = this.cfg.properties.status;
     const kind = await this.resolveStatusKind();
     const statusFilter = {
       or: this.activeStateNames().map((name) => ({ property: statusProp, [kind]: { equals: name } })),
     };
     const scope = this.scopeFilter();
-    const filter = scope ? { and: [statusFilter, scope] } : statusFilter;
+    return scope ? { and: [statusFilter, scope] } : statusFilter;
+  }
 
+  /** One ID-ascending page for the picker — sorted server-side, body NOT fetched (start
+   *  re-fetches it via fetchIssueByIdentifier). This is what makes the picker fast. */
+  async fetchCandidatePage(opts: { cursor?: string; limit?: number; search?: string } = {}): Promise<CandidatePage> {
+    const { cursor, limit = 10 } = opts;
+    const body: Record<string, unknown> = {
+      filter: await this.candidateFilter(),
+      page_size: limit,
+      sorts: [{ property: this.cfg.properties.identifier, direction: 'ascending' }],
+    };
+    if (cursor) body.start_cursor = cursor;
+    const json = await fetchJson<unknown>(
+      `${API}/databases/${this.cfg.database_id}/query`,
+      { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
+      { label: 'notion.query.page' },
+    );
+    const parsed = QueryResponse.parse(json);
+    const items: Issue[] = [];
+    for (const page of parsed.results) {
+      const issue = this.toIssue(page);
+      if (issue) items.push(issue);
+    }
+    return { items, nextCursor: parsed.has_more ? (parsed.next_cursor ?? undefined) : undefined };
+  }
+
+  async fetchCandidateIssues(): Promise<Issue[]> {
+    const filter = await this.candidateFilter();
     const issues: Issue[] = [];
     let cursor: string | null = null;
     do {

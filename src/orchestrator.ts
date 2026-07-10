@@ -293,17 +293,19 @@ export class Orchestrator {
   // ──────────────────────────────────────── commands (on-demand, no polling)
 
   /** Candidate issues from the tracker that are not already in flight. */
-  async listCandidates(): Promise<
-    Array<{ identifier: string; title: string; state: string; repoKey?: string; inFlight: boolean }>
-  > {
-    const issues = await this.tracker.fetchCandidateIssues();
-    return issues.map((i) => ({
+  async listCandidates(opts?: { cursor?: string; limit?: number }): Promise<{
+    candidates: Array<{ identifier: string; title: string; state: string; repoKey?: string; inFlight: boolean }>;
+    nextCursor?: string;
+  }> {
+    const { items, nextCursor } = await this.tracker.fetchCandidatePage({ cursor: opts?.cursor, limit: opts?.limit ?? 10 });
+    const candidates = items.map((i) => ({
       identifier: i.identifier,
       title: i.title,
       state: i.state,
       repoKey: i.repoKey,
       inFlight: this.store.get(i.identifier) !== undefined,
     }));
+    return { candidates, nextCursor };
   }
 
   /** Begin work on an issue. Creates the workspace synchronously so failures surface immediately. */

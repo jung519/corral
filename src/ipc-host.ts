@@ -70,7 +70,7 @@ async function dispatch(method: string, a: Record<string, unknown>, deps: IpcHos
     case 'state':
       return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
     case 'candidates':
-      return { candidates: o ? await o.listCandidates() : [] };
+      return o ? await o.listCandidates({ cursor: a.cursor as string | undefined, limit: a.limit as number | undefined }) : { candidates: [] };
     case 'diffs':
       return { diffs: deps.channel.getDiffs(String(a.id ?? '')) };
     case 'start':

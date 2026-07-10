@@ -12,7 +12,7 @@ import { z } from 'zod';
 import type { TrackerConfig } from '../config/schema.js';
 import { fetchJson, fetchRetry } from '../core/fetch-retry.js';
 import { logger } from '../core/logger.js';
-import type { BotIdentity, Issue, IssueState, TrackerAdapter, TrackerComment } from '../core/types.js';
+import type { BotIdentity, CandidatePage, Issue, IssueState, TrackerAdapter, TrackerComment } from '../core/types.js';
 
 export interface TrackerCtx {
   token: string;
@@ -80,6 +80,20 @@ export class GithubIssuesTracker implements TrackerAdapter {
 
   private numberOf(issue: Issue): number {
     return Number(issue.internalId);
+  }
+
+  /** One ID(number)-ascending page for the picker. GitHub can't sort by number directly;
+   *  `created asc` matches number order in practice. `page` is the opaque cursor. */
+  async fetchCandidatePage(opts: { cursor?: string; limit?: number; search?: string } = {}): Promise<CandidatePage> {
+    const { cursor, limit = 10 } = opts;
+    const page = cursor ? Math.max(1, Number(cursor)) : 1;
+    const params = new URLSearchParams({ state: 'open', per_page: String(limit), page: String(page), sort: 'created', direction: 'asc' });
+    if (this.cfg.scope_label) params.set('labels', this.cfg.scope_label);
+    const json = await fetchJson<unknown>(`${this.base()}/issues?${params.toString()}`, { headers: this.headers }, { label: 'github.issues.page' });
+    const raw = z.array(IssueSchema).parse(json);
+    const items = raw.map((r) => this.toIssue(r)).filter((i): i is Issue => i !== null && ACTIVE.includes(i.state));
+    // A full raw page (issues+PRs) means GitHub may have more; empty/short page = last.
+    return { items, nextCursor: raw.length === limit ? String(page + 1) : undefined };
   }
 
   async fetchCandidateIssues(): Promise<Issue[]> {

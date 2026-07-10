@@ -35,9 +35,9 @@ export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
   return data.records ?? [];
 }
 
-export async function getCandidates(): Promise<Candidate[]> {
-  const data = await call<{ candidates: Candidate[] }>('candidates');
-  return data.candidates;
+/** One page of candidates (ID-ascending). `nextCursor` absent = last page. */
+export async function getCandidates(cursor?: string): Promise<{ candidates: Candidate[]; nextCursor?: string }> {
+  return call<{ candidates: Candidate[]; nextCursor?: string }>('candidates', cursor ? { cursor } : undefined);
 }
 
 export const startIssue = (identifier: string): Promise<CommandResult> => call('start', { identifier });

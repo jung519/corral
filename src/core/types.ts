@@ -96,10 +96,20 @@ export interface BotIdentity {
 
 // ─────────────────────────────────────────────────────────── axis 1: tracker
 
+/** One page of candidate issues, sorted by identifier ascending (lowest number first).
+ *  `nextCursor` absent = last page. Lightweight — no issue body (fetched on start). */
+export interface CandidatePage {
+  items: Issue[];
+  nextCursor?: string;
+}
+
 export interface TrackerAdapter {
   readonly kind: string;
-  /** Issues currently in a state Corral acts on. */
+  /** All issues currently in a state Corral acts on (used by the background poller). */
   fetchCandidateIssues(): Promise<Issue[]>;
+  /** One ID-ascending page of candidates for the picker (paged; body not fetched). The
+   *  `search` term is reserved for a future search UI — implementations may ignore it. */
+  fetchCandidatePage(opts?: { cursor?: string; limit?: number; search?: string }): Promise<CandidatePage>;
   fetchIssueByIdentifier(identifier: string): Promise<Issue | null>;
   /** Move the issue to a semantic state (writes the mapped tracker state name). */
   transitionIssue(issue: Issue, to: IssueState): Promise<void>;

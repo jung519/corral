@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import ApprovalCard from './ApprovalCard.svelte';
   import PhaseBar from './PhaseBar.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
@@ -14,6 +14,9 @@
   let view: StateResponse = $state({ issues: [], pending: [], events: [] });
   let live: CorralEvent[] = $state([]);
   let candidates: Candidate[] = $state([]);
+  let candCursor = $state<string | undefined>(undefined);
+  let candLoading = $state(false);
+  let candListEl = $state<HTMLElement | undefined>(undefined);
   let showCandidates = $state(false);
   let online = $state(false);
   let configured = $state<boolean | undefined>(undefined);
@@ -47,8 +50,40 @@
       location.hash = '#/setup';
       return;
     }
-    candidates = await api.getCandidates();
+    const r = await api.getCandidates();
+    candidates = r.candidates;
+    candCursor = r.nextCursor;
     showCandidates = true;
+    void fillIfNeeded();
+  }
+  // Infinite scroll: fetch the next ID-ascending page and append (deduped).
+  async function loadMoreCandidates() {
+    if (!candCursor || candLoading) return;
+    candLoading = true;
+    try {
+      const r = await api.getCandidates(candCursor);
+      const seen = new Set(candidates.map((c) => c.identifier));
+      candidates = [...candidates, ...r.candidates.filter((c) => !seen.has(c.identifier))];
+      candCursor = r.nextCursor;
+    } finally {
+      candLoading = false;
+    }
+  }
+  // If a page doesn't overflow the list, there's no scrollbar to trigger more — keep
+  // pulling pages until the list is scrollable or the tracker is exhausted.
+  async function fillIfNeeded() {
+    await tick();
+    if (candListEl && candCursor && !candLoading && candListEl.scrollHeight <= candListEl.clientHeight + 4) {
+      await loadMoreCandidates();
+      await fillIfNeeded();
+    }
+  }
+  async function onCandScroll(e: Event) {
+    const el = e.currentTarget as HTMLElement;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 80) {
+      await loadMoreCandidates();
+      await fillIfNeeded();
+    }
   }
   async function start(id: string) {
     const r = await api.startIssue(id);
@@ -167,17 +202,20 @@
   >
     <div class="modal" role="dialog" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
       <h2>{t('dash.candidates')}</h2>
-      {#if candidates.length === 0}<p class="dim">{t('dash.none')}</p>{/if}
-      {#each candidates as c (c.identifier)}
-        <div class="candidate">
-          <span><strong>{c.identifier}</strong> {c.title}</span>
-          {#if c.inFlight}
-            <span class="dim">{t('dash.inFlight')}</span>
-          {:else}
-            <Button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</Button>
-          {/if}
-        </div>
-      {/each}
+      {#if candidates.length === 0 && !candLoading}<p class="dim">{t('dash.none')}</p>{/if}
+      <div class="cand-list" bind:this={candListEl} onscroll={onCandScroll}>
+        {#each candidates as c (c.identifier)}
+          <div class="candidate">
+            <span><strong>{c.identifier}</strong> {c.title}</span>
+            {#if c.inFlight}
+              <span class="dim">{t('dash.inFlight')}</span>
+            {:else}
+              <Button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</Button>
+            {/if}
+          </div>
+        {/each}
+        {#if candLoading}<p class="dim center">{t('dash.loadingMore')}</p>{/if}
+      </div>
       <button onclick={() => (showCandidates = false)}>{t('dash.close')}</button>
     </div>
   </div>
@@ -357,6 +395,14 @@
     width: 560px;
     max-height: 70vh;
     overflow: auto;
+  }
+  .cand-list {
+    max-height: 55vh;
+    overflow-y: auto;
+  }
+  .center {
+    text-align: center;
+    padding: 8px 0;
   }
   .candidate {
     display: flex;

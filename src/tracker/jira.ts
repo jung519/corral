@@ -8,7 +8,7 @@ import { z } from 'zod';
 import type { TrackerConfig } from '../config/schema.js';
 import { fetchJson, fetchRetry } from '../core/fetch-retry.js';
 import { logger } from '../core/logger.js';
-import type { BotIdentity, Issue, IssueState, TrackerAdapter, TrackerComment } from '../core/types.js';
+import type { BotIdentity, CandidatePage, Issue, IssueState, TrackerAdapter, TrackerComment } from '../core/types.js';
 
 export interface TrackerCtx {
   token: string;
@@ -48,6 +48,23 @@ export class JiraTracker implements TrackerAdapter {
     for (const [semantic, name] of Object.entries(cfg.states)) {
       if (name && !this.nameToState.has(name)) this.nameToState.set(name, semantic as IssueState);
     }
+  }
+
+  /** One key(number)-ascending page for the picker. Uses the /search/jql token pagination
+   *  (`nextPageToken` is the opaque cursor); ORDER BY key ASC gives lowest number first. */
+  async fetchCandidatePage(opts: { cursor?: string; limit?: number; search?: string } = {}): Promise<CandidatePage> {
+    const { cursor, limit = 10 } = opts;
+    const jql = `project = "${this.cfg.project}" AND statusCategory != Done ORDER BY key ASC`;
+    const body: Record<string, unknown> = { jql, maxResults: limit, fields: ['summary', 'status', 'labels', 'description'] };
+    if (cursor) body.nextPageToken = cursor;
+    const json = await fetchJson<unknown>(
+      `${this.api}/search/jql`,
+      { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
+      { label: 'jira.search.page' },
+    );
+    const parsed = z.object({ issues: z.array(IssueSchema).default([]), nextPageToken: z.string().nullish() }).parse(json);
+    const items = parsed.issues.map((raw) => this.toIssue(raw)).filter((i) => ACTIVE.includes(i.state));
+    return { items, nextCursor: parsed.nextPageToken ?? undefined };
   }
 
   async fetchCandidateIssues(): Promise<Issue[]> {
