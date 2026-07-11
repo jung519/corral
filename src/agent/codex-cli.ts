@@ -47,7 +47,8 @@ export class CodexCliTransport implements AgentTransport {
     const priorThread = this.threadByIssue.get(spec.handle.id);
     const setup = this.spawnSpec(spec, priorThread);
     const parser = new CodexStreamParser();
-    log.info(`agent run model=${spec.model ?? 'default'} continue=${spec.continueSession}`);
+    const effectiveModel = this.apiKey ? (spec.model ?? 'default') : 'default (subscription)';
+    log.info(`agent run model=${effectiveModel} continue=${spec.continueSession}`);
 
     await runCliTurn(spec, setup, parser, onEvent, log);
 
@@ -55,7 +56,10 @@ export class CodexCliTransport implements AgentTransport {
   }
 
   private spawnSpec(spec: AgentTurnSpec, priorThread: string | undefined): CliSpawnSpec {
-    const args = buildArgs(spec, priorThread);
+    // A codex ChatGPT-account (subscription) login only permits codex's own default model
+    // and rejects any explicit `-m <model>` with a 400. Pass the model ONLY on the API-key
+    // path; on the subscription path let codex pick its default.
+    const args = buildArgs(spec, priorThread, !!this.apiKey);
     if (spec.handle.backend === 'local') {
       return { command: 'codex', args, cwd: spec.handle.workdir, env: this.localEnv() };
     }
@@ -98,10 +102,11 @@ export class CodexCliTransport implements AgentTransport {
   }
 }
 
-/** Build the codex argv after the binary: `exec [opts] [resume <id>] <prompt>`. */
-function buildArgs(spec: AgentTurnSpec, priorThread: string | undefined): string[] {
+/** Build the codex argv after the binary: `exec [opts] [resume <id>] <prompt>`. `allowModel`
+ *  is false on a ChatGPT-account (subscription) login, which rejects any explicit model. */
+function buildArgs(spec: AgentTurnSpec, priorThread: string | undefined, allowModel: boolean): string[] {
   const opts = ['--json', '--skip-git-repo-check', '--dangerously-bypass-approvals-and-sandbox'];
-  if (spec.model) opts.push('-m', spec.model);
+  if (allowModel && spec.model) opts.push('-m', spec.model);
   // Resume the exact prior session only when we have its id (precise, parallel-safe).
   const resume = spec.continueSession && priorThread ? ['resume', priorThread] : [];
   return ['exec', ...opts, ...resume, spec.prompt];
