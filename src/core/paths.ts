@@ -26,6 +26,8 @@ export const SCRATCH = {
   reviewStatus: `${SCRATCH_DIR}/review_status.json`,
   /** Agent's reply scratch (feedback answers). */
   reply: `${SCRATCH_DIR}/pending_reply.md`,
+  /** Agent's answer to a read-only Q&A question (structured markdown, preserved verbatim). */
+  qaAnswer: `${SCRATCH_DIR}/qa_answer.md`,
   /** Agent's question to the human (when it can't proceed). */
   question: `${SCRATCH_DIR}/question.md`,
   /** PR metadata the agent writes (title/body) for the orchestrator to open the PR. */

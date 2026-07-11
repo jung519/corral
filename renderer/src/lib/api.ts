@@ -53,9 +53,12 @@ export const approve = (id: string, selection?: string, text?: string): Promise<
 export const feedback = (id: string, text: string): Promise<CommandResult> =>
   call('action', { id, type: 'feedback', text });
 
-/** Read-only Q&A about a pending plan/review — does NOT modify the result. */
-export const ask = (identifier: string, question: string): Promise<{ ok: boolean; answer?: string; message?: string }> =>
-  call('ask', { identifier, question });
+/** Read-only Q&A about a pending plan/review — does NOT modify the result. `answerHtml` is
+ *  the answer rendered from markdown (line breaks + sections preserved). */
+export const ask = (
+  identifier: string,
+  question: string,
+): Promise<{ ok: boolean; answer?: string; answerHtml?: string; message?: string }> => call('ask', { identifier, question });
 
 /** Subscribe to the live event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {

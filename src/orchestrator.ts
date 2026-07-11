@@ -23,6 +23,7 @@ import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 import { CostTracker } from './core/cost-tracker.js';
 import { bus } from './core/events.js';
+import { renderMarkdown } from './core/markdown.js';
 import {
   type HistoryPhase,
   type HistoryRecord,
@@ -687,7 +688,7 @@ export class Orchestrator {
    * agent's streamed text (no file write), and the API path is restricted to read tools.
    * Available only while the action is pending (the workspace clone is still alive).
    */
-  async answerQuestion(identifier: string, question: string): Promise<{ ok: boolean; answer?: string; message?: string }> {
+  async answerQuestion(identifier: string, question: string): Promise<{ ok: boolean; answer?: string; answerHtml?: string; message?: string }> {
     const rt = this.store.get(identifier);
     if (!rt) return { ok: false, message: 'Not an in-flight issue.' };
     if (!question.trim()) return { ok: false, message: 'Enter a question.' };
@@ -700,8 +701,10 @@ export class Orchestrator {
     const doc = (await this.readOutput(handle, isReview ? SCRATCH.pendingReview : SCRATCH.pendingPlan)) ?? '';
     const prompt = questionPrompt(isReview ? 'review' : 'plan', doc, question.trim());
 
-    // The agent answers in its streamed text; capture those activity events (read-only —
-    // no file is written, so the result document can't be touched).
+    // The agent writes its answer as structured markdown to a file (line breaks + sections
+    // survive there — the streamed timeline text is collapsed to one line). Clear it first
+    // so a failed turn can't surface a stale answer; keep the streamed text as a fallback.
+    await this.workspace.io.writeFile(handle, SCRATCH.qaAnswer, '').catch(() => {});
     const TEXT_PREFIX = '💬 ';
     const parts: string[] = [];
     const unsub = bus.subscribe((e) => {
@@ -719,14 +722,17 @@ export class Orchestrator {
         continueSession: true,
         turnTimeoutMs: a.turn_timeout_ms,
         maxTurns: a.max_turns,
-        allowedTools: ['read', 'ls', 'grep'], // read-only (enforced on the api transport)
+        // read-only except the single answer file (enforced on the api transport; prompt-gated on cli)
+        allowedTools: ['read', 'ls', 'grep', 'write'],
       });
-      const answer = parts.join('').trim();
+      const fileAnswer = ((await this.readOutput(handle, SCRATCH.qaAnswer)) ?? '').trim();
+      const answer = fileAnswer || parts.join('').trim();
       if (!res.ok && !answer) return { ok: false, message: 'The agent could not answer — try rephrasing.' };
+      const final = answer || '(no answer)';
       // Persist the exchange (issues.json survives restarts; flushed into history on archive).
-      rt.qa = [...(rt.qa ?? []), { q: question.trim(), a: answer || '(no answer)', ts: Date.now(), phase: isReview ? 'review' : 'plan' }];
+      rt.qa = [...(rt.qa ?? []), { q: question.trim(), a: final, ts: Date.now(), phase: isReview ? 'review' : 'plan' }];
       this.store.upsert(rt);
-      return { ok: true, answer: answer || '(no answer)' };
+      return { ok: true, answer: final, answerHtml: renderMarkdown(final) };
     } finally {
       this.busy.delete(identifier);
       unsub();
@@ -1427,13 +1433,20 @@ function oneLineErr(err: unknown): string {
   return msg.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
 
-/** Prompt for a read-only clarification turn about a pending plan/review. */
+/** Prompt for a read-only clarification turn about a pending plan/review. The answer is
+ *  written to a file (SCRATCH.qaAnswer) as structured markdown so line breaks and sections
+ *  survive — the live timeline collapses streamed text to one line, which is unreadable. */
 function questionPrompt(kind: 'plan' | 'review', doc: string, question: string): string {
   return [
     `The human is reading your ${kind} for this issue and has a QUESTION about it.`,
-    `This is a READ-ONLY clarification: do NOT modify, create, stage, or commit any file, and do NOT change the ${kind}. Just answer.`,
-    `Ground your answer in the actual code (read the files you need to be precise) and the ${kind} document below.`,
-    `Reply with a concise, direct answer in the same language as the document.`,
+    `Ground your answer in the actual code — read the files you need to be precise — and the ${kind} document below.`,
+    '',
+    `WRITE YOUR ANSWER as markdown to \`${SCRATCH.qaAnswer}\`. Do NOT modify, create, stage, or commit ANY other file, and do NOT change the ${kind}. The only file you may write is \`${SCRATCH.qaAnswer}\`.`,
+    'Format the answer to be scannable — never one dense paragraph:',
+    '- Open with a one or two sentence direct answer (a `## 요약` / `## Summary` section).',
+    '- Then break the reasoning into short bullets or `###` subsections, one point each.',
+    '- Put a blank line between blocks. Keep code identifiers and file paths in `code` style.',
+    'Write in the same language as the document.',
     '',
     `=== YOUR ${kind.toUpperCase()} ===`,
     doc || '(document unavailable — answer from the code)',

@@ -20,7 +20,8 @@
   const isQuestion = $derived(action.kind === 'question');
   const isPlan = $derived(['plan', 'pr_plan', 'fix_plan'].includes(action.kind));
 
-  type Msg = { role: 'you' | 'agent'; text: string };
+  // `html` is set for agent answers (markdown rendered by the core); rendered via {@html}.
+  type Msg = { role: 'you' | 'agent'; text: string; html?: string };
   let thread = $state<Msg[]>([]);
   let input = $state('');
   let busy = $state(false);
@@ -33,7 +34,8 @@
     busy = true;
     try {
       const r = await api.ask(action.identifier, q);
-      thread = [...thread, { role: 'agent', text: r.ok ? (r.answer ?? '') : `⚠ ${r.message ?? 'failed'}` }];
+      if (r.ok) thread = [...thread, { role: 'agent', text: r.answer ?? '', html: r.answerHtml }];
+      else thread = [...thread, { role: 'agent', text: `⚠ ${r.message ?? 'failed'}` }];
     } catch (e) {
       thread = [...thread, { role: 'agent', text: `⚠ ${String(e)}` }];
     } finally {
@@ -102,7 +104,11 @@
         {#each thread as m, i (i)}
           <div class="msg {m.role}">
             <span class="who">{m.role === 'you' ? t('qa.you') : t('qa.agent')}</span>
-            <div class="txt">{m.text}</div>
+            {#if m.html}
+              <div class="txt md">{@html m.html}</div>
+            {:else}
+              <div class="txt">{m.text}</div>
+            {/if}
           </div>
         {/each}
         {#if busy}<div class="msg agent"><span class="who">{t('qa.agent')}</span><div class="txt dim">{t('qa.asking')}</div></div>{/if}
@@ -206,6 +212,68 @@
   }
   .txt.dim {
     color: var(--text-dim);
+  }
+  /* Rendered markdown answer (@html) — real block structure instead of pre-wrap. */
+  .txt.md {
+    white-space: normal;
+  }
+  .txt.md :global(> :first-child) {
+    margin-top: 0;
+  }
+  .txt.md :global(> :last-child) {
+    margin-bottom: 0;
+  }
+  .txt.md :global(p) {
+    margin: 0 0 8px;
+  }
+  .txt.md :global(h1),
+  .txt.md :global(h2),
+  .txt.md :global(h3),
+  .txt.md :global(h4) {
+    margin: 12px 0 6px;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.3;
+  }
+  .txt.md :global(h2) {
+    padding-bottom: 3px;
+    border-bottom: 1px solid var(--border);
+  }
+  .txt.md :global(h3) {
+    border-left: 3px solid var(--accent);
+    padding-left: 8px;
+  }
+  .txt.md :global(ul),
+  .txt.md :global(ol) {
+    margin: 0 0 10px;
+    padding-left: 20px;
+  }
+  .txt.md :global(li) {
+    margin: 4px 0;
+    line-height: 1.55;
+  }
+  .txt.md :global(code) {
+    font-family: var(--mono, ui-monospace, Menlo, monospace);
+    font-size: 0.86em;
+    background: var(--surface-2);
+    border-radius: 4px;
+    padding: 1px 5px;
+    overflow-wrap: anywhere;
+  }
+  .txt.md :global(pre) {
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 10px 12px;
+    overflow: auto;
+    margin: 0 0 10px;
+  }
+  .txt.md :global(pre code) {
+    background: none;
+    padding: 0;
+  }
+  .txt.md :global(strong) {
+    font-weight: 500;
   }
   textarea {
     width: 100%;

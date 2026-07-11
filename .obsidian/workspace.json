@@ -186,6 +186,11 @@
   },
   "active": "333faba962359b4a",
   "lastOpenFiles": [
+    "dist/core/markdown.d.ts",
+    "dist/core/markdown.js",
+    "dist/core/markdown.js.map",
+    "src/core/markdown.ts",
+    "renderer/dist/assets/index-BN1HPllC.js",
     "docs/multi-project-monetization-plan.md"
   ]
 }
