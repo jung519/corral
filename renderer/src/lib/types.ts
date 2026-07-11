@@ -48,6 +48,8 @@ export interface Candidate {
   title: string;
   state: string;
   repoKey?: string;
+  /** Tracker page URL (Notion/Jira/GitHub) — link to open the source issue. */
+  url?: string;
   inFlight: boolean;
 }
 

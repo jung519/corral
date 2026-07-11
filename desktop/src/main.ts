@@ -5,7 +5,7 @@
  * config exists it starts the orchestrator child and loads the dashboard. All
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
-import { app, BrowserWindow, ipcMain, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron';
 import { exec, execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -54,6 +54,12 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+
+  // External links (tracker pages, PRs) open in the OS browser, never inside the app.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
   });
 
   // Ensure the core (IPC control plane) is running whenever a window exists — covers

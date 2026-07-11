@@ -294,7 +294,7 @@ export class Orchestrator {
 
   /** Candidate issues from the tracker that are not already in flight. */
   async listCandidates(opts?: { cursor?: string; limit?: number }): Promise<{
-    candidates: Array<{ identifier: string; title: string; state: string; repoKey?: string; inFlight: boolean }>;
+    candidates: Array<{ identifier: string; title: string; state: string; repoKey?: string; url?: string; inFlight: boolean }>;
     nextCursor?: string;
   }> {
     const { items, nextCursor } = await this.tracker.fetchCandidatePage({ cursor: opts?.cursor, limit: opts?.limit ?? 10 });
@@ -303,6 +303,7 @@ export class Orchestrator {
       title: i.title,
       state: i.state,
       repoKey: i.repoKey,
+      url: i.url,
       inFlight: this.store.get(i.identifier) !== undefined,
     }));
     return { candidates, nextCursor };
@@ -364,6 +365,14 @@ export class Orchestrator {
     const rt: IssueRuntime = { identifier, repoKey, phase: 'initial', title: issue.title, url: issue.url, baseCommits, startedAt: Date.now() };
     this.store.upsert(rt);
     bus.emitEvent({ identifier, kind: 'phase', phase: 'planning', label: `📋 Planning started — ${issue.title}` });
+    // Move the tracker out of the backlog on start so a started issue is visibly distinct
+    // from untouched "todo" items. Target is the mapped `planning` state (config.tracker.
+    // states.planning) — map it to a column of its own to separate, or to the same column
+    // as in_progress to read "started = in progress". Non-fatal: a write failure won't
+    // block the run.
+    void this.tracker.transitionIssue(issue, 'planning').catch((err) => {
+      logger.child(identifier).warn('tracker transition → planning failed (non-fatal)', String(err));
+    });
 
     void this.serialize(identifier, () => this.prepareAndPlan(rt, issue, repos, handle));
     return { ok: true };

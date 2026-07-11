@@ -206,12 +206,17 @@
       <div class="cand-list" bind:this={candListEl} onscroll={onCandScroll}>
         {#each candidates as c (c.identifier)}
           <div class="candidate">
-            <span><strong>{c.identifier}</strong> {c.title}</span>
-            {#if c.inFlight}
-              <span class="dim">{t('dash.inFlight')}</span>
-            {:else}
-              <Button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</Button>
-            {/if}
+            <span class="ctext"><strong>{c.identifier}</strong> {c.title}</span>
+            <span class="cright">
+              {#if c.url}
+                <a class="ext" href={c.url} target="_blank" rel="noreferrer" title={t('dash.openTracker')} aria-label={t('dash.openTracker')}>↗</a>
+              {/if}
+              {#if c.inFlight}
+                <span class="dim">{t('dash.inFlight')}</span>
+              {:else}
+                <Button class="primary" onclick={() => start(c.identifier)}>{t('dash.start')}</Button>
+              {/if}
+            </span>
           </div>
         {/each}
         {#if candLoading}<p class="dim center">{t('dash.loadingMore')}</p>{/if}
@@ -411,5 +416,24 @@
     gap: 12px;
     padding: 8px 0;
     border-bottom: 1px solid var(--border);
+  }
+  .ctext {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .cright {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 0 0 auto;
+  }
+  .ext {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 16px;
+    line-height: 1;
   }
 </style>
