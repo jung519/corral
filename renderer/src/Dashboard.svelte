@@ -6,7 +6,7 @@
   import Button from './lib/Button.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
-  import { phaseActivity, phaseColor, phaseLabelKey } from './lib/phase';
+  import { phaseActivity, phaseColor, phaseLabelKey, waitingLabelKey } from './lib/phase';
   import { toast } from './lib/toast.svelte';
   import type { Candidate, CorralEvent, StateResponse } from './lib/types';
   import { loadDraft, type WizardState } from './lib/wizard';
@@ -162,7 +162,8 @@
           {#if !issue.stuck && phaseActivity(issue.phase) === 'working'}
             <span class="working" title={t('dash.working')}><span class="spin" aria-hidden="true"></span>{t('dash.working')}</span>
           {:else if !issue.stuck && phaseActivity(issue.phase) === 'waiting'}
-            <span class="waiting" title={t('dash.waiting')}><span class="pulse" aria-hidden="true"></span>{t('dash.waiting')}</span>
+            {@const wl = t(waitingLabelKey(issue.phase))}
+            <span class="waiting" title={wl}><span class="pulse" aria-hidden="true"></span>{wl}</span>
           {/if}
           <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase))}</span>
           <span class="cost">${issue.cost.toFixed(4)}</span>

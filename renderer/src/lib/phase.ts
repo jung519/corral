@@ -75,3 +75,21 @@ export function phaseLabelKey(phase: string): string {
   if (phase === 'auth_error_waiting') return 'phase.error';
   return STAGE_KEYS[stageIndex(phase)] ?? 'phase.plan';
 }
+
+/** i18n key for the waiting badge — phase-specific so it says WHAT is awaited (a plan
+ *  approval vs a PR merge), not a generic "waiting" that reads like the run is stuck. */
+export function waitingLabelKey(phase: string): string {
+  switch (phase) {
+    case 'plan_sent':
+    case 'pr_plan_sent':
+      return 'wait.planApproval';
+    case 'review_sent':
+      return 'wait.reviewApproval';
+    case 'question_sent':
+      return 'wait.answer';
+    case 'pr_open':
+      return 'wait.prMerge';
+    default:
+      return 'dash.waiting';
+  }
+}
