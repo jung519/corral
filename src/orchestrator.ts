@@ -484,6 +484,11 @@ export class Orchestrator {
   async retry(identifier: string): Promise<{ ok: boolean; message?: string }> {
     const rt = this.store.get(identifier);
     if (!rt) return { ok: false, message: 'Not an in-flight issue.' };
+    // States like auth_error_waiting can't be re-run in place — tell the user to Restart
+    // instead of emitting a wall of red timeline errors from a doomed re-dispatch.
+    if (!RETRYABLE_PHASES.has(rt.phase)) {
+      return { ok: false, message: `이 상태('${rt.phase}')는 재시도할 수 없습니다. '재시작'을 눌러 처음부터 다시 실행하세요.` };
+    }
     if (this.busy.has(identifier)) return { ok: false, message: 'Busy — try again shortly.' };
     const handle = this.handles.get(identifier);
     if (!handle) return { ok: false, message: 'No workspace — restart the issue from scratch.' };
@@ -1414,6 +1419,9 @@ export class Orchestrator {
 }
 
 /** Compact one-line error for UI messages. */
+/** Phases whose awaited step `redispatchPhase` can re-run in place (others need a Restart). */
+const RETRYABLE_PHASES = new Set<string>(['plan_sent', 'pr_plan_sent', 'review_sent', 'implementing', 'review_fixing']);
+
 function oneLineErr(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
   return msg.replace(/\s+/g, ' ').trim().slice(0, 200);

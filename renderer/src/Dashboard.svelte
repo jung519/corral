@@ -98,7 +98,8 @@
     void refresh();
   }
   async function retry(id: string) {
-    await api.retryIssue(id);
+    const r = await api.retryIssue(id);
+    if (!r.ok && r.message) toast(r.message, 'error');
     void refresh();
   }
   async function remove(id: string) {
