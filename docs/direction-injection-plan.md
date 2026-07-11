@@ -34,8 +34,12 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
 ## 5. 범위 — 저장 위치 (확정: 전역 + 프로젝트)
 | 구분 | 위치 | 내용 |
 |---|---|---|
-| **전역(조직/작업자)** | 유저 설정 | 모든 프로젝트 공통 의도·성향 |
-| **프로젝트** | `.corral/DIRECTION.md` (또는 reference repo) | 이 레포의 목적·방향 (버전관리) |
+| **전역(조직/작업자)** | **userData 파일 `direction.md`** (머신 단위, 모든 config/프로젝트 공통) | 공통 의도·성향 |
+| **프로젝트** | `.corral/DIRECTION.md` (레포 안, 버전관리) | 이 레포의 목적·방향 |
+
+> 전역 저장은 **(b) userData 파일**로 확정(결정 F). config 필드가 아니라 머신 단위 파일이라,
+> 여러 프로젝트/여러 config를 관통하는 진짜 전역이 됨. 코어는 경로를 주입식으로 받아 읽는다
+> (상태 디렉터리 `CORRAL_STATE_DIR` 패턴과 동일).
 
 **이슈별 방향은 전용 기능을 만들지 않는다(결정 D).** 특정 이슈만 다른 방향이 필요하면
 사용자가 **이슈 본문**(최초 작성 시) 또는 **검토 단계 지시**(질문·논의 팝업의 수정요청/
@@ -73,13 +77,19 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
 - 자유도는 유지하되, 좋은 Direction의 형태를 예시로 보여 품질을 끌어올린다.
 - (Direction 품질이 결과 품질을 좌우하므로, 이 가이드 자체가 중요한 산출물.)
 
-## 8. 단계
-1. **전역 Direction(자유텍스트 + 작성 가이드/템플릿) → 계획 프롬프트 주입.**
-2. **프로젝트 Direction(`DIRECTION.md`) → 레포별 주입** + reference repo 연동.
-3. **이슈 본문/검토 지시를 이슈-레벨 오버라이드로 인식**(프롬프트 한 줄 — 결정 D).
-4. **옵션 생성에 방향 축** 반영(보수/균형/적극).
-5. **리뷰 보정 적용**(결정 C) — 계획과 동일 Direction로 심각도·판단 보정.
-6. **검증(eval)**: Direction on/off로 같은 이슈의 계획·옵션·리뷰 비교.
+## 8. 단계 (전역 = userData 확정 반영)
+0. **전역 저장 배선(userData)**: 코어가 userData `direction.md`를 주입식 경로로 읽음
+   (`CORRAL_STATE_DIR` 패턴). 데스크톱에 읽기/쓰기 IPC 브리지.
+1. **Direction 주입(계획) + 병합**: 전역(userData) + 프로젝트(`.corral/DIRECTION.md`)를
+   우선순위대로 병합 → WORKFLOW.md liquid 블록 + kickoff/consolidatePlan 프롬프트에 주입.
+2. **전역 Direction UI**: 환경설정에 자유텍스트 입력 + 스타터 템플릿 + §14 설명 문구 →
+   userData `direction.md`에 저장(IPC).
+3. **이슈-레벨 오버라이드**(결정 D): kickoff/review 프롬프트 한 줄로 이슈 본문/검토 지시 우선.
+4. **리뷰 보정**(결정 C): reviewRoundPrompt+consolidateReview에 Direction "심각도 보정" 프레이밍.
+5. **옵션 방향 축**(선택): plan_options 생성에 보수/균형/적극 축.
+6. **프로젝트 Direction 문서/UI + eval**: `.corral/DIRECTION.md` 안내, Direction on/off 비교.
+
+**최소 동작 슬라이스 = 0+1+2+3+4** (전역 방향이 계획·리뷰에 실리고, UI 편집, 이슈 오버라이드).
 
 ## 9. 1인 개발 적합성
 - 거의 전부 **프롬프트·설정·UI** 작업 → **솔로 가능, 며칠 규모**. RAG 같은 인프라 없음.
@@ -105,8 +115,11 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
 - (D) ✅ **이슈별 전용 기능 없음** — 이슈 본문/검토 지시로 대체(이미 주입됨). 프롬프트에서
   이슈-레벨 오버라이드로 취급하도록 명시.
 - (E) ✅ **명칭 = `Direction / 방향성`** (i18n 한/영) — 코드·문서·UI **전부 통일**.
-  이전 코드네임 "Charter"는 폐기(내부/외부 이중 명칭 없음). 코드 식별자는 `direction`
-  (예: `profile.direction`, `.corral/DIRECTION.md`). 대비 축: **Rules(규칙, skills) ↔ Direction(방향).**
+  이전 코드네임 "Charter"는 폐기(내부/외부 이중 명칭 없음). 코드 식별자는 `direction`.
+  대비 축: **Rules(규칙, skills) ↔ Direction(방향).**
+- (F) ✅ **전역 저장 = userData 파일** `direction.md`(머신 단위) — config 필드 아님.
+  코어는 경로 주입식으로 읽어 프로젝트 `.corral/DIRECTION.md`와 병합. 여러 프로젝트/config
+  관통 전역이 목적.
 
 ## 14. UI 설명 문구 (요구사항 — 옵션에 반드시 노출)
 skills만 쓰던 사용자는 "이미 skills가 있는데 왜 또?"라는 의문을 가장 먼저 가진다. 이 의문을
