@@ -11,14 +11,10 @@
             "id": "333faba962359b4a",
             "type": "leaf",
             "state": {
-              "type": "markdown",
-              "state": {
-                "file": "docs/charter-injection-plan.md",
-                "mode": "source",
-                "source": false
-              },
+              "type": "empty",
+              "state": {},
               "icon": "lucide-file",
-              "title": "charter-injection-plan"
+              "title": "새 탭"
             }
           }
         ]
@@ -95,7 +91,6 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "docs/charter-injection-plan.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -105,7 +100,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "charter-injection-plan 의 백링크"
+              "title": "백링크"
             }
           },
           {
@@ -114,12 +109,11 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "docs/charter-injection-plan.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "charter-injection-plan 의 나가는 링크"
+              "title": "나가는 링크"
             }
           },
           {
@@ -157,13 +151,12 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "docs/charter-injection-plan.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "charter-injection-plan 의 개요"
+              "title": "개요"
             }
           }
         ]
@@ -186,6 +179,9 @@
   },
   "active": "333faba962359b4a",
   "lastOpenFiles": [
+    "docs/charter-injection-plan.md",
+    "docs/direction-injection-plan.md",
+    "renderer/dist/assets/index-OEnxfjLa.js",
     "renderer/dist/assets/index-ijnFtL-W.js",
     "renderer/dist/assets/index-yj0AC-uN.css",
     "dist/core/markdown.d.ts",
