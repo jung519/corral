@@ -54,6 +54,14 @@ describe('CodexStreamParser', () => {
     expect(p.isRateLimit(p.parse(rate)!, rate)).toBe(true);
   });
 
+  it('does NOT flag auth from agent-message text that merely reviews auth code', () => {
+    const p = new CodexStreamParser();
+    // A successful review whose text discusses authentication — must not read as a failure.
+    const msg = '{"type":"item.completed","item":{"type":"agent_message","text":"The authentication and oauth flow in login.ts looks fine; no unauthorized access."}}';
+    expect(p.isAuthFailure(p.parse(msg)!, msg)).toBe(false);
+    expect(p.isRateLimit(p.parse(msg)!, msg)).toBe(false);
+  });
+
   it('handles a full realistic turn', () => {
     const p = new CodexStreamParser();
     const raw = [

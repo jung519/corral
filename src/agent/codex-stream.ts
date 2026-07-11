@@ -74,13 +74,24 @@ export class CodexStreamParser implements CliStreamParser<CodexEvent> {
     }
   }
 
+  // Only classify from a real codex ERROR line — NOT from agent_message JSONL, which
+  // carries the review text itself. Reviewing auth-related code prints words like
+  // "authentication"/"oauth", which would otherwise false-positive as an auth failure on a
+  // perfectly successful run. Codex prints failures as `ERROR: {...}`; agent JSONL starts
+  // with `{`, so this prefix cleanly separates the two.
   isAuthFailure(_event: CodexEvent, rawLine: string): boolean {
-    return looksLikeAuth(rawLine);
+    return isCodexError(rawLine) && looksLikeAuth(rawLine);
   }
 
   isRateLimit(_event: CodexEvent, rawLine: string): boolean {
-    return looksLikeRateLimit(rawLine);
+    return isCodexError(rawLine) && looksLikeRateLimit(rawLine);
   }
+}
+
+/** A codex error line: a `ERROR: …` print or a top-level `{"type":"error",...}` event.
+ *  Agent-message text embeds any quotes as `\"…\"`, so it never matches unescaped `"type":"error"`. */
+function isCodexError(rawLine: string): boolean {
+  return /^\s*ERROR\b/.test(rawLine) || /"type"\s*:\s*"error"/.test(rawLine);
 }
 
 /** One completed item → timeline event(s). agent_message = text; tool-ish items = tool_use. */
