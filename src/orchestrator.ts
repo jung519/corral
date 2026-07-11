@@ -423,9 +423,16 @@ export class Orchestrator {
         const result = await ensureWorkerImage({
           prepRoot: resolve(this.config.workspace.root, '.corral-image-prep', identifier),
           repos: repos.map((r) => ({ key: r.key, cloneUrl: r.cloneUrl(), baseBranch: r.baseBranchFor(issue) })),
-          // Install a CLI for the primary provider + every fallback, so cross-provider
-          // failover works inside the container (not just the primary's CLI).
-          agentProviders: [this.config.agent.provider, ...this.config.agent.fallbacks.map((f) => f.provider)],
+          // Install a CLI for the primary provider + every fallback + every per-stage
+          // agent, so cross-provider routing/failover works inside the container. Missing
+          // a per-stage provider (e.g. review=gpt → codex) makes that stage crash at run.
+          agentProviders: [
+            ...new Set([
+              this.config.agent.provider,
+              ...this.config.agent.fallbacks.map((f) => f.provider),
+              ...Object.values(this.config.agent.stages ?? {}).map((s) => s.provider),
+            ]),
+          ],
           // Approval = config opt-in (workspace.docker.auto_build) + the Dockerfile is
           // surfaced here for audit. (A per-build modal can be layered on this seam.)
           approve: (dockerfile) => {
