@@ -36,6 +36,8 @@ export interface WorkflowContext {
   language?: string;
   /** Path of the reference/conventions repo cloned in the workspace; undefined to skip. */
   reference_path?: string;
+  /** Merged global + per-project Direction ("방향성") body; empty/undefined to skip. */
+  direction?: string;
 }
 
 let templateSource: string | null = null;

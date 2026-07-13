@@ -35,6 +35,19 @@ describe('prompt-builder', () => {
     expect(without).not.toContain('Skills / conventions (REQUIRED)');
   });
 
+  it('renders the Direction block only when direction text is set', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const withDir = await renderWorkflow(
+      { issue, tracker_kind: 'notion', repos, direction: '### Global direction (org / operator)\n안정 우선' },
+      'WORKFLOW.md',
+    );
+    expect(withDir).toContain('Direction (방향성');
+    expect(withDir).toContain('guiding, not'); // framing guard present
+    expect(withDir).toContain('안정 우선'); // the injected text
+    const without = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(without).not.toContain('Direction (방향성');
+  });
+
   it('renders the output-language instruction from the context', async () => {
     const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
     const ko = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');

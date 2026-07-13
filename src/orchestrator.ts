@@ -33,6 +33,7 @@ import {
 } from './core/issue-history.js';
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
+import { type DirectionStore, mergeDirection, PROJECT_DIRECTION_FILE, type ProjectDirection } from './core/direction.js';
 import { SCRATCH } from './core/paths.js';
 import {
   type AgentAdapter,
@@ -86,6 +87,8 @@ export class Orchestrator {
     private readonly profile: ResolvedProfile,
     /** Authenticated clone URL of the read-only reference/conventions repo (or undefined). */
     private readonly referenceCloneUrl?: string,
+    /** Global Direction reader — merged with per-project `.corral/DIRECTION.md` on dispatch. */
+    private readonly directionStore?: DirectionStore,
   ) {
     // Wrap the agent once so every turn — planning, critique, review — is timed into
     // the issue's "AI working" total (recorded in the history entry on completion).
@@ -602,6 +605,19 @@ export class Orchestrator {
     return this.referenceCloneUrl ? REFERENCE_DIR : undefined;
   }
 
+  /** Merge the global Direction (userData) with each repo's `.corral/DIRECTION.md` (read
+   * from the cloned workspace) into the workflow's Direction block. Empty → '' (no block).
+   * Read fresh per dispatch so edits apply without a core restart. */
+  private async buildDirection(handle: WorkspaceHandle): Promise<string> {
+    const global = this.directionStore?.read() ?? '';
+    const projects: ProjectDirection[] = [];
+    for (const r of this.router.all()) {
+      const text = await this.workspace.io.readFile(handle, `${r.key}/${PROJECT_DIRECTION_FILE}`).catch(() => null);
+      if (text) projects.push({ repo: r.key, text });
+    }
+    return mergeDirection(global, projects);
+  }
+
   private async dispatchPlanning(rt: IssueRuntime, issue: Issue): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
     const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning');
@@ -780,6 +796,7 @@ export class Orchestrator {
           branch: r.branchNameFor(issue),
         })),
         reference_path: this.referencePath(),
+        direction: await this.buildDirection(handle),
       });
       await this.wipeOutputs(handle);
       // Run-time backend guard: a provider assigned to this stage that can't execute under

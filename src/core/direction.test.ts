@@ -2,7 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DirectionStore } from './direction.js';
+import { DirectionStore, mergeDirection } from './direction.js';
 
 describe('DirectionStore', () => {
   let dir: string;
@@ -61,5 +61,35 @@ describe('DirectionStore', () => {
     } finally {
       process.chdir(cwd);
     }
+  });
+});
+
+describe('mergeDirection', () => {
+  it('returns empty when nothing is set', () => {
+    expect(mergeDirection('', [])).toBe('');
+    expect(mergeDirection('   ', [{ repo: 'app', text: '  ' }])).toBe('');
+  });
+
+  it('global only → one labelled block', () => {
+    expect(mergeDirection('안정 우선', [])).toBe('### Global direction (org / operator)\n안정 우선');
+  });
+
+  it('global first, then each non-empty project, separated by blank lines', () => {
+    const out = mergeDirection('G', [
+      { repo: 'app', text: 'A' },
+      { repo: 'server', text: '' },
+      { repo: 'admin', text: 'B' },
+    ]);
+    expect(out).toBe(
+      '### Global direction (org / operator)\nG\n\n### Project direction — app\nA\n\n### Project direction — admin\nB',
+    );
+  });
+
+  it('project only (no global) is allowed', () => {
+    expect(mergeDirection('', [{ repo: 'app', text: 'A' }])).toBe('### Project direction — app\nA');
+  });
+
+  it('trims surrounding whitespace of each scope', () => {
+    expect(mergeDirection('  G\n', [])).toBe('### Global direction (org / operator)\nG');
   });
 });

@@ -29,6 +29,19 @@ consult it and follow its rules:
    you deviate, justify it explicitly in the plan/PR — otherwise comply.
 This repo is read-only: never edit or commit inside `{{ reference_path }}`.
 {% endif %}
+{% if direction %}
+## Direction (방향성 — guiding, not a rule)
+
+The operator has set a **direction** for how this work should be judged. Apply it as the
+**default direction when the issue is otherwise neutral**. It is guiding, not binding:
+- The issue's correctness and explicit requirements ALWAYS win over the direction.
+- The skills/conventions above remain **binding rules**; the direction never overrides them.
+- Do NOT enforce the direction like a rule or twist a better solution to fit it. Where the
+  issue expresses no clear preference, lean the way the direction points — in approach,
+  trade-offs, priorities, and how you order plan options.
+
+{{ direction }}
+{% endif %}
 
 ## Output language
 
@@ -56,14 +69,17 @@ identifiers, file paths, commands, and severity labels (BLOCKER/SUGGESTION/NIT) 
    `server/src/...`), edge cases, and **testable acceptance criteria**.
    - If there are genuinely distinct viable approaches, present them as numbered options
      (recommended first) and write the option labels as a JSON array to
-     `.corral/plan_options.json`. A single approach → omit that file.
+     `.corral/plan_options.json`. A single approach → omit that file.{% if direction %}
+   - Let the **Direction** above steer the approach, the trade-offs, and the order of
+     options where the issue itself is neutral — without overriding the issue's requirements.{% endif %}
 3. If you cannot proceed without a decision from the human, write the question to
    `.corral/question.md` instead of a plan, and stop.
 
 ### Consolidate plan
 Independent critiques are in `.corral/plan_critique_*.md`. Fold them into the final vetted
 plan at `.corral/pending_plan.md` (keep options + acceptance criteria; note how each
-critique was addressed). Do not modify code.
+critique was addressed). Do not modify code.{% if direction %} Keep the final plan aligned
+with the **Direction** above where the issue is neutral (it is guiding, not a rule).{% endif %}
 
 ### B — Plan feedback
 The prompt starts with a feedback marker. Revise `.corral/pending_plan.md` accordingly and stop.

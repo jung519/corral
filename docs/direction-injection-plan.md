@@ -82,8 +82,10 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
    기본 `direction.md` = cwd/userData) 읽기/쓰기 + 코어 IPC `direction`(코어가 읽은 값 확인).
    데스크톱 `direction-store.ts` + `direction:read/write` IPC 브리지 + preload/타입.
    (주입·UI·검증은 다음 Phase.)
-1. **Direction 주입(계획) + 병합**: 전역(userData) + 프로젝트(`.corral/DIRECTION.md`)를
-   우선순위대로 병합 → WORKFLOW.md liquid 블록 + kickoff/consolidatePlan 프롬프트에 주입.
+1. ✅ **Direction 주입(계획) + 병합 — 완료**: 전역(DirectionStore) + 각 레포 `.corral/DIRECTION.md`를
+   `mergeDirection`로 병합 → WORKFLOW.md `{% if direction %}` 블록(프레이밍 가드: guiding-not-binding,
+   이슈 정확성 우선, skills는 여전히 binding) + 계획/consolidate 단계에서 참조. 가이드는 매 dispatch
+   전달(API=시스템 프롬프트, CLI=규칙 파일)이라 계획·consolidate에 자동 반영. (리뷰 보정은 Phase 4.)
 2. **전역 Direction UI**: 환경설정에 자유텍스트 입력 + 스타터 템플릿 + §14 설명 문구 →
    userData `direction.md`에 저장(IPC).
 3. **이슈-레벨 오버라이드**(결정 D): kickoff/review 프롬프트 한 줄로 이슈 본문/검토 지시 우선.

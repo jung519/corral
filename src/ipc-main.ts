@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   if (existsSync(configPath)) {
     try {
       const config = await loadConfig(configPath);
-      const app = await bootstrap(config, { credentials, channel });
+      const app = await bootstrap(config, { credentials, channel, directionStore });
       orchestrator = app.orchestrator;
       await channel.start();
       await orchestrator.start();

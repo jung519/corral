@@ -44,3 +44,30 @@ export class DirectionStore {
     writeFileSync(this.file, text, 'utf8');
   }
 }
+
+/** Per-project Direction (`<repo>/.corral/DIRECTION.md`) gathered for a dispatch. */
+export interface ProjectDirection {
+  repo: string;
+  text: string;
+}
+
+/** Path of the per-project Direction file, relative to a repo's subdir in the workspace. */
+export const PROJECT_DIRECTION_FILE = '.corral/DIRECTION.md';
+
+/**
+ * Merge the global (userData) and per-project (`.corral/DIRECTION.md`) Direction into
+ * the scoped body injected into the workflow guide. Empty scopes are skipped; returns
+ * '' when nothing is set (→ the workflow's `{% if direction %}` block renders nothing).
+ * Priority (issue > project > global) is expressed by the framing in WORKFLOW.md, not by
+ * ordering here — but global is listed first so project text reads as the refinement.
+ */
+export function mergeDirection(global: string, projects: ProjectDirection[]): string {
+  const blocks: string[] = [];
+  const g = global.trim();
+  if (g) blocks.push(`### Global direction (org / operator)\n${g}`);
+  for (const p of projects) {
+    const t = p.text.trim();
+    if (t) blocks.push(`### Project direction — ${p.repo}\n${t}`);
+  }
+  return blocks.join('\n\n');
+}
