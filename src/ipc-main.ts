@@ -14,6 +14,7 @@ import { loadConfig } from './config/loader.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import { FileCredentialStore } from './credentials/file-store.js';
 import { LayeredCredentialStore } from './credentials/layered.js';
+import { DirectionStore } from './core/direction.js';
 import { logger } from './core/logger.js';
 import { startIpcHost } from './ipc-host.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -24,6 +25,9 @@ const stateDir = process.env.CORRAL_STATE_DIR ?? '.corral-state';
 const fileStore = new FileCredentialStore(resolve(stateDir, 'credentials.json'));
 const credentials = new LayeredCredentialStore([new EnvCredentialStore(), fileStore], fileStore);
 const channel = new WebChannel();
+// Global Direction lives next to corral.yaml in userData (cwd on desktop). Read-only
+// here for now — the desktop's direction:write bridge owns writes (Phase 0).
+const directionStore = new DirectionStore();
 
 let orchestrator: Orchestrator | undefined;
 
@@ -47,7 +51,7 @@ async function main(): Promise<void> {
     logger.info('corral starting in setup mode (ipc)');
   }
 
-  startIpcHost({ channel, orchestrator: () => orchestrator });
+  startIpcHost({ channel, orchestrator: () => orchestrator, directionStore });
 }
 
 main().catch((err: unknown) => {

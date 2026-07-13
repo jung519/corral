@@ -21,6 +21,12 @@ const api = {
     write: (json: string): Promise<void> => ipcRenderer.invoke('draft:write', json),
     clear: (): Promise<void> => ipcRenderer.invoke('draft:clear'),
   },
+  /** Global Direction (free-text "방향성") persisted to userData/direction.md. The core
+   *  reads the same file to inject it into prompts (from Phase 1). */
+  direction: {
+    read: (): Promise<string> => ipcRenderer.invoke('direction:read'),
+    write: (text: string): Promise<void> => ipcRenderer.invoke('direction:write', text),
+  },
   secret: {
     set: (service: string, account: string, value: string): Promise<void> =>
       ipcRenderer.invoke('secret:set', service, account, value),

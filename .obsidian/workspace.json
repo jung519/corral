@@ -179,16 +179,19 @@
   },
   "active": "333faba962359b4a",
   "lastOpenFiles": [
+    "desktop/dist/direction-store.js",
+    "dist/core/direction.d.ts",
+    "dist/core/direction.js",
+    "dist/core/direction.js.map",
+    "src/core/direction.test.ts",
+    "desktop/src/direction-store.ts",
+    "src/core/direction.ts",
+    "renderer/dist/assets/index-BDrv03Vu.js",
     "docs/charter-injection-plan.md",
     "docs/direction-injection-plan.md",
     "renderer/dist/assets/index-OEnxfjLa.js",
     "renderer/dist/assets/index-ijnFtL-W.js",
     "renderer/dist/assets/index-yj0AC-uN.css",
-    "dist/core/markdown.d.ts",
-    "dist/core/markdown.js",
-    "dist/core/markdown.js.map",
-    "src/core/markdown.ts",
-    "renderer/dist/assets/index-BN1HPllC.js",
     "docs/multi-project-monetization-plan.md"
   ]
 }

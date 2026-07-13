@@ -11,6 +11,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { configExists, readConfig, writeConfig } from './config-store.js';
+import { readDirection, writeDirection } from './direction-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
 import { callCore, restartOrchestrator, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
@@ -77,6 +78,9 @@ function registerIpc(): void {
   ipcMain.handle('draft:read', () => readDraft());
   ipcMain.handle('draft:write', (_e, json: string) => writeDraft(json));
   ipcMain.handle('draft:clear', () => clearDraft());
+
+  ipcMain.handle('direction:read', () => readDirection());
+  ipcMain.handle('direction:write', (_e, text: string) => writeDirection(text));
 
   ipcMain.handle('secret:set', (_e, service: string, account: string, value: string) =>
     setSecret(service, account, value),

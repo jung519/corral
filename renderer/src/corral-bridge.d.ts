@@ -16,6 +16,10 @@ declare global {
         write(json: string): Promise<void>;
         clear(): Promise<void>;
       };
+      direction: {
+        read(): Promise<string>;
+        write(text: string): Promise<void>;
+      };
       secret: {
         set(service: string, account: string, value: string): Promise<void>;
         has(service: string, account: string): Promise<boolean>;

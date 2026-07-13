@@ -78,8 +78,10 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
 - (Direction 품질이 결과 품질을 좌우하므로, 이 가이드 자체가 중요한 산출물.)
 
 ## 8. 단계 (전역 = userData 확정 반영)
-0. **전역 저장 배선(userData)**: 코어가 userData `direction.md`를 주입식 경로로 읽음
-   (`CORRAL_STATE_DIR` 패턴). 데스크톱에 읽기/쓰기 IPC 브리지.
+0. ✅ **전역 저장 배선(userData) — 완료**: 코어 `DirectionStore`(주입식 경로 `CORRAL_DIRECTION_PATH`,
+   기본 `direction.md` = cwd/userData) 읽기/쓰기 + 코어 IPC `direction`(코어가 읽은 값 확인).
+   데스크톱 `direction-store.ts` + `direction:read/write` IPC 브리지 + preload/타입.
+   (주입·UI·검증은 다음 Phase.)
 1. **Direction 주입(계획) + 병합**: 전역(userData) + 프로젝트(`.corral/DIRECTION.md`)를
    우선순위대로 병합 → WORKFLOW.md liquid 블록 + kickoff/consolidatePlan 프롬프트에 주입.
 2. **전역 Direction UI**: 환경설정에 자유텍스트 입력 + 스타터 템플릿 + §14 설명 문구 →
