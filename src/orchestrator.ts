@@ -647,6 +647,7 @@ export class Orchestrator {
       this.referencePath(),
       (r) => this.cost.add(rt.identifier, r),
       focus,
+      await this.buildDirection(handle),
     );
     // Preserve the draft before the consolidate dispatch's wipeOutputs clears it.
     await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);

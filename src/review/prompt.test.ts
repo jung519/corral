@@ -71,4 +71,12 @@ describe('review prompts (de-masil)', () => {
     expect(pc).toContain('focus this review on: "perf"');
     expect(pc).toContain('특이사항 없음');
   });
+
+  it('planCritiquePrompt injects the Direction as guiding (not a rule)', () => {
+    const dir = '### Global direction (org / operator)\nprefer fewer dependencies';
+    const pc = planCritiquePrompt(issue, 1, profileKo, undefined, undefined, dir);
+    expect(pc).toContain('prefer fewer dependencies');
+    expect(pc).toContain('guiding, not a rule');
+    expect(planCritiquePrompt(issue, 1, profileKo)).not.toContain('guiding, not a rule');
+  });
 });

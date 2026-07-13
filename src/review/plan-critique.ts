@@ -33,6 +33,7 @@ export class PlanCritiqueOrchestrator {
     referencePath?: string,
     onRoundCost?: RoundCostFn,
     focus?: string,
+    direction = '',
   ): Promise<string[]> {
     const log = logger.child(issue.identifier);
     if (!this.cfg.enabled) return [];
@@ -45,7 +46,7 @@ export class PlanCritiqueOrchestrator {
 
     const tasks: Array<Promise<string | null>> = [];
     for (let r = 1; r <= rounds; r++) {
-      tasks.push(this.runRound(handle, issue, r, model, referencePath, onRoundCost, focus));
+      tasks.push(this.runRound(handle, issue, r, model, referencePath, onRoundCost, focus, direction));
     }
     const results = await Promise.all(tasks);
     const files = results.filter((f): f is string => f !== null);
@@ -61,13 +62,14 @@ export class PlanCritiqueOrchestrator {
     referencePath?: string,
     onRoundCost?: RoundCostFn,
     focus?: string,
+    direction = '',
   ): Promise<string | null> {
     const log = logger.child(issue.identifier);
     try {
       const result = await this.agent.run(handle, issue, {
         stage: 'planning',
         workflow: '',
-        prompt: planCritiquePrompt(issue, round, this.profile, referencePath, focus),
+        prompt: planCritiquePrompt(issue, round, this.profile, referencePath, focus, direction),
         continueSession: false,
         model,
         turnTimeoutMs: this.turnTimeoutMs,

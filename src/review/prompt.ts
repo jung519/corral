@@ -21,6 +21,7 @@ export function planCritiquePrompt(
   profile: ResolvedProfile,
   referencePath?: string,
   focus?: string,
+  direction = '',
 ): string {
   const out = SCRATCH.planCritique(round);
   const lines = [
@@ -39,6 +40,13 @@ export function planCritiquePrompt(
   }
   if (referencePath) {
     lines.push(`Check the plan against the conventions in the reference repo at ${referencePath}.`);
+  }
+  if (direction.trim()) {
+    lines.push(
+      `Direction (guiding, not a rule): the operator set the direction below for this project. ` +
+        `Judge whether the plan's approach and trade-offs fit it as the DEFAULT direction WHERE THE ISSUE IS NEUTRAL. ` +
+        `Do NOT flag a direction-aligned choice as a problem just because you would choose otherwise; the issue's requirements and correctness always come first, and skills/conventions remain binding.\n${direction.trim()}`,
+    );
   }
   lines.push(
     `Classify each finding as BLOCKER / SUGGESTION / NIT with a rationale and (where relevant) a file:line.`,
