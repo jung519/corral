@@ -92,7 +92,11 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
 3. ✅ **이슈-레벨 오버라이드 — 완료**(결정 D): WORKFLOW.md Direction 블록에 우선순위 명시
    (이슈+그 이슈의 인간 지시 > 프로젝트 Direction > 전역 Direction), 리뷰 피드백 섹션에도
    "인간 지시가 Direction보다 우선" 한 줄. 별도 UI/필드 없음.
-4. **리뷰 보정**(결정 C): reviewRoundPrompt+consolidateReview에 Direction "심각도 보정" 프레이밍.
+4. ✅ **리뷰 보정 — 완료**(결정 C): 리뷰 라운드는 `workflow:''`(가이드 미전달)라 direction을
+   `reviewRoundPrompt`에 직접 주입(orchestrator.buildDirection→review.run→runRound). consolidate는
+   가이드를 받으므로 WORKFLOW.md "Consolidate review"에 프레이밍. **가드: 심각도는 주관/우선순위
+   findings만 보정, 정확성·보안·데이터손실·동작파손은 무조건 BLOCKER 유지, 없는 findings 만들지 말 것.**
+   (미해결 갭: plan-critique도 `workflow:''`라 direction 미전달 — Phase 1 후속으로 별도 처리.)
 5. **방향성 검증**(결정 G, §15): verified 플래그(전역/프로젝트 독립) + 이슈 시작 게이트
    (값 있고 false면 검사, 실패 시 차단) + 등록 시 무맥락 검사(API) / 이연·동의(CLI).
 6. **옵션 방향 축**(선택): plan_options 생성에 보수/균형/적극 축.

@@ -107,7 +107,11 @@ Independent review rounds are in `.corral/review_round_*.md`; static-gate facts 
 `.corral/static_qa.json`; semgrep findings (if any) in `.corral/semgrep.json`. Any non-zero
 static-gate command is a BLOCKER. Consolidate everything into `.corral/pending_review.md`,
 and write the unresolved counts as JSON to `.corral/review_status.json`:
-`{"blocker": N, "suggestion": N, "nit": N}`.
+`{"blocker": N, "suggestion": N, "nit": N}`.{% if direction %} When consolidating, calibrate
+the SEVERITY of subjective / priority findings to the **Direction** above (a speed/MVP
+direction → downgrade or drop cosmetic and gold-plating items; a stability/mature direction
+→ hold strict). Never downgrade a correctness, security, data-loss, or broken-behavior
+finding on account of the direction, and never invent findings to satisfy it.{% endif %}
 
 Write `pending_review.md` in this EXACT scannable layout. A human reads it in a small panel,
 so readability is critical: put a blank line between every block, and put every fact on its

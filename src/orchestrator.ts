@@ -1131,6 +1131,7 @@ export class Orchestrator {
         (r) => this.cost.add(rt.identifier, r),
         verifyCommands,
         diffStats,
+        await this.buildDirection(handle),
       );
       await this.uploadDiff(rt, issue, changed);
       const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review');

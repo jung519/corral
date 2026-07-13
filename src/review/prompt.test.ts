@@ -49,6 +49,16 @@ describe('review prompts (de-masil)', () => {
     );
   });
 
+  it('reviewRoundPrompt injects the Direction with a severity-calibration guard', () => {
+    const dir = '### Global direction (org / operator)\nMVP speed first';
+    const p = reviewRoundPrompt(issue, 1, [{ dir: 'app', base: 'b' }], profileKo, undefined, dir);
+    expect(p).toContain('MVP speed first'); // the direction text is present
+    expect(p).toContain('calibrate SEVERITY'); // framing that it only tunes severity
+    expect(p).toMatch(/does NOT change correctness/i); // correctness bugs stay BLOCKER
+    // Omitted when no direction is set.
+    expect(reviewRoundPrompt(issue, 1, [{ dir: 'app', base: 'b' }], profileKo)).not.toContain('calibrate SEVERITY');
+  });
+
   it('uses generic calibration for the generic stack', () => {
     const generic = resolveProfile(ProfileSchema.parse({}));
     const p = reviewRoundPrompt(issue, 1, [{ dir: '.', base: 'b' }], generic);

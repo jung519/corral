@@ -71,6 +71,7 @@ export function reviewRoundPrompt(
   targets: ReviewTarget[],
   profile: ResolvedProfile,
   referencePath?: string,
+  direction = '',
 ): string {
   const out = SCRATCH.reviewRound(round);
   const examples = profile.stack.calibrationExamples.map((e) => `  - ${e}`).join('\n');
@@ -93,6 +94,13 @@ export function reviewRoundPrompt(
   ];
   if (referencePath) {
     lines.push(`ALSO check compliance with the conventions in the reference repo at ${referencePath}. Flag any violation.`);
+  }
+  if (direction.trim()) {
+    lines.push(
+      `Direction (calibrate SEVERITY to it — it NEVER hides a real bug): the operator set the direction below for this project. ` +
+        `Use it only to judge how strict to be on SUBJECTIVE / priority findings — e.g. a speed-first or MVP direction → downgrade cosmetic or gold-plating items to NIT or drop them; a stability-first or mature direction → hold the line strictly. ` +
+        `It does NOT change correctness, security, data-loss, or broken-behavior findings — those stay BLOCKER regardless of the direction. Do NOT invent findings to satisfy the direction, and the issue's requirements still come first.\n${direction.trim()}`,
+    );
   }
   lines.push(
     `Calibration — findings at this level warrant a BLOCKER (align your severity to these):\n${examples}`,
