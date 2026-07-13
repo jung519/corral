@@ -86,8 +86,9 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
    `mergeDirection`로 병합 → WORKFLOW.md `{% if direction %}` 블록(프레이밍 가드: guiding-not-binding,
    이슈 정확성 우선, skills는 여전히 binding) + 계획/consolidate 단계에서 참조. 가이드는 매 dispatch
    전달(API=시스템 프롬프트, CLI=규칙 파일)이라 계획·consolidate에 자동 반영. (리뷰 보정은 Phase 4.)
-2. **전역 Direction UI**: 환경설정에 자유텍스트 입력 + 스타터 템플릿 + §14 설명 문구 →
-   userData `direction.md`에 저장(IPC).
+2. ✅ **전역 Direction UI — 완료**: 환경설정(Preferences)에 자유텍스트 textarea + 스타터 템플릿
+   버튼 + §14 설명 문구(부제·짧은 설명·"왜 필요"·"skills로는 왜 안 되나" 펼침·대비 한 줄) →
+   Phase 0 브리지로 userData `direction.md`에 저장. (검증 플래그는 Phase 5.)
 3. **이슈-레벨 오버라이드**(결정 D): kickoff/review 프롬프트 한 줄로 이슈 본문/검토 지시 우선.
 4. **리뷰 보정**(결정 C): reviewRoundPrompt+consolidateReview에 Direction "심각도 보정" 프레이밍.
 5. **방향성 검증**(결정 G, §15): verified 플래그(전역/프로젝트 독립) + 이슈 시작 게이트

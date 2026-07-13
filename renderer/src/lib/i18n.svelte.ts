@@ -291,6 +291,27 @@ const en: Dict = {
   'settings.none': 'none',
   'settings.summaryHint': 'Your current configuration. Secrets are masked — click Edit to change anything (you re-enter keys there).',
   'settings.langNote': 'Switches the UI language. When the agent output language is set to “Same as UI (auto)”, changing this also changes what language plans and reviews are written in (applies to runs started afterward).',
+  'direction.title': 'Direction',
+  'direction.optional': '(optional)',
+  'direction.subtitle': 'Guidance so the AI plans and reviews the way your team wants — not just correctly.',
+  'direction.desc':
+    'Where skills say “how to build” (rules), Direction says “why / which way” (judgment). The same task gets solved to match your priorities and trade-offs — applied to planning and review.',
+  'direction.whyTitle': 'Why do I need this?',
+  'direction.why':
+    'skills and profile tell the AI your rules and stack, but not whether you favor stability over speed, whether you avoid new dependencies, or what this product cares about most right now. Write it once and it applies consistently to every issue without repeating yourself.',
+  'direction.vsSkillsTitle': 'Can’t I just put this in skills?',
+  'direction.vsSkills':
+    'skills are injected as binding rules and the review flags violations. Put direction there and the AI enforces it like a rule — twisting better solutions and flagging the direction as a “violation.” Direction is not a rule; it is the default lean when the issue is neutral, and the issue’s correctness always wins. That is why it is a separate layer.',
+  'direction.contrast': 'Rules (must follow) ↔ Direction (default judgment).',
+  'direction.placeholder':
+    'e.g.\n## Purpose\n…\n## Priorities\nStability > feature speed\n## Decision principles\nA new dependency needs justification\n## Don’t\n…',
+  'direction.insertTemplate': 'Insert starter template',
+  'direction.template':
+    '## Purpose\n\n## Priorities\n- e.g. Stability > feature speed\n\n## Decision principles\n- e.g. A new dependency needs justification\n\n## Don’t\n- e.g. Don’t expand scope beyond the issue\n',
+  'direction.save': 'Save',
+  'direction.saving': 'Saving…',
+  'direction.saved': 'Saved',
+  'direction.browserNote': 'Editing Direction requires the desktop app.',
   'logs.title': 'Logs',
   'logs.empty': 'No events yet.',
   'about.tagline': 'Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent.',
@@ -582,6 +603,27 @@ const ko: Dict = {
   'settings.none': '없음',
   'settings.summaryHint': '현재 설정값입니다. 민감 정보는 가려져 있어요 — 바꾸려면 수정을 누르세요(거기서 키를 다시 입력합니다).',
   'settings.langNote': 'UI 언어를 전환합니다. 에이전트 출력 언어가 “UI와 동일 (자동)”이면, 이 값을 바꾸는 것만으로 계획·리뷰가 작성되는 언어도 함께 바뀝니다(이후 시작되는 작업부터 적용).',
+  'direction.title': '방향성',
+  'direction.optional': '(선택)',
+  'direction.subtitle': 'AI가 “올바르게”를 넘어 팀이 원하는 방향으로 계획·리뷰하도록 하는 지침입니다.',
+  'direction.desc':
+    'skills가 “어떻게 만들지(규칙)”라면, 방향성은 “왜·어느 방향으로(판단 기준)”입니다. 같은 문제라도 우선순위와 트레이드오프에 맞춰 풀도록 계획과 리뷰에 반영됩니다.',
+  'direction.whyTitle': '왜 필요한가요?',
+  'direction.why':
+    'skills·profile은 규칙과 스택은 알려주지만, “안정 우선인지 속도 우선인지”, “새 의존성을 꺼리는지”, “지금 이 제품이 뭘 가장 중요하게 여기는지” 같은 방향은 담기지 않습니다. 한 번 적어두면 매 이슈마다 다시 말하지 않아도 일관되게 반영됩니다.',
+  'direction.vsSkillsTitle': '그냥 skills에 적으면 안 되나요?',
+  'direction.vsSkills':
+    'skills는 반드시 지켜야 하는 규칙(binding)으로 주입되고 리뷰가 위반을 지적합니다. 방향을 여기 넣으면 AI가 규칙처럼 강제해 더 나은 해법도 비틀고, 리뷰가 방향을 “위반”으로 잡습니다. 방향성은 규칙이 아니라 이슈가 중립일 때의 기본 방향이며, 이슈의 정확성이 항상 우선합니다 — 그래서 별도 층입니다.',
+  'direction.contrast': 'Rules 규칙(지켜야 함) ↔ Direction 방향성(판단 기준).',
+  'direction.placeholder':
+    '예:\n## 목적\n…\n## 우선순위\n안정 > 기능 속도\n## 의사결정 원칙\n새 의존성은 정당화 필요\n## 하지 말 것\n…',
+  'direction.insertTemplate': '스타터 템플릿 삽입',
+  'direction.template':
+    '## 목적\n\n## 우선순위\n- 예: 안정 > 기능 속도\n\n## 의사결정 원칙\n- 예: 새 의존성은 정당화 필요\n\n## 하지 말 것\n- 예: 이슈 범위를 넘어 확장하지 말 것\n',
+  'direction.save': '저장',
+  'direction.saving': '저장 중…',
+  'direction.saved': '저장됨',
+  'direction.browserNote': '방향성 편집은 데스크톱 앱에서만 가능합니다.',
   'logs.title': '로그',
   'logs.empty': '아직 이벤트가 없습니다.',
   'about.tagline': '오픈소스 에이전트 개발 오케스트레이터 — 트래커 → 저장소 → 사람 승인 → AI 코딩 에이전트.',
