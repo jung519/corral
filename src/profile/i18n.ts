@@ -31,7 +31,7 @@ const en: Messages = {
     'The previous run was interrupted by a restart. Per the workflow guide, resume and finish the interrupted work (implementation, or applying review findings).',
   'cost.summaryHeading': 'Cost summary',
   'cost.total': 'Total cost',
-  'cost.dispatches': 'Dispatches',
+  'cost.dispatches': 'AI runs',
   'cost.tokens': 'Tokens (in/out)',
   'cost.none': 'No cost recorded.',
 };
@@ -46,7 +46,7 @@ const ko: Messages = {
   'signal.resume': '이전 작업이 재시작으로 중단되었습니다. 워크플로우 가이드에 따라 중단된 작업(구현 또는 리뷰 지적 수정)을 이어서 완료하세요.',
   'cost.summaryHeading': '비용 요약',
   'cost.total': '총 비용',
-  'cost.dispatches': '디스패치 횟수',
+  'cost.dispatches': 'AI 실행 횟수',
   'cost.tokens': '토큰 (입력/출력)',
   'cost.none': '집계된 비용이 없습니다.',
 };
