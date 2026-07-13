@@ -324,7 +324,7 @@
     try {
       if (!window.corral) throw new Error('Corral desktop bridge unavailable');
       // Write the config first so it always lands, even if a later step throws.
-      await window.corral.config.write(buildConfigYaml(s));
+      await window.corral.config.write(buildConfigYaml(s, currentLang()));
       for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
       // First-run brings the orchestrator up; an inline edit just persists config.
       if (!embedded) await window.corral.startOrchestrator();
@@ -795,6 +795,7 @@
         <label class="field"
           ><span>{t('field.language')}</span>
           <select bind:value={s.language}>
+            <option value="auto">{t('field.language.auto')}</option>
             <option value="en">English</option>
             <option value="ko">한국어</option>
           </select></label

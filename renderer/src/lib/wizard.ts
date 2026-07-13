@@ -109,6 +109,9 @@ export interface WizardState {
   dockerMountLogin: boolean;
   port: number;
   maxActive: number;
+  /** Agent output language: `'auto'` (follow the UI language until explicitly pinned),
+   *  or a concrete code like `'en'`/`'ko'`. `buildConfigYaml` resolves `'auto'` to the
+   *  current UI language, so config always stores a concrete code. */
   language: string;
   stack: string;
   /** Optional read-only conventions/skills repo ("owner/name" or https URL). */
@@ -158,7 +161,7 @@ export function initialState(): WizardState {
     dockerMountLogin: true,
     port: 4400,
     maxActive: 3,
-    language: 'en',
+    language: 'auto',
     stack: 'generic',
     referenceRepo: '',
     referenceToken: '',
@@ -446,8 +449,11 @@ function stageAgentYaml(s: WizardState): string[] {
   return lines;
 }
 
-export function buildConfigYaml(s: WizardState): string {
-  const profile = ['profile:', `  language: ${yamlStr(s.language)}`, `  stack: ${yamlStr(s.stack)}`];
+export function buildConfigYaml(s: WizardState, uiLang: string): string {
+  // Output language "auto" = follow the UI language. Resolve to a concrete code here so
+  // the core never has to know about the renderer's UI-language toggle.
+  const language = s.language === 'auto' ? uiLang : s.language;
+  const profile = ['profile:', `  language: ${yamlStr(language)}`, `  stack: ${yamlStr(s.stack)}`];
   if (s.referenceRepo.trim()) {
     profile.push(`  reference_repo: ${yamlStr(s.referenceRepo.trim())}`);
     // Always point at the keychain entry (like agent/repo creds) — a private reference

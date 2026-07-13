@@ -6,6 +6,7 @@
   import Wizard from './Wizard.svelte';
   import { editNav } from './lib/nav.svelte';
   import {
+    buildConfigYaml,
     CORE_STATE_KEYS,
     loadDraft,
     OPTIONAL_STATE_KEYS,
@@ -24,7 +25,22 @@
   const isSaved = (service: string, account: string) => savedSecrets.has(`${service}:${account}`);
   const secret = (service: string, account: string) =>
     isSaved(service, account) ? `●●●● ${t('settings.saved')}` : t('settings.notSet');
-  const langLabel = (c: string) => (c === 'ko' ? '한국어' : c === 'en' ? 'English' : c);
+  const langLabel = (c: string) => (c === 'auto' ? t('field.language.auto') : c === 'ko' ? '한국어' : c === 'en' ? 'English' : c);
+
+  // The UI-language toggle. When the agent output language is "auto" (follow UI), flipping
+  // the UI language must also re-emit config so future runs write in the new language.
+  // (No core respawn — it applies to runs started afterward, as the note says.)
+  async function chooseUiLang(next: 'en' | 'ko') {
+    if (currentLang() === next) return;
+    setLang(next);
+    if (s && s.language === 'auto' && configured && window.corral) {
+      try {
+        await window.corral.config.write(buildConfigYaml(s, next));
+      } catch {
+        /* best-effort — the setup screen still reflects the new UI language */
+      }
+    }
+  }
   const PROVIDER_LABEL: Record<Provider, string> = { claude: 'Claude', gemini: 'Gemini', gpt: 'GPT' };
   // An account is "configured" once any credential (key or oauth) is stored for it.
   const acctState = (p: Provider) =>
@@ -177,8 +193,8 @@
     <div class="row">
       <span class="k">UI</span>
       <span class="lang">
-        <button class:on={currentLang() === 'en'} onclick={() => setLang('en')}>EN</button>
-        <button class:on={currentLang() === 'ko'} onclick={() => setLang('ko')}>한국어</button>
+        <button class:on={currentLang() === 'en'} onclick={() => chooseUiLang('en')}>EN</button>
+        <button class:on={currentLang() === 'ko'} onclick={() => chooseUiLang('ko')}>한국어</button>
       </span>
     </div>
     <p class="note">{t('settings.langNote')}</p>

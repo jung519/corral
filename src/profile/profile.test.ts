@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ProfileSchema } from '../config/schema.js';
 import { createTranslator } from './i18n.js';
-import { resolveProfile } from './index.js';
+import { languageName, resolveProfile } from './index.js';
 import { resolveStackProfile } from './stacks.js';
 
 describe('profile', () => {
@@ -21,6 +21,13 @@ describe('profile', () => {
 
   it('falls back to English for an unknown language', () => {
     expect(createTranslator('fr')('signal.approved')).toBe('APPROVED');
+  });
+
+  it('never emits a literal "auto" as an output-language name', () => {
+    // The renderer resolves the "follow UI" setting before writing config, but if "auto"
+    // ever reaches the core it must degrade to English, not "write in auto".
+    expect(languageName('auto')).toBe('English');
+    expect(languageName('ko')).toBe('Korean (한국어)');
   });
 
   it('throws on an unknown stack profile', () => {

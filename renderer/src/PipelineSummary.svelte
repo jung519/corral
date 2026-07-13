@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { t } from './lib/i18n.svelte';
+  import { currentLang, t } from './lib/i18n.svelte';
   import { editSection } from './lib/nav.svelte';
   import type { WizardState } from './lib/wizard';
 
@@ -40,7 +40,15 @@
     [
       { icon: s.backend === 'docker' ? '🐳' : '💻', text: s.backend === 'docker' ? 'Docker' : 'Local' },
       s.fallbacks.length ? { icon: '🔁', text: t('pipe.fallback').replace('{n}', String(s.fallbacks.length)) } : null,
-      { icon: '🌐', text: s.language === 'ko' ? '한국어' : 'English' },
+      {
+        icon: '🌐',
+        text:
+          s.language === 'auto'
+            ? `${currentLang() === 'ko' ? '한국어' : 'English'} · auto`
+            : s.language === 'ko'
+              ? '한국어'
+              : 'English',
+      },
       { icon: '⚙️', text: t('pipe.concurrent').replace('{n}', String(s.maxActive)) },
     ].filter((c): c is { icon: string; text: string } => c !== null),
   );

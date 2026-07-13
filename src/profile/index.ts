@@ -17,9 +17,13 @@ export interface ResolvedProfile {
   referenceRepo?: string;
 }
 
-/** Map a language code to a clear name the model honors; pass anything else through. */
+/** Map a language code to a clear name the model honors; pass anything else through.
+ *  The renderer resolves the "auto" (follow-UI) output-language setting to a concrete
+ *  code before writing config, so the core should never see "auto"; if it does (e.g. a
+ *  hand-edited yaml), fall back to English rather than telling the model to write in
+ *  a language literally named "auto". */
 export function languageName(code: string): string {
-  const names: Record<string, string> = { en: 'English', ko: 'Korean (한국어)' };
+  const names: Record<string, string> = { en: 'English', ko: 'Korean (한국어)', auto: 'English' };
   return names[code] ?? code;
 }
 

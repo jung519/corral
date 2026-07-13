@@ -1,6 +1,8 @@
 /** Renderer UI i18n. Default English; Korean available via the language toggle
- * (persisted to localStorage). Separate from `profile.language` in config, which
- * controls the AGENT's output language, not the UI. */
+ * (persisted to localStorage). Distinct from `profile.language` in config (the AGENT's
+ * output language), but linked by default: when output language is "auto" the config
+ * emits whatever this UI language is, so flipping the toggle also steers agent output
+ * until the user explicitly pins a language. */
 
 export type Lang = 'en' | 'ko';
 
@@ -173,6 +175,7 @@ const en: Dict = {
   'field.port': 'Control-plane port',
   'field.maxActive': 'Max active issues',
   'field.language': 'Agent output language',
+  'field.language.auto': 'Same as UI (auto)',
   'field.stack': 'Stack profile',
   'dash.count': 'issue(s)',
   'dash.import': '+ Import issues',
@@ -287,7 +290,7 @@ const en: Dict = {
   'settings.notSet': 'not set',
   'settings.none': 'none',
   'settings.summaryHint': 'Your current configuration. Secrets are masked — click Edit to change anything (you re-enter keys there).',
-  'settings.langNote': 'This switches the UI language. The agent output language is shown above (Agent output language).',
+  'settings.langNote': 'Switches the UI language. When the agent output language is set to “Same as UI (auto)”, changing this also changes what language plans and reviews are written in (applies to runs started afterward).',
   'logs.title': 'Logs',
   'logs.empty': 'No events yet.',
   'about.tagline': 'Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent.',
@@ -463,6 +466,7 @@ const ko: Dict = {
   'field.port': '컨트롤 플레인 포트',
   'field.maxActive': '동시 이슈 한도',
   'field.language': '에이전트 출력 언어',
+  'field.language.auto': 'UI와 동일 (자동)',
   'field.stack': '스택 프로파일',
   'dash.count': '개 이슈',
   'dash.import': '+ 이슈 가져오기',
@@ -577,7 +581,7 @@ const ko: Dict = {
   'settings.notSet': '미설정',
   'settings.none': '없음',
   'settings.summaryHint': '현재 설정값입니다. 민감 정보는 가려져 있어요 — 바꾸려면 수정을 누르세요(거기서 키를 다시 입력합니다).',
-  'settings.langNote': 'UI 언어를 전환합니다. 에이전트 출력 언어는 위(에이전트 출력 언어)에 표시됩니다.',
+  'settings.langNote': 'UI 언어를 전환합니다. 에이전트 출력 언어가 “UI와 동일 (자동)”이면, 이 값을 바꾸는 것만으로 계획·리뷰가 작성되는 언어도 함께 바뀝니다(이후 시작되는 작업부터 적용).',
   'logs.title': '로그',
   'logs.empty': '아직 이벤트가 없습니다.',
   'about.tagline': '오픈소스 에이전트 개발 오케스트레이터 — 트래커 → 저장소 → 사람 승인 → AI 코딩 에이전트.',
