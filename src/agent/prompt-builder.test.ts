@@ -43,6 +43,7 @@ describe('prompt-builder', () => {
     );
     expect(withDir).toContain('Direction (방향성');
     expect(withDir).toContain('guiding, not'); // framing guard present
+    expect(withDir).toContain('Issue-level override'); // issue/instructions outrank direction
     expect(withDir).toContain('안정 우선'); // the injected text
     const without = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
     expect(without).not.toContain('Direction (방향성');

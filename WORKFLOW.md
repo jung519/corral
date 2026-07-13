@@ -39,6 +39,11 @@ The operator has set a **direction** for how this work should be judged. Apply i
 - Do NOT enforce the direction like a rule or twist a better solution to fit it. Where the
   issue expresses no clear preference, lean the way the direction points — in approach,
   trade-offs, priorities, and how you order plan options.
+- **Issue-level override:** if the issue body — or a human instruction given for this issue
+  (e.g. a review change-request) — states a direction that conflicts with the direction
+  below, follow the issue/instruction for THIS issue; the direction below is only the
+  standing default. Precedence, most specific first: **issue + its human instructions >
+  project direction > global direction.**
 
 {{ direction }}
 {% endif %}
@@ -139,7 +144,9 @@ and SUGGESTION fixes from `.corral/pending_review.md`, commit (in the relevant r
 and stop. (NITs are advisory — do not block on them.)
 
 ### E — Review feedback (the prompt starts with a feedback marker while a review is pending)
-This is the human's instruction after reading the review. Usually one of:
+This is the human's instruction after reading the review.{% if direction %} It takes
+precedence over the standing Direction for this issue — if the two conflict, follow the
+human's instruction.{% endif %} Usually one of:
 - **A code-change request** ("fix X") → edit and commit the code on the relevant repo's work
   branch (English commit message). Do NOT recompute base commits. **Do NOT push.**
 - **A re-review request / opinion** ("look again at Y", "this finding is a false positive") →

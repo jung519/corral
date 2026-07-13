@@ -89,7 +89,9 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
 2. ✅ **전역 Direction UI — 완료**: 환경설정(Preferences)에 자유텍스트 textarea + 스타터 템플릿
    버튼 + §14 설명 문구(부제·짧은 설명·"왜 필요"·"skills로는 왜 안 되나" 펼침·대비 한 줄) →
    Phase 0 브리지로 userData `direction.md`에 저장. (검증 플래그는 Phase 5.)
-3. **이슈-레벨 오버라이드**(결정 D): kickoff/review 프롬프트 한 줄로 이슈 본문/검토 지시 우선.
+3. ✅ **이슈-레벨 오버라이드 — 완료**(결정 D): WORKFLOW.md Direction 블록에 우선순위 명시
+   (이슈+그 이슈의 인간 지시 > 프로젝트 Direction > 전역 Direction), 리뷰 피드백 섹션에도
+   "인간 지시가 Direction보다 우선" 한 줄. 별도 UI/필드 없음.
 4. **리뷰 보정**(결정 C): reviewRoundPrompt+consolidateReview에 Direction "심각도 보정" 프레이밍.
 5. **방향성 검증**(결정 G, §15): verified 플래그(전역/프로젝트 독립) + 이슈 시작 게이트
    (값 있고 false면 검사, 실패 시 차단) + 등록 시 무맥락 검사(API) / 이연·동의(CLI).
