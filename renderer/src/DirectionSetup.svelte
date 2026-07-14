@@ -86,32 +86,33 @@
   {#if !hasBridge}
     <p class="hint warn">{t('direction.browserNote')}</p>
   {:else}
+    <div class="consent">
+      <label class="ctoggle">
+        <input type="checkbox" checked={dirConsent} onchange={(e) => toggleConsent(e.currentTarget.checked)} />
+        <strong>{t('direction.consent')}</strong>
+      </label>
+      <details class="why">
+        <summary>{t('direction.c.summary')}</summary>
+        <ul class="cwhy">
+          <li><b>{t('direction.c.whyK')}</b> {t('direction.c.whyV')}</li>
+          <li><b>{t('direction.c.whenK')}</b> {t('direction.c.whenV')}</li>
+          <li><b>{t('direction.c.costK')}</b> {t('direction.c.costV')}</li>
+          <li><b>{t('direction.c.offK')}</b> {t('direction.c.offV')}</li>
+        </ul>
+      </details>
+      {#if !dirConsent}<p class="hint warn">{t('direction.notApplied')}</p>{/if}
+    </div>
+
     <textarea rows="12" bind:value={direction} placeholder={t('direction.placeholder')} spellcheck="false"></textarea>
     <div class="actions">
       {#if !direction.trim()}
         <Button onclick={insertTemplate}>{t('direction.insertTemplate')}</Button>
       {/if}
       <span class="spacer"></span>
-      {#if !dirDirty && !dirSaving}<span class="savedTag">{t('direction.saved')}</span>{/if}
-      <Button class="primary" onclick={saveDirection} disabled={dirSaving || !dirDirty}>
+      {#if savedDirection.trim() && !dirDirty && !dirSaving}<span class="savedTag">{t('direction.saved')}</span>{/if}
+      <Button class="primary" onclick={saveDirection} disabled={dirSaving || !dirDirty || !dirConsent}>
         {dirSaving ? t('direction.saving') : t('direction.save')}
       </Button>
-    </div>
-
-    <div class="consent">
-      <label class="ctoggle">
-        <input type="checkbox" checked={dirConsent} onchange={(e) => toggleConsent(e.currentTarget.checked)} />
-        <strong>{t('direction.consent')}</strong>
-      </label>
-      <ul class="cwhy">
-        <li><b>{t('direction.c.whyK')}</b> {t('direction.c.whyV')}</li>
-        <li><b>{t('direction.c.whenK')}</b> {t('direction.c.whenV')}</li>
-        <li><b>{t('direction.c.costK')}</b> {t('direction.c.costV')}</li>
-        <li><b>{t('direction.c.offK')}</b> {t('direction.c.offV')}</li>
-      </ul>
-      {#if direction.trim() && !dirConsent}
-        <p class="hint warn">{t('direction.notApplied')}</p>
-      {/if}
     </div>
   {/if}
 
@@ -201,9 +202,7 @@
     color: var(--green, #3fb950);
   }
   .consent {
-    margin-top: 14px;
-    padding-top: 12px;
-    border-top: 1px solid var(--border);
+    margin: 4px 0 14px;
   }
   .ctoggle {
     display: flex;
@@ -211,6 +210,7 @@
     gap: 8px;
     cursor: pointer;
     font-size: 13px;
+    margin-bottom: 6px;
   }
   .ctoggle input {
     width: 16px;
