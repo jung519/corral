@@ -43,7 +43,7 @@ The operator has set a **direction** for how this work should be judged. Apply i
   (e.g. a review change-request) — states a direction that conflicts with the direction
   below, follow the issue/instruction for THIS issue; the direction below is only the
   standing default. Precedence, most specific first: **issue + its human instructions >
-  project direction > global direction.**
+  the direction below.**
 
 {{ direction }}
 {% endif %}

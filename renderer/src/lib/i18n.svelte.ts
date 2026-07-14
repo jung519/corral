@@ -323,13 +323,6 @@ const en: Dict = {
   'direction.c.offK': 'If off:',
   'direction.c.offV': 'the Direction is not applied to any run.',
   'direction.notApplied': 'Until you allow the check, the Direction is not applied to any run.',
-  'direction.project.title': 'Per-project Direction',
-  'direction.project.desc':
-    'For a direction specific to one repo, commit it to that repo at `.corral/DIRECTION.md`. It is shared with your team via git and, at issue start, merged with this global Direction and validated the same way.',
-  'direction.project.copy': 'Copy repo template',
-  'direction.project.copied': 'Copied',
-  'direction.project.template':
-    '# Direction for this repository\n\n## Purpose\n\n## Priorities\n- e.g. Stability > feature speed\n\n## Decision principles\n- e.g. A new dependency needs justification\n\n## Don’t\n- e.g. Don’t expand scope beyond the issue\n',
   'logs.title': 'Logs',
   'logs.empty': 'No events yet.',
   'about.tagline': 'Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent.',
@@ -653,13 +646,6 @@ const ko: Dict = {
   'direction.c.offK': '끄면:',
   'direction.c.offV': '방향성이 어떤 작업에도 적용되지 않습니다.',
   'direction.notApplied': '검사를 허용하기 전까지 방향성은 어떤 작업에도 적용되지 않습니다.',
-  'direction.project.title': '프로젝트별 방향성',
-  'direction.project.desc':
-    '특정 레포만의 방향은 그 레포의 `.corral/DIRECTION.md`에 커밋하세요. git으로 팀과 공유되고, 이슈 시작 시 이 전역 방향성과 병합·검증됩니다.',
-  'direction.project.copy': '레포 템플릿 복사',
-  'direction.project.copied': '복사됨',
-  'direction.project.template':
-    '# 이 레포의 방향성\n\n## 목적\n\n## 우선순위\n- 예: 안정 > 기능 속도\n\n## 의사결정 원칙\n- 예: 새 의존성은 정당화 필요\n\n## 하지 말 것\n- 예: 이슈 범위를 넘어 확장하지 말 것\n',
   'logs.title': '로그',
   'logs.empty': '아직 이벤트가 없습니다.',
   'about.tagline': '오픈소스 에이전트 개발 오케스트레이터 — 트래커 → 저장소 → 사람 승인 → AI 코딩 에이전트.',

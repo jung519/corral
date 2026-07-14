@@ -33,15 +33,7 @@ import {
 } from './core/issue-history.js';
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
-import {
-  type DirectionCheckStore,
-  type DirectionScope,
-  type DirectionStore,
-  mergeDirection,
-  parseDirectionVerdict,
-  PROJECT_DIRECTION_FILE,
-  type ProjectDirection,
-} from './core/direction.js';
+import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } from './core/direction.js';
 import { SCRATCH } from './core/paths.js';
 import {
   type AgentAdapter,
@@ -615,32 +607,12 @@ export class Orchestrator {
     return this.referenceCloneUrl ? REFERENCE_DIR : undefined;
   }
 
-  /** Merge the global Direction (userData) with each repo's `.corral/DIRECTION.md` (read
-   * from the cloned workspace) into the workflow's Direction block. **Only VERIFIED scopes
-   * are included** (§15) — unverified text is never injected. Empty → '' (no block). Read
+  /** The global Direction text to inject — only if it's VERIFIED (§15); unverified text is
+   * never injected. '' → the workflow's `{% if direction %}` block renders nothing. Read
    * fresh per dispatch so edits apply without a core restart. */
-  private async buildDirection(handle: WorkspaceHandle): Promise<string> {
-    const check = this.directionCheck;
-    const globalText = this.directionStore?.read() ?? '';
-    const global = check && check.isVerified('global', globalText) ? globalText : '';
-    const projects: ProjectDirection[] = [];
-    for (const r of this.router.all()) {
-      const text = await this.workspace.io.readFile(handle, `${r.key}/${PROJECT_DIRECTION_FILE}`).catch(() => null);
-      if (text && check?.isVerified(`project:${r.key}`, text)) projects.push({ repo: r.key, text });
-    }
-    return mergeDirection(global, projects);
-  }
-
-  /** One Direction scope present in this issue's workspace (non-empty text). */
-  private async directionScopes(handle: WorkspaceHandle): Promise<Array<{ scope: DirectionScope; label: string; text: string }>> {
-    const out: Array<{ scope: DirectionScope; label: string; text: string }> = [];
-    const g = (this.directionStore?.read() ?? '').trim();
-    if (g) out.push({ scope: 'global', label: '전역', text: g });
-    for (const r of this.router.all()) {
-      const t = (await this.workspace.io.readFile(handle, `${r.key}/${PROJECT_DIRECTION_FILE}`).catch(() => null))?.trim();
-      if (t) out.push({ scope: `project:${r.key}`, label: `프로젝트 ${r.key}`, text: t });
-    }
-    return out;
+  private buildDirection(): string {
+    const text = (this.directionStore?.read() ?? '').trim();
+    return text && this.directionCheck?.isVerified('global', text) ? text : '';
   }
 
   /**
@@ -652,58 +624,51 @@ export class Orchestrator {
   private async runDirectionCheck(rt: IssueRuntime, issue: Issue, handle: WorkspaceHandle): Promise<boolean> {
     const check = this.directionCheck;
     if (!check) return true;
-    const scopes = await this.directionScopes(handle);
-    const unverified = scopes.filter((s) => !check.isVerified(s.scope, s.text));
-    if (!unverified.length) return true;
+    const text = (this.directionStore?.read() ?? '').trim();
+    if (!text || check.isVerified('global', text)) return true;
 
     if (!check.getConsent()) {
-      // No consent → do NOT spend AI. Unverified scopes are skipped (buildDirection filters
-      // them out); tell the user how to enable the check.
-      const names = unverified.map((u) => u.label).join(', ');
+      // No consent → do NOT spend AI. The unverified Direction is skipped (buildDirection
+      // filters it out); tell the user how to enable the check.
       bus.emitEvent({
         identifier: rt.identifier,
         kind: 'activity',
         phase: rt.phase,
-        label: `💬 방향성(${names})이 미검토라 이번 작업에 적용되지 않습니다 — 환경설정에서 AI 검토를 허용하세요.`,
+        label: `💬 방향성이 미검토라 이번 작업에 적용되지 않습니다 — 설정에서 AI 검토를 허용하세요.`,
       });
       return true;
     }
 
-    for (const s of unverified) {
-      const verdict = await this.validateDirectionText(handle, issue, s.label, s.text);
-      if (verdict.ran) {
-        bus.emitEvent({
-          identifier: rt.identifier,
-          kind: 'activity',
-          phase: rt.phase,
-          label: `💬 방향성 검토(${s.label}) 완료 — $${verdict.cost.toFixed(4)} 사용`,
-        });
-      }
-      if (!verdict.ran) {
-        // Infra failure (agent error / no parseable verdict): don't block, don't verify —
-        // this scope just isn't injected this run and is re-checked next start.
-        bus.emitEvent({
-          identifier: rt.identifier,
-          kind: 'activity',
-          phase: rt.phase,
-          label: `💬 방향성 검토(${s.label})를 완료하지 못했습니다 — 이번 작업엔 미적용, 다음 시작 시 재시도.`,
-        });
-        continue;
-      }
-      if (verdict.approved) {
-        check.markVerified(s.scope, s.text);
-        continue;
-      }
-      // Rejected → block the issue (fix the direction and restart).
-      const msg = `방향성(${s.label})이 검토를 통과하지 못했습니다: ${verdict.reason} — 방향성을 비우거나 수정한 뒤 다시 시작하세요.`;
-      rt.phase = 'auth_error_waiting';
-      rt.stuck = true;
-      this.store.upsert(rt);
-      bus.emitEvent({ identifier: rt.identifier, kind: 'error', phase: rt.phase, label: `❌ ${msg}` });
-      await this.channel.notify(rt.identifier, `❌ ${msg}`).catch(() => {});
-      return false;
+    const verdict = await this.validateDirectionText(handle, issue, '방향성', text);
+    if (!verdict.ran) {
+      // Infra failure (agent error / no parseable verdict): don't block, don't verify —
+      // the Direction just isn't injected this run and is re-checked next start.
+      bus.emitEvent({
+        identifier: rt.identifier,
+        kind: 'activity',
+        phase: rt.phase,
+        label: `💬 방향성 검토를 완료하지 못했습니다 — 이번 작업엔 미적용, 다음 시작 시 재시도.`,
+      });
+      return true;
     }
-    return true;
+    bus.emitEvent({
+      identifier: rt.identifier,
+      kind: 'activity',
+      phase: rt.phase,
+      label: `💬 방향성 검토 완료 — $${verdict.cost.toFixed(4)} 사용`,
+    });
+    if (verdict.approved) {
+      check.markVerified('global', text);
+      return true;
+    }
+    // Rejected → block the issue (fix the direction and restart).
+    const msg = `방향성이 검토를 통과하지 못했습니다: ${verdict.reason} — 방향성을 비우거나 수정한 뒤 다시 시작하세요.`;
+    rt.phase = 'auth_error_waiting';
+    rt.stuck = true;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'error', phase: rt.phase, label: `❌ ${msg}` });
+    await this.channel.notify(rt.identifier, `❌ ${msg}`).catch(() => {});
+    return false;
   }
 
   /** Run a single AI turn that judges one Direction text and writes a JSON verdict. */
@@ -763,7 +728,7 @@ export class Orchestrator {
       this.referencePath(),
       (r) => this.cost.add(rt.identifier, r),
       focus,
-      await this.buildDirection(handle),
+      this.buildDirection(),
     );
     // Preserve the draft before the consolidate dispatch's wipeOutputs clears it.
     await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
@@ -913,7 +878,7 @@ export class Orchestrator {
           branch: r.branchNameFor(issue),
         })),
         reference_path: this.referencePath(),
-        direction: await this.buildDirection(handle),
+        direction: this.buildDirection(),
       });
       await this.wipeOutputs(handle);
       // Run-time backend guard: a provider assigned to this stage that can't execute under
@@ -1248,7 +1213,7 @@ export class Orchestrator {
         (r) => this.cost.add(rt.identifier, r),
         verifyCommands,
         diffStats,
-        await this.buildDirection(handle),
+        this.buildDirection(),
       );
       await this.uploadDiff(rt, issue, changed);
       const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review');

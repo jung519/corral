@@ -178,6 +178,8 @@
   },
   "active": "68f11f63123e491e",
   "lastOpenFiles": [
+    "renderer/dist/assets/index-ABCP5lMU.js",
+    "renderer/dist/assets/index-BsRgT8hY.css",
     "renderer/dist/assets/index-Cw4C0MSk.js",
     "renderer/dist/assets/index-C66Mnixm.css",
     "renderer/dist/assets/index-CqqtQHdM.js",
@@ -188,8 +190,6 @@
     "renderer/src/DirectionSetup.svelte",
     "renderer/dist/assets/index-BBiGmipZ.js",
     "renderer/dist/assets/index-RYFFeYUL.js",
-    "renderer/dist/assets/index-CZKULtlW.css",
-    "desktop/dist/direction-store.js",
     "docs/charter-injection-plan.md",
     "docs/direction-injection-plan.md",
     "docs/multi-project-monetization-plan.md"
