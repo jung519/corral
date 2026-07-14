@@ -178,6 +178,9 @@
   },
   "active": "68f11f63123e491e",
   "lastOpenFiles": [
+    "renderer/dist/assets/index-CqqtQHdM.js",
+    "renderer/dist/assets/index-CbE8UgrL.css",
+    "docs/direction-eval.md",
     "renderer/dist/assets/index-CgSB_1lN.js",
     "renderer/dist/assets/index-6n_9UDxr.css",
     "renderer/src/DirectionSetup.svelte",
@@ -187,8 +190,6 @@
     "desktop/dist/direction-store.js",
     "dist/core/direction.d.ts",
     "dist/core/direction.js",
-    "dist/core/direction.js.map",
-    "src/core/direction.test.ts",
     "docs/charter-injection-plan.md",
     "docs/direction-injection-plan.md",
     "docs/multi-project-monetization-plan.md"

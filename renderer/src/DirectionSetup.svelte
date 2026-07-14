@@ -53,6 +53,19 @@
     if (direction.trim()) return;
     direction = t('direction.template');
   }
+
+  // Per-project Direction lives in the repo (`.corral/DIRECTION.md`), edited by the team in
+  // git — there is no UI for it here by design. We just explain it + hand over a template.
+  let copied = $state(false);
+  async function copyProjectTemplate() {
+    try {
+      await navigator.clipboard.writeText(t('direction.project.template'));
+      copied = true;
+      setTimeout(() => (copied = false), 1500);
+    } catch {
+      /* clipboard blocked — no-op */
+    }
+  }
 </script>
 
 <div class="card">
@@ -101,6 +114,14 @@
       {/if}
     </div>
   {/if}
+
+  <div class="project">
+    <h3>{t('direction.project.title')}</h3>
+    <p class="desc">{t('direction.project.desc')}</p>
+    <Button onclick={copyProjectTemplate}>
+      {copied ? t('direction.project.copied') : t('direction.project.copy')}
+    </Button>
+  </div>
 </div>
 
 <style>
@@ -206,5 +227,15 @@
   .cwhy b {
     color: var(--text);
     font-weight: 500;
+  }
+  .project {
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .project h3 {
+    font-size: 13px;
+    margin: 0 0 4px;
+    color: var(--text);
   }
 </style>
