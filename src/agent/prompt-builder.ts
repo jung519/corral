@@ -70,6 +70,24 @@ export function turnPrompt(message: string): string {
   return message;
 }
 
+/**
+ * Safety check for a user-written "Direction" text (§15). The agent judges ONLY the text
+ * — not any code — and writes a strict JSON verdict. REJECT covers illicit/abusive intent
+ * and things an AI coding agent cannot actually do; APPROVE covers legitimate direction.
+ */
+export function directionCheckPrompt(label: string, text: string, outPath: string, languageName = 'English'): string {
+  return [
+    `You are a safety reviewer. A user wrote the "direction" text below to steer an AI coding agent.`,
+    `Judge ONLY this text — do NOT inspect any repository or code. Decide if it is safe and feasible to follow.`,
+    `REJECT (approved=false) if it asks to: clone/replicate a specific website or product wholesale; scrape, abuse, or circumvent a commercial or unauthorized service; do anything illegal, deceptive, or against a service's terms; or something an AI coding agent genuinely cannot do (out of scope / impossible).`,
+    `APPROVE (approved=true) if it is a legitimate direction about purpose, priorities, trade-offs, principles, or style.`,
+    `When unsure whether it is merely opinionated vs actually harmful/impossible, APPROVE — only reject clear cases.`,
+    `Write ONLY a JSON object to ${outPath} and nothing else: {"approved": true|false, "reason": "<one short sentence in ${languageName}>"}.`,
+    `--- DIRECTION (${label}) ---`,
+    text,
+  ].join('\n');
+}
+
 /** Language-independent operational instructions sent to the agent. */
 export const PROMPTS = {
   consolidateReview: `Please consolidate the review rounds into ${SCRATCH.pendingReview}.`,

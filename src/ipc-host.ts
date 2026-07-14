@@ -13,7 +13,7 @@
  * desktop writes config/secrets via its own bridge (keychain) and respawns this child.
  */
 import type { WebChannel } from './channel/web.js';
-import type { DirectionStore } from './core/direction.js';
+import type { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { bus } from './core/events.js';
 import { logger } from './core/logger.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -30,6 +30,8 @@ export interface IpcHostDeps {
   orchestrator: () => Orchestrator | undefined;
   /** Global Direction reader — available even in setup mode (plain file read). */
   directionStore: DirectionStore;
+  /** Direction validation state — consent flag read/written from the settings UI. */
+  directionCheck: DirectionCheckStore;
 }
 
 const NOT_CONFIGURED = { ok: false, message: 'Corral is not configured yet — finish setup first.' };
@@ -74,6 +76,11 @@ async function dispatch(method: string, a: Record<string, unknown>, deps: IpcHos
       // What the core actually reads from the injected path — lets the renderer confirm
       // the global Direction reached the core (Phase 0). Injection is wired in Phase 1.
       return { text: deps.directionStore.read(), path: deps.directionStore.path };
+    case 'directionConsentGet':
+      return { consent: deps.directionCheck.getConsent() };
+    case 'directionConsentSet':
+      deps.directionCheck.setConsent(a.value === true);
+      return { ok: true, consent: deps.directionCheck.getConsent() };
     case 'state':
       return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
     case 'candidates':

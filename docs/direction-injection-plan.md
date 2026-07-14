@@ -97,8 +97,12 @@ Direction에 담는 것: ① 회사/제품 목적, ② 방향·우선순위(예:
    가이드를 받으므로 WORKFLOW.md "Consolidate review"에 프레이밍. **가드: 심각도는 주관/우선순위
    findings만 보정, 정확성·보안·데이터손실·동작파손은 무조건 BLOCKER 유지, 없는 findings 만들지 말 것.**
    (미해결 갭: plan-critique도 `workflow:''`라 direction 미전달 — Phase 1 후속으로 별도 처리.)
-5. **방향성 검증**(결정 G, §15): verified 플래그(전역/프로젝트 독립) + 이슈 시작 게이트
-   (값 있고 false면 검사, 실패 시 차단) + 등록 시 무맥락 검사(API) / 이연·동의(CLI).
+5. ✅ **방향성 검증 — 완료(체크포인트2 + 동의)**(결정 G, §15): `DirectionCheckStore`(consent +
+   스코프별 verified 해시, 코어 단일 소유). 이슈 시작(dispatchPlanning) 게이트: 값 있고 미검증
+   스코프를 AI 턴으로 검사 → 승인=해시 기록·주입, 거부=이슈 차단, 인프라오류=미적용·재시도.
+   **동의=1회 사전 동의**(환경설정 체크박스, 비용 고지) — 미동의면 검사 안 하고 미주입(비용 0).
+   검사 후 실제 비용을 타임라인 이벤트로 표시(+총비용 집계). buildDirection은 verified 스코프만
+   주입. **등록 시점(체크포인트1) 검사는 이연.**
 6. **옵션 방향 축**(선택): plan_options 생성에 보수/균형/적극 축.
 7. **프로젝트 Direction 문서/UI + eval**: `.corral/DIRECTION.md` 안내, Direction on/off 비교.
 

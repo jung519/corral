@@ -14,7 +14,7 @@ import { loadConfig } from './config/loader.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import { FileCredentialStore } from './credentials/file-store.js';
 import { LayeredCredentialStore } from './credentials/layered.js';
-import { DirectionStore } from './core/direction.js';
+import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { logger } from './core/logger.js';
 import { startIpcHost } from './ipc-host.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -28,6 +28,8 @@ const channel = new WebChannel();
 // Global Direction lives next to corral.yaml in userData (cwd on desktop). Read-only
 // here for now — the desktop's direction:write bridge owns writes (Phase 0).
 const directionStore = new DirectionStore();
+// Direction validation state (consent + verified hashes) — shared by the gate + IPC.
+const directionCheck = new DirectionCheckStore(resolve(stateDir));
 
 let orchestrator: Orchestrator | undefined;
 
@@ -35,7 +37,7 @@ async function main(): Promise<void> {
   if (existsSync(configPath)) {
     try {
       const config = await loadConfig(configPath);
-      const app = await bootstrap(config, { credentials, channel, directionStore });
+      const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck });
       orchestrator = app.orchestrator;
       await channel.start();
       await orchestrator.start();
@@ -51,7 +53,7 @@ async function main(): Promise<void> {
     logger.info('corral starting in setup mode (ipc)');
   }
 
-  startIpcHost({ channel, orchestrator: () => orchestrator, directionStore });
+  startIpcHost({ channel, orchestrator: () => orchestrator, directionStore, directionCheck });
 }
 
 main().catch((err: unknown) => {

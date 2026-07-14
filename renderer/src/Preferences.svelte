@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import * as api from './lib/api';
   import Button from './lib/Button.svelte';
   import { t } from './lib/i18n.svelte';
   import { prefs, setPref } from './lib/prefs.svelte';
@@ -7,10 +8,12 @@
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
   // Global Direction (방향성) — free text persisted to userData/direction.md via the
-  // Phase-0 bridge. Loaded on mount; saved explicitly. (Validation is Phase 5.)
+  // Phase-0 bridge. Loaded on mount; saved explicitly. `dirConsent` is the one-time
+  // consent to spend AI on validating the text at issue start (§15).
   let direction = $state('');
   let savedDirection = $state('');
   let dirSaving = $state(false);
+  let dirConsent = $state(false);
   const dirDirty = $derived(direction !== savedDirection);
 
   onMount(async () => {
@@ -20,7 +23,20 @@
     } catch {
       /* leave empty — the section still renders */
     }
+    try {
+      dirConsent = (await api.getDirectionConsent()).consent;
+    } catch {
+      /* core may be unreachable — leave consent off */
+    }
   });
+
+  async function toggleConsent(value: boolean) {
+    try {
+      dirConsent = (await api.setDirectionConsent(value)).consent;
+    } catch {
+      /* keep the previous state on failure */
+    }
+  }
 
   async function saveDirection() {
     if (!hasBridge || dirSaving || !dirDirty) return;
@@ -98,6 +114,17 @@
           {dirSaving ? t('direction.saving') : t('direction.save')}
         </Button>
       </div>
+
+      <label class="row consent">
+        <span>
+          <strong>{t('direction.consent')}</strong>
+          <span class="sub">{t('direction.consentHint')}</span>
+        </span>
+        <input type="checkbox" checked={dirConsent} onchange={(e) => toggleConsent(e.currentTarget.checked)} />
+      </label>
+      {#if direction.trim() && !dirConsent}
+        <p class="hint warn">{t('direction.notApplied')}</p>
+      {/if}
     {/if}
   </section>
 </div>

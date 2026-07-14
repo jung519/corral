@@ -11,8 +11,10 @@
  * Reads hit disk every call (no cache) so a desktop edit is picked up without respawning
  * the core. Empty/missing file → empty string (= no Direction, nothing to inject).
  */
+import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
+import { DEFAULT_STATE_DIR } from './issue-state.js';
 
 export const DEFAULT_DIRECTION_PATH = process.env.CORRAL_DIRECTION_PATH ?? 'direction.md';
 
@@ -70,4 +72,85 @@ export function mergeDirection(global: string, projects: ProjectDirection[]): st
     if (t) blocks.push(`### Project direction — ${p.repo}\n${t}`);
   }
   return blocks.join('\n\n');
+}
+
+/** Scope key for the verification store: `global` or `project:<repoKey>`. */
+export type DirectionScope = 'global' | `project:${string}`;
+
+/** Content hash a Direction scope is "verified" against (trimmed, so whitespace-only
+ *  edits don't force re-checks). Editing the text changes the hash → auto-unverified. */
+export function directionHash(text: string): string {
+  return createHash('sha256').update(text.trim()).digest('hex');
+}
+
+interface CheckState {
+  /** One-time user consent to spend AI on validating Direction text (see §15.6). */
+  consent: boolean;
+  /** scope key → hash of the text that passed validation. */
+  verified: Record<string, string>;
+}
+
+/**
+ * Persists Direction-validation state (§15): the one-time consent flag and, per scope,
+ * the hash of the text an AI check approved. The core is the SOLE owner/writer so there
+ * is no read-modify-write race with the desktop. Verified is hash-based, so any edit to
+ * the text (UI save or a committed `.corral/DIRECTION.md` change) auto-invalidates it.
+ */
+export class DirectionCheckStore {
+  private readonly file: string;
+
+  constructor(stateDir: string = DEFAULT_STATE_DIR) {
+    this.file = resolve(stateDir, 'direction-check.json');
+  }
+
+  private load(): CheckState {
+    try {
+      const s = JSON.parse(readFileSync(this.file, 'utf8')) as Partial<CheckState>;
+      return { consent: s.consent === true, verified: s.verified ?? {} };
+    } catch {
+      return { consent: false, verified: {} };
+    }
+  }
+
+  private save(state: CheckState): void {
+    mkdirSync(dirname(this.file), { recursive: true });
+    writeFileSync(this.file, JSON.stringify(state, null, 2), 'utf8');
+  }
+
+  getConsent(): boolean {
+    return this.load().consent;
+  }
+
+  setConsent(value: boolean): void {
+    const state = this.load();
+    state.consent = value;
+    this.save(state);
+  }
+
+  /** True when this exact text (by hash) has passed validation for this scope. */
+  isVerified(scope: DirectionScope, text: string): boolean {
+    return this.load().verified[scope] === directionHash(text);
+  }
+
+  markVerified(scope: DirectionScope, text: string): void {
+    const state = this.load();
+    state.verified[scope] = directionHash(text);
+    this.save(state);
+  }
+}
+
+/** Parse the Direction safety-check verdict the agent writes (§15). Tolerant of the agent
+ *  wrapping the JSON in prose/fences — extracts the first `{…}`. null if absent/unparseable
+ *  (treated as "couldn't validate", not a rejection). */
+export function parseDirectionVerdict(raw: string | null): { approved: boolean; reason: string } | null {
+  if (!raw) return null;
+  const match = raw.match(/\{[\s\S]*\}/);
+  if (!match) return null;
+  try {
+    const obj = JSON.parse(match[0]) as { approved?: unknown; reason?: unknown };
+    if (typeof obj.approved !== 'boolean') return null;
+    return { approved: obj.approved, reason: typeof obj.reason === 'string' ? obj.reason : '' };
+  } catch {
+    return null;
+  }
 }

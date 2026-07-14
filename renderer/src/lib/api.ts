@@ -60,6 +60,11 @@ export const ask = (
   question: string,
 ): Promise<{ ok: boolean; answer?: string; answerHtml?: string; message?: string }> => call('ask', { identifier, question });
 
+/** One-time consent to spend AI on validating Direction text (§15). Owned by the core. */
+export const getDirectionConsent = (): Promise<{ consent: boolean }> => call('directionConsentGet');
+export const setDirectionConsent = (value: boolean): Promise<{ ok: boolean; consent: boolean }> =>
+  call('directionConsentSet', { value });
+
 /** Subscribe to the live event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {
   try {

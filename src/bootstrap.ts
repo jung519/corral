@@ -10,7 +10,7 @@ import { loadConfig } from './config/loader.js';
 import type { AgentRoutingConfig, Config } from './config/schema.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import type { CredentialRef, CredentialStore } from './credentials/types.js';
-import { DirectionStore } from './core/direction.js';
+import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import type {
   AgentAdapter,
   ChannelAdapter,
@@ -44,6 +44,8 @@ export interface BootstrapDeps {
   channel?: ChannelAdapter;
   /** Global Direction reader (shared with the IPC host). Defaults to a fresh store. */
   directionStore?: DirectionStore;
+  /** Direction validation state (consent + verified hashes), shared with the IPC host. */
+  directionCheck?: DirectionCheckStore;
 }
 
 export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promise<App> {
@@ -110,6 +112,7 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     profile,
     referenceCloneUrl,
     deps.directionStore ?? new DirectionStore(),
+    deps.directionCheck ?? new DirectionCheckStore(),
   );
 
   return { config, profile, tracker, repositories: repositoryList, repositoryRouter, agent, workspace, channel, orchestrator };

@@ -17,7 +17,7 @@
  * real channel (the dashboard lands in S3).
  */
 import { processAttachments } from './attachments.js';
-import { buildSignals, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
+import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
 import { TimingAgent } from './agent/timing-agent.js';
 import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
@@ -33,7 +33,15 @@ import {
 } from './core/issue-history.js';
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
-import { type DirectionStore, mergeDirection, PROJECT_DIRECTION_FILE, type ProjectDirection } from './core/direction.js';
+import {
+  type DirectionCheckStore,
+  type DirectionScope,
+  type DirectionStore,
+  mergeDirection,
+  parseDirectionVerdict,
+  PROJECT_DIRECTION_FILE,
+  type ProjectDirection,
+} from './core/direction.js';
 import { SCRATCH } from './core/paths.js';
 import {
   type AgentAdapter,
@@ -89,6 +97,8 @@ export class Orchestrator {
     private readonly referenceCloneUrl?: string,
     /** Global Direction reader — merged with per-project `.corral/DIRECTION.md` on dispatch. */
     private readonly directionStore?: DirectionStore,
+    /** Direction validation state (consent + per-scope verified hashes). */
+    private readonly directionCheck?: DirectionCheckStore,
   ) {
     // Wrap the agent once so every turn — planning, critique, review — is timed into
     // the issue's "AI working" total (recorded in the history entry on completion).
@@ -606,20 +616,126 @@ export class Orchestrator {
   }
 
   /** Merge the global Direction (userData) with each repo's `.corral/DIRECTION.md` (read
-   * from the cloned workspace) into the workflow's Direction block. Empty → '' (no block).
-   * Read fresh per dispatch so edits apply without a core restart. */
+   * from the cloned workspace) into the workflow's Direction block. **Only VERIFIED scopes
+   * are included** (§15) — unverified text is never injected. Empty → '' (no block). Read
+   * fresh per dispatch so edits apply without a core restart. */
   private async buildDirection(handle: WorkspaceHandle): Promise<string> {
-    const global = this.directionStore?.read() ?? '';
+    const check = this.directionCheck;
+    const globalText = this.directionStore?.read() ?? '';
+    const global = check && check.isVerified('global', globalText) ? globalText : '';
     const projects: ProjectDirection[] = [];
     for (const r of this.router.all()) {
       const text = await this.workspace.io.readFile(handle, `${r.key}/${PROJECT_DIRECTION_FILE}`).catch(() => null);
-      if (text) projects.push({ repo: r.key, text });
+      if (text && check?.isVerified(`project:${r.key}`, text)) projects.push({ repo: r.key, text });
     }
     return mergeDirection(global, projects);
   }
 
+  /** One Direction scope present in this issue's workspace (non-empty text). */
+  private async directionScopes(handle: WorkspaceHandle): Promise<Array<{ scope: DirectionScope; label: string; text: string }>> {
+    const out: Array<{ scope: DirectionScope; label: string; text: string }> = [];
+    const g = (this.directionStore?.read() ?? '').trim();
+    if (g) out.push({ scope: 'global', label: '전역', text: g });
+    for (const r of this.router.all()) {
+      const t = (await this.workspace.io.readFile(handle, `${r.key}/${PROJECT_DIRECTION_FILE}`).catch(() => null))?.trim();
+      if (t) out.push({ scope: `project:${r.key}`, label: `프로젝트 ${r.key}`, text: t });
+    }
+    return out;
+  }
+
+  /**
+   * Direction validation gate (§15, checkpoint 2). Runs at planning start: any non-empty
+   * Direction text that isn't already verified is checked by an AI turn. Rejected text
+   * BLOCKS the issue; approved text is recorded (hash) so it's injected. Without user
+   * consent nothing is spent — unverified scopes simply won't be injected. Returns false
+   * if the issue was blocked (caller must stop). */
+  private async runDirectionCheck(rt: IssueRuntime, issue: Issue, handle: WorkspaceHandle): Promise<boolean> {
+    const check = this.directionCheck;
+    if (!check) return true;
+    const scopes = await this.directionScopes(handle);
+    const unverified = scopes.filter((s) => !check.isVerified(s.scope, s.text));
+    if (!unverified.length) return true;
+
+    if (!check.getConsent()) {
+      // No consent → do NOT spend AI. Unverified scopes are skipped (buildDirection filters
+      // them out); tell the user how to enable the check.
+      const names = unverified.map((u) => u.label).join(', ');
+      bus.emitEvent({
+        identifier: rt.identifier,
+        kind: 'activity',
+        phase: rt.phase,
+        label: `💬 방향성(${names})이 미검토라 이번 작업에 적용되지 않습니다 — 환경설정에서 AI 검토를 허용하세요.`,
+      });
+      return true;
+    }
+
+    for (const s of unverified) {
+      const verdict = await this.validateDirectionText(handle, issue, s.label, s.text);
+      if (verdict.ran) {
+        bus.emitEvent({
+          identifier: rt.identifier,
+          kind: 'activity',
+          phase: rt.phase,
+          label: `💬 방향성 검토(${s.label}) 완료 — $${verdict.cost.toFixed(4)} 사용`,
+        });
+      }
+      if (!verdict.ran) {
+        // Infra failure (agent error / no parseable verdict): don't block, don't verify —
+        // this scope just isn't injected this run and is re-checked next start.
+        bus.emitEvent({
+          identifier: rt.identifier,
+          kind: 'activity',
+          phase: rt.phase,
+          label: `💬 방향성 검토(${s.label})를 완료하지 못했습니다 — 이번 작업엔 미적용, 다음 시작 시 재시도.`,
+        });
+        continue;
+      }
+      if (verdict.approved) {
+        check.markVerified(s.scope, s.text);
+        continue;
+      }
+      // Rejected → block the issue (fix the direction and restart).
+      const msg = `방향성(${s.label})이 검토를 통과하지 못했습니다: ${verdict.reason} — 방향성을 비우거나 수정한 뒤 다시 시작하세요.`;
+      rt.phase = 'auth_error_waiting';
+      rt.stuck = true;
+      this.store.upsert(rt);
+      bus.emitEvent({ identifier: rt.identifier, kind: 'error', phase: rt.phase, label: `❌ ${msg}` });
+      await this.channel.notify(rt.identifier, `❌ ${msg}`).catch(() => {});
+      return false;
+    }
+    return true;
+  }
+
+  /** Run a single AI turn that judges one Direction text and writes a JSON verdict. */
+  private async validateDirectionText(
+    handle: WorkspaceHandle,
+    issue: Issue,
+    label: string,
+    text: string,
+  ): Promise<{ ran: boolean; approved: boolean; reason: string; cost: number }> {
+    await this.workspace.io.writeFile(handle, SCRATCH.directionCheck, '').catch(() => {});
+    const result = await this.agent.run(handle, issue, {
+      stage: 'planning',
+      workflow: '', // self-contained — no workflow guide, judges the text only
+      prompt: directionCheckPrompt(label, text, SCRATCH.directionCheck, this.profile.languageName),
+      continueSession: false,
+      turnTimeoutMs: this.config.agent.turn_timeout_ms,
+      allowedTools: ['read', 'ls', 'write'],
+    });
+    // Count the check in the issue's cost total (the event only displays it).
+    this.cost.add(issue.identifier, result);
+    const raw = await this.workspace.io.readFile(handle, SCRATCH.directionCheck).catch(() => null);
+    const verdict = parseDirectionVerdict(raw);
+    if (!result.ok || !verdict) {
+      return { ran: false, approved: false, reason: '(no verdict)', cost: result.costUsd ?? 0 };
+    }
+    return { ran: true, approved: verdict.approved, reason: verdict.reason, cost: result.costUsd ?? 0 };
+  }
+
   private async dispatchPlanning(rt: IssueRuntime, issue: Issue): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
+    // Direction validation gate (§15) — blocks the issue if a Direction text is rejected.
+    if (!(await this.runDirectionCheck(rt, issue, handle))) return;
     const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning');
     if (!draft.ok) return;
     if (await this.handleQuestion(rt, handle)) return;

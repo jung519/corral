@@ -312,6 +312,10 @@ const en: Dict = {
   'direction.saving': 'Saving…',
   'direction.saved': 'Saved',
   'direction.browserNote': 'Editing Direction requires the desktop app.',
+  'direction.consent': 'Allow AI safety check of the Direction',
+  'direction.consentHint':
+    'The check uses your own AI and costs money: whenever you save or edit the Direction, it is validated once at the next issue start. The actual cost is shown in that issue’s timeline after the check.',
+  'direction.notApplied': 'Until you allow the check, the Direction is not applied to any run.',
   'logs.title': 'Logs',
   'logs.empty': 'No events yet.',
   'about.tagline': 'Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent.',
@@ -624,6 +628,10 @@ const ko: Dict = {
   'direction.saving': '저장 중…',
   'direction.saved': '저장됨',
   'direction.browserNote': '방향성 편집은 데스크톱 앱에서만 가능합니다.',
+  'direction.consent': 'AI로 방향성 안전 검사 허용',
+  'direction.consentHint':
+    '검사는 당신의 AI를 사용하며 비용이 발생합니다: 방향성을 저장·수정할 때마다 다음 이슈 시작 시 1회 검사됩니다. 실제 비용은 검사 후 해당 이슈 타임라인에 표시됩니다.',
+  'direction.notApplied': '검사를 허용하기 전까지 방향성은 어떤 작업에도 적용되지 않습니다.',
   'logs.title': '로그',
   'logs.empty': '아직 이벤트가 없습니다.',
   'about.tagline': '오픈소스 에이전트 개발 오케스트레이터 — 트래커 → 저장소 → 사람 승인 → AI 코딩 에이전트.',

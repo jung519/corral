@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { DirectionStore, mergeDirection } from './direction.js';
+import {
+  DirectionCheckStore,
+  directionHash,
+  DirectionStore,
+  mergeDirection,
+  parseDirectionVerdict,
+} from './direction.js';
 
 describe('DirectionStore', () => {
   let dir: string;
@@ -91,5 +97,71 @@ describe('mergeDirection', () => {
 
   it('trims surrounding whitespace of each scope', () => {
     expect(mergeDirection('  G\n', [])).toBe('### Global direction (org / operator)\nG');
+  });
+});
+
+describe('directionHash', () => {
+  it('ignores surrounding whitespace but not content', () => {
+    expect(directionHash('  hello \n')).toBe(directionHash('hello'));
+    expect(directionHash('hello')).not.toBe(directionHash('hello!'));
+  });
+});
+
+describe('DirectionCheckStore', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'corral-check-'));
+  });
+  afterEach(() => {
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('defaults to no consent and nothing verified', () => {
+    const s = new DirectionCheckStore(dir);
+    expect(s.getConsent()).toBe(false);
+    expect(s.isVerified('global', 'x')).toBe(false);
+  });
+
+  it('persists consent across instances', () => {
+    new DirectionCheckStore(dir).setConsent(true);
+    expect(new DirectionCheckStore(dir).getConsent()).toBe(true);
+  });
+
+  it('verifies a scope by exact text; any edit invalidates it', () => {
+    const s = new DirectionCheckStore(dir);
+    s.markVerified('global', 'stability first');
+    expect(s.isVerified('global', 'stability first')).toBe(true);
+    expect(s.isVerified('global', 'stability first!')).toBe(false); // edited → re-check
+    expect(s.isVerified('project:app', 'stability first')).toBe(false); // per-scope
+  });
+
+  it('keeps verified hashes when consent is toggled (independent fields)', () => {
+    const s = new DirectionCheckStore(dir);
+    s.markVerified('project:app', 'A');
+    s.setConsent(true);
+    expect(s.isVerified('project:app', 'A')).toBe(true);
+    expect(s.getConsent()).toBe(true);
+  });
+});
+
+describe('parseDirectionVerdict', () => {
+  it('parses a clean verdict', () => {
+    expect(parseDirectionVerdict('{"approved": true, "reason": "ok"}')).toEqual({ approved: true, reason: 'ok' });
+  });
+  it('extracts JSON wrapped in prose / code fences', () => {
+    expect(parseDirectionVerdict('Here:\n```json\n{"approved": false, "reason": "abuse"}\n```')).toEqual({
+      approved: false,
+      reason: 'abuse',
+    });
+  });
+  it('returns null for missing / non-boolean / unparseable input', () => {
+    expect(parseDirectionVerdict(null)).toBeNull();
+    expect(parseDirectionVerdict('')).toBeNull();
+    expect(parseDirectionVerdict('no json here')).toBeNull();
+    expect(parseDirectionVerdict('{"approved": "yes"}')).toBeNull();
+    expect(parseDirectionVerdict('{approved: true}')).toBeNull();
+  });
+  it('defaults reason to empty string when absent', () => {
+    expect(parseDirectionVerdict('{"approved": true}')).toEqual({ approved: true, reason: '' });
   });
 });
