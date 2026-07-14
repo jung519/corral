@@ -23,6 +23,7 @@ import { type ResolvedProfile, resolveProfile } from './profile/index.js';
 import { repositories as repositoryRegistry } from './repository/index.js';
 import { RepositoryRouter } from './repository/router.js';
 import { trackers } from './tracker/index.js';
+import { codexAuthMounted } from './workspace/docker.js';
 import { workspaces } from './workspace/index.js';
 
 export interface App {
@@ -59,13 +60,28 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     repositoryList.push(repositoryRegistry.create(repo, { token: await resolveSecret(repo.credential) }));
   }
 
-  const workspace = workspaces.create({ kind: config.workspace.backend, ...config.workspace }, {});
+  // Mount the operator's live codex credential into containers instead of shipping a
+  // base64 snapshot (which 401s as soon as the host rotates its refresh token). Never when
+  // a gpt CLI member uses an API key — that path rewrites auth.json and would clobber the
+  // host's ChatGPT login through the mount.
+  const gptCliMembers = [config.agent, ...config.agent.fallbacks, ...Object.values(config.agent.stages ?? {})].filter(
+    (m) => m.provider === 'gpt' && m.transport === 'cli',
+  );
+  const codexMounted = codexAuthMounted(config.workspace, gptCliMembers.some((m) => !!m.credential));
+
+  const workspace = workspaces.create(
+    { kind: config.workspace.backend, ...config.workspace },
+    { mountCodexAuth: codexMounted },
+  );
 
   // Primary agent + ordered fallbacks → a single AgentAdapter that fails over when the
   // active agent's usage is exhausted. Each member resolves its own credentials (BYOK).
+  // When the credential is mounted, its base64 snapshot must NOT be injected: the codex
+  // prelude writes it IN PLACE over the mount, clobbering the host's live auth.json.
   const buildMember = async (r: AgentRoutingConfig, label: string): Promise<FailoverMember> => {
     const apiKey = r.credential ? await resolveSecret(r.credential) : '';
-    const oauthToken = r.oauth_credential ? await resolveSecret(r.oauth_credential) : '';
+    let oauthToken = r.oauth_credential ? await resolveSecret(r.oauth_credential) : '';
+    if (codexMounted && r.provider === 'gpt' && r.transport === 'cli') oauthToken = '';
     const adapter = createAgent(r, { apiKey: apiKey || null, oauthToken: oauthToken || null, io: workspace.io });
     return { adapter, label };
   };

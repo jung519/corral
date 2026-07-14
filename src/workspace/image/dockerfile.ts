@@ -84,6 +84,10 @@ export function renderDockerfile(spec: WorkerImageSpec, opts: RenderDockerfileOp
     `RUN npm install -g ${cliPkgs.join(' ')}`,
     // claude refuses --dangerously-skip-permissions as root, so run as a non-root user.
     'RUN useradd -m -s /bin/bash worker && mkdir -p /workspace && chown -R worker:worker /workspace',
+    // Pre-create ~/.codex owned by worker. When the host codex credential is bind-mounted
+    // at ~/.codex/auth.json, docker would otherwise create the parent dir as ROOT, and
+    // codex (which writes app-server state there) dies with "Permission denied".
+    'RUN mkdir -p /home/worker/.codex && chown -R worker:worker /home/worker/.codex',
     'USER worker',
     'WORKDIR /workspace',
     // The worker user has no git identity; `git commit` errors without one. The host

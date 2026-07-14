@@ -8,7 +8,9 @@
  * the agent transport's concern (API key / the user's own CLI login); any env the
  * orchestrator needs to inject goes through DockerBackendOptions.env.
  */
+import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import type { WorkspaceConfig } from '../config/schema.js';
 import { logger } from '../core/logger.js';
 import type { CreateWorkspaceInput, WorkspaceAdapter, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
@@ -16,6 +18,27 @@ import { run, runOrThrow } from '../util/exec.js';
 import { dockerIO, WORKER_USER } from './docker-io.js';
 
 const WORKDIR = '/workspace';
+
+/** The host's codex credential. Mounting THIS FILE (not all of `~/.codex`) keeps the
+ *  container on the operator's live login without dragging in the host `config.toml`,
+ *  which overrides the container's and routes codex to the API endpoint (401). */
+export function hostCodexAuthPath(): string {
+  return join(homedir(), '.codex', 'auth.json');
+}
+
+/**
+ * True when the container should mount the host codex credential instead of receiving a
+ * base64 snapshot. A snapshot goes stale the moment the host refreshes (codex ROTATES the
+ * refresh token → `refresh_token_reused` 401); one shared file cannot.
+ *
+ * `codexUsesApiKey` MUST be true whenever any gpt CLI member authenticates with an API key:
+ * that path runs `codex login --with-api-key`, which REWRITES auth.json — and an in-place
+ * write passes straight through the bind mount, destroying the operator's ChatGPT login.
+ */
+export function codexAuthMounted(cfg: WorkspaceConfig, codexUsesApiKey = false): boolean {
+  if (cfg.backend !== 'docker' || codexUsesApiKey) return false;
+  return (cfg.docker?.mount_host_login ?? true) && existsSync(hostCodexAuthPath());
+}
 
 export interface DockerBackendOptions {
   image: string;
@@ -25,6 +48,9 @@ export interface DockerBackendOptions {
   /** Mount the host ~/.claude login into the container (read-only) so the CLI
    *  authenticates without an API key. */
   mountHostLogin?: boolean;
+  /** Mount the host codex credential file (~/.codex/auth.json) read-write, so the
+   *  container shares the operator's live login instead of a snapshot that goes stale. */
+  mountCodexAuth?: boolean;
 }
 
 export class DockerWorkspace implements WorkspaceAdapter {
@@ -55,6 +81,12 @@ export class DockerWorkspace implements WorkspaceAdapter {
     for (const [k, v] of Object.entries(this.opts.env ?? {})) args.push('-e', `${k}=${v}`);
     // Mount the host Claude login read-only so the CLI authenticates without an API key.
     if (this.opts.mountHostLogin) args.push('-v', `${homedir()}/.claude:/home/${WORKER_USER}/.claude:ro`);
+    // Same idea for codex, but credential-file only and READ-WRITE: codex refreshes the
+    // token in place (an in-place write passes through a file bind mount), so host and
+    // container stay on ONE credential — no stale snapshot to go 401.
+    if (this.opts.mountCodexAuth) {
+      args.push('-v', `${hostCodexAuthPath()}:/home/${WORKER_USER}/.codex/auth.json`);
+    }
     args.push(image, 'sleep', 'infinity');
 
     log.info(`starting container ${name} (${image})`);
@@ -118,13 +150,21 @@ export async function dockerDaemonRunning(): Promise<boolean> {
   return res.code === 0 && res.stdout.trim().length > 0;
 }
 
-export function dockerOptionsFromConfig(cfg: WorkspaceConfig['docker'], imageOverride?: string): DockerBackendOptions {
+export function dockerOptionsFromConfig(
+  cfg: WorkspaceConfig['docker'],
+  imageOverride?: string,
+  mountCodexAuth = false,
+): DockerBackendOptions {
   return {
     image: imageOverride ?? cfg?.image ?? 'corral-worker:latest',
     memory: cfg?.memory,
     cpus: cfg?.cpus,
     env: cfg?.env,
     mountHostLogin: cfg?.mount_host_login ?? true,
+    // Guarded twice: bootstrap decides (it knows the agent config), and the source file
+    // must exist — a missing source path makes docker create a DIRECTORY at the mount
+    // point, which breaks codex entirely.
+    mountCodexAuth: mountCodexAuth && existsSync(hostCodexAuthPath()),
   };
 }
 

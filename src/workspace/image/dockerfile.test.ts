@@ -18,6 +18,9 @@ describe('renderDockerfile', () => {
     expect(df).toContain('RUN corepack enable'); // setup command
     expect(df).toContain('npm install -g @anthropic-ai/claude-code'); // guaranteed
     expect(df).toContain('USER worker'); // non-root
+    // ~/.codex must exist and be worker-owned BEFORE the auth.json bind mount, or docker
+    // creates the parent as root and codex dies with "Permission denied".
+    expect(df).toContain('mkdir -p /home/worker/.codex && chown -R worker:worker /home/worker/.codex');
     expect(df).toContain('WORKDIR /workspace');
     expect(df).toContain('git config --global user.email'); // commit identity (fresh container has none)
   });
