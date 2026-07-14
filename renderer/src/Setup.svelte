@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
+  import DirectionSetup from './DirectionSetup.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
   import Wizard from './Wizard.svelte';
   import { editNav } from './lib/nav.svelte';
@@ -122,6 +123,8 @@
         {/each}
       {/if}
     </div>
+
+    <DirectionSetup />
 
     <div class="card">
       {@render head(t('step.repo'), 'repo')}

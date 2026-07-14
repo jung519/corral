@@ -74,8 +74,7 @@
       }
     ],
     "direction": "horizontal",
-    "width": 300,
-    "collapsed": true
+    "width": 300
   },
   "right": {
     "id": "74acd793fe124d49",
@@ -177,8 +176,11 @@
       "bases:새 베이스 생성하기": false
     }
   },
-  "active": "333faba962359b4a",
+  "active": "68f11f63123e491e",
   "lastOpenFiles": [
+    "renderer/dist/assets/index-CgSB_1lN.js",
+    "renderer/dist/assets/index-6n_9UDxr.css",
+    "renderer/src/DirectionSetup.svelte",
     "renderer/dist/assets/index-BBiGmipZ.js",
     "renderer/dist/assets/index-RYFFeYUL.js",
     "renderer/dist/assets/index-CZKULtlW.css",
@@ -187,9 +189,6 @@
     "dist/core/direction.js",
     "dist/core/direction.js.map",
     "src/core/direction.test.ts",
-    "desktop/src/direction-store.ts",
-    "src/core/direction.ts",
-    "renderer/dist/assets/index-BDrv03Vu.js",
     "docs/charter-injection-plan.md",
     "docs/direction-injection-plan.md",
     "docs/multi-project-monetization-plan.md"
