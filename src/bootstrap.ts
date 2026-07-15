@@ -62,12 +62,14 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
 
   // Mount the operator's live codex credential into containers instead of shipping a
   // base64 snapshot (which 401s as soon as the host rotates its refresh token). Never when
-  // a gpt CLI member uses an API key — that path rewrites auth.json and would clobber the
-  // host's ChatGPT login through the mount.
+  // a gpt CLI member actually HAS an API key — that path rewrites auth.json and would
+  // clobber the host's ChatGPT login through the mount. Test the RESOLVED secret, not the
+  // ref: the wizard always emits a `credential` ref, key stored or not.
   const gptCliMembers = [config.agent, ...config.agent.fallbacks, ...Object.values(config.agent.stages ?? {})].filter(
     (m) => m.provider === 'gpt' && m.transport === 'cli',
   );
-  const codexMounted = codexAuthMounted(config.workspace, gptCliMembers.some((m) => !!m.credential));
+  const gptCliKeys = await Promise.all(gptCliMembers.map((m) => (m.credential ? resolveSecret(m.credential) : '')));
+  const codexMounted = codexAuthMounted(config.workspace, gptCliKeys.some((k) => !!k));
 
   const workspace = workspaces.create(
     { kind: config.workspace.backend, ...config.workspace },

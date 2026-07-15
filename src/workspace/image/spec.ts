@@ -9,8 +9,9 @@ import { z } from 'zod';
 import type { CollectedManifest } from './manifest.js';
 
 /** Bump when the rendered Dockerfile's guaranteed layer changes — it's folded into
- * the image cache hash so existing images rebuild on a template change. */
-export const WORKER_IMAGE_TEMPLATE_VERSION = '2';
+ * the image cache hash so existing images rebuild on a template change.
+ * 3: pre-create worker-owned ~/.codex (host codex credential bind mount). */
+export const WORKER_IMAGE_TEMPLATE_VERSION = '3';
 
 export const WorkerImageSpecSchema = z.object({
   /** Debian/Ubuntu-based base image (apt available), e.g. "node:24-bookworm-slim". */
