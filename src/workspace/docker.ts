@@ -31,13 +31,19 @@ export function hostCodexAuthPath(): string {
  * base64 snapshot. A snapshot goes stale the moment the host refreshes (codex ROTATES the
  * refresh token → `refresh_token_reused` 401); one shared file cannot.
  *
+ * ⚠️ Deliberately NOT gated on `mount_host_login`. That flag is about mounting the host
+ * `~/.claude` directory — a different provider with a different auth story. Operators turn
+ * it off because claude authenticates by key/OAuth, which silently disabled codex auth too
+ * and left the review stage failing with `login_required`. Codex has no other working
+ * subscription path under docker, so it gets its own decision.
+ *
  * `codexUsesApiKey` MUST be true whenever any gpt CLI member authenticates with an API key:
  * that path runs `codex login --with-api-key`, which REWRITES auth.json — and an in-place
  * write passes straight through the bind mount, destroying the operator's ChatGPT login.
  */
 export function codexAuthMounted(cfg: WorkspaceConfig, codexUsesApiKey = false): boolean {
   if (cfg.backend !== 'docker' || codexUsesApiKey) return false;
-  return (cfg.docker?.mount_host_login ?? true) && existsSync(hostCodexAuthPath());
+  return existsSync(hostCodexAuthPath());
 }
 
 export interface DockerBackendOptions {

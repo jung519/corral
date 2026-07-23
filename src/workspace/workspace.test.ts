@@ -1,6 +1,7 @@
+import { existsSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { WorkspaceSchema } from '../config/schema.js';
-import { codexAuthMounted, dockerOptionsFromConfig } from './docker.js';
+import { codexAuthMounted, dockerOptionsFromConfig, hostCodexAuthPath } from './docker.js';
 import { LocalWorkspace } from './local.js';
 
 describe('dockerOptionsFromConfig', () => {
@@ -24,9 +25,11 @@ describe('codexAuthMounted', () => {
     expect(codexAuthMounted(WorkspaceSchema.parse({ backend: 'local' }))).toBe(false);
   });
 
-  it('is false when the operator opted out of host-login mounts', () => {
+  // `mount_host_login` is about the ~/.claude directory. Gating codex on it silently broke
+  // the review stage (login_required) for operators who key-authenticate claude.
+  it('is independent of the claude host-login mount flag', () => {
     expect(codexAuthMounted(WorkspaceSchema.parse({ backend: 'docker', docker: { mount_host_login: false } }))).toBe(
-      false,
+      existsSync(hostCodexAuthPath()),
     );
   });
 
