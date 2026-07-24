@@ -14,6 +14,7 @@ import { configExists, readConfig, writeConfig } from './config-store.js';
 import { readDirection, writeDirection } from './direction-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
+import { initAutoUpdate } from './auto-updater.js';
 import { callCore, restartOrchestrator, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
 import { decideGate, fetchManifest, type GateDecision } from './update-gate.js';
 import {
@@ -288,6 +289,8 @@ app.whenReady().then(async () => {
   registerIpc();
   createWindow();
   if (decision.kind === 'recommended') showRecommendedNudge(decision);
+  // Background delivery: keep the app current so the forced gate rarely fires (packaged only).
+  initAutoUpdate();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
