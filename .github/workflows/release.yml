@@ -57,9 +57,25 @@ jobs:
         run: pnpm -C desktop run dist -- --publish ${{ startsWith(github.ref, 'refs/tags/') && 'always' || 'never' }}
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # No signing certs yet — tell electron-builder NOT to try (auto-discovery would
-          # pick a random keychain identity in CI and fail). Signing is a later milestone.
-          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # Signing is wired but SAFE-WHEN-EMPTY: with no secrets set, every value below is
+          # '' / false → electron-builder skips signing and builds unsigned exactly as before.
+          # Add the secrets (see docs/signing.md) and the same builds sign automatically.
+          #
+          # macOS — Developer ID cert (.p12 → base64) + Apple notary creds. Notarization is
+          # env-driven (no config): electron-builder notarizes when APPLE_* are set, and
+          # skips silently when they aren't. The Apple creds are gated on the CERT being
+          # present too — notarizing an unsigned app would FAIL, so it's all-or-nothing.
+          CSC_LINK: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          APPLE_ID: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK != '' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK != '' && secrets.APPLE_TEAM_ID || '' }}
+          # Windows — code-signing cert (.pfx → base64).
+          WIN_CSC_LINK: ${{ runner.os == 'Windows' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ runner.os == 'Windows' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          # Search the keychain for an identity ONLY when a mac cert was actually provided;
+          # otherwise stay unsigned (a stray identity in CI would make signing fail).
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ runner.os == 'macOS' && secrets.MAC_CSC_LINK != '' }}
 
       - name: Upload installers as workflow artifacts (backup / manual runs)
         uses: actions/upload-artifact@v4
