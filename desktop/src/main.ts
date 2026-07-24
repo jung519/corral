@@ -5,7 +5,7 @@
  * config exists it starts the orchestrator child and loads the dashboard. All
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
-import { app, BrowserWindow, ipcMain, Notification, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
 import { exec, execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -15,6 +15,7 @@ import { readDirection, writeDirection } from './direction-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
 import { callCore, restartOrchestrator, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
+import { decideGate, fetchManifest, type GateDecision } from './update-gate.js';
 import {
   fetchNotionSchema,
   type RepoTestInput,
@@ -215,12 +216,77 @@ function importCodexAuth(): { ok: boolean; b64?: string; error?: string } {
   }
 }
 
-app.whenReady().then(() => {
+/**
+ * Version gate (§update). Blocks a too-old app (forced) or nudges an out-of-date one
+ * (recommended), based on the remote manifest. Returns false only when the app must NOT
+ * continue (forced → we open the download page and quit). Fail-open: offline / fetch error
+ * → proceed, so a network blip never bricks the app.
+ */
+async function runUpdateGate(): Promise<boolean> {
+  const manifest = await fetchManifest();
+  const decision = decideGate(app.getVersion(), manifest);
+  if (decision.kind === 'ok') return true;
+
+  if (decision.kind === 'forced') {
+    const detail =
+      `${decision.notice ? decision.notice + '\n\n' : ''}` +
+      `이 버전은 더 이상 지원되지 않습니다. 계속하려면 업데이트가 필요합니다.` +
+      `${decision.target ? `\n\n필요 버전: ${decision.target} 이상 (현재 ${app.getVersion()})` : ''}`;
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      title: '업데이트 필요',
+      message: 'Corral 업데이트가 필요합니다',
+      detail,
+      buttons: decision.downloadUrl ? ['다운로드', '종료'] : ['종료'],
+      defaultId: 0,
+      cancelId: decision.downloadUrl ? 1 : 0,
+      noLink: true,
+    });
+    if (decision.downloadUrl && response === 0) await shell.openExternal(decision.downloadUrl);
+    app.quit();
+    return false;
+  }
+
+  // recommended → let the app open, then show a dismissible nudge (non-blocking).
+  return true;
+}
+
+/** The dismissible "update available" nudge shown AFTER the window opens (recommended). */
+function showRecommendedNudge(decision: GateDecision): void {
+  void dialog
+    .showMessageBox({
+      type: 'info',
+      title: '업데이트 권장',
+      message: '새 버전이 있습니다',
+      detail:
+        `${decision.notice ? decision.notice + '\n\n' : ''}` +
+        `${decision.target ? `권장 버전: ${decision.target} (현재 ${app.getVersion()})` : ''}`,
+      buttons: decision.downloadUrl ? ['지금 업데이트', '나중에'] : ['확인'],
+      defaultId: 0,
+      cancelId: decision.downloadUrl ? 1 : 0,
+      noLink: true,
+    })
+    .then(({ response }) => {
+      if (decision.downloadUrl && response === 0) void shell.openExternal(decision.downloadUrl);
+    });
+}
+
+app.whenReady().then(async () => {
   // macOS dev: the dock icon comes from the bundle when packaged, but in `electron .`
   // it's the default Electron icon — set the brand icon explicitly so dev matches.
   if (process.platform === 'darwin' && app.dock && existsSync(ICON_PNG)) app.dock.setIcon(ICON_PNG);
+
+  // Version gate BEFORE anything else — a forced-out app must not spawn the core or window.
+  const manifest = await fetchManifest();
+  const decision = decideGate(app.getVersion(), manifest);
+  if (decision.kind === 'forced') {
+    await runUpdateGate();
+    return;
+  }
+
   registerIpc();
   createWindow();
+  if (decision.kind === 'recommended') showRecommendedNudge(decision);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
