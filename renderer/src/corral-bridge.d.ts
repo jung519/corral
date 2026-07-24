@@ -6,6 +6,7 @@ declare global {
   interface Window {
     corral?: {
       platform: string;
+      appVersion(): Promise<string>;
       config: {
         exists(): Promise<boolean>;
         read(): Promise<string | null>;

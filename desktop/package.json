@@ -1,7 +1,7 @@
 {
   "name": "corral-desktop",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Corral Electron shell — wraps the headless control plane in a desktop app (BYOK keychain, setup wizard).",
   "main": "dist/main.js",
   "scripts": {
@@ -17,7 +17,10 @@
     "typescript": "^5.7.2"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["electron", "esbuild"]
+    "onlyBuiltDependencies": [
+      "electron",
+      "esbuild"
+    ]
   },
   "build": {
     "appId": "com.corral.app",
@@ -26,17 +29,33 @@
       "output": "release",
       "buildResources": "build"
     },
-    "files": ["dist/**/*", "preload.js"],
+    "files": [
+      "dist/**/*",
+      "preload.js"
+    ],
     "extraResources": [
-      { "from": "../renderer/dist", "to": "renderer" },
-      { "from": "../dist", "to": "core/dist" },
-      { "from": "../WORKFLOW.md", "to": "core/WORKFLOW.md" }
+      {
+        "from": "../renderer/dist",
+        "to": "renderer"
+      },
+      {
+        "from": "../dist",
+        "to": "core/dist"
+      },
+      {
+        "from": "../WORKFLOW.md",
+        "to": "core/WORKFLOW.md"
+      }
     ],
     "mac": {
       "icon": "build/icon.icns",
       "category": "public.app-category.developer-tools"
     },
-    "win": { "icon": "build/icon.png" },
-    "linux": { "icon": "build/icon.png" }
+    "win": {
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "icon": "build/icon.png"
+    }
   }
 }

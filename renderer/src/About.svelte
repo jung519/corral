@@ -1,5 +1,15 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { t } from './lib/i18n.svelte';
+
+  let version = $state('');
+  onMount(async () => {
+    try {
+      version = (await window.corral?.appVersion()) ?? '';
+    } catch {
+      /* browser preview — no bridge */
+    }
+  });
 </script>
 
 <div class="view">
@@ -8,6 +18,10 @@
   <p class="byok">{t('about.byok')}</p>
 
   <dl>
+    {#if version}
+      <dt>{t('about.version')}</dt>
+      <dd>v{version}</dd>
+    {/if}
     <dt>{t('about.license')}</dt>
     <dd>Apache-2.0</dd>
     <dt>{t('about.repo')}</dt>

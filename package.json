@@ -1,6 +1,6 @@
 {
   "name": "corral",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent. BYOK, provider-neutral, self-hostable.",
   "type": "module",
   "license": "Apache-2.0",
@@ -19,6 +19,7 @@
     "app": "pnpm build:all && pnpm -C desktop start",
     "app:run": "pnpm -C desktop start",
     "package": "pnpm build:all && pnpm -C desktop dist",
+    "version:set": "node scripts/set-version.mjs",
     "preinstall": "npx only-allow pnpm"
   },
   "dependencies": {

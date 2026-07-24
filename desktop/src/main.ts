@@ -72,6 +72,7 @@ function createWindow(): void {
 }
 
 function registerIpc(): void {
+  ipcMain.handle('app:version', () => app.getVersion());
   ipcMain.handle('config:exists', () => configExists());
   ipcMain.handle('config:read', () => readConfig());
   ipcMain.handle('config:write', (_e, yaml: string) => writeConfig(yaml));
