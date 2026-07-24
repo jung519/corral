@@ -9,12 +9,29 @@ GPT), **BYOK** (bring your own keys; nothing is embedded), and **self-hostable**
 
 Corral is the open-source successor to an internal tool called *Symphony*.
 
+## ⬇ Download
+
+**[Get the latest release →](https://github.com/jung519/corral/releases/latest)** — macOS &
+Windows installers.
+
+| Platform | File |
+|---|---|
+| macOS (Apple Silicon) | `Corral-<version>-arm64.dmg` |
+| macOS (Intel) | `Corral-<version>.dmg` |
+| Windows | `Corral-Setup-<version>.exe` |
+
+> **Unsigned for now** — bypass the launch warning once: **macOS** right-click the app →
+> **Open**; **Windows** on SmartScreen → **More info → Run anyway**. Prefer source?
+> [Build it yourself.](#try-it-run-on-your-own-machine)
+
+On first launch a **setup wizard** connects your AI provider, tracker, and repository — no
+config files to edit.
+
 ## Status
 
-**Works end-to-end** (issue → plan → your approval → code → self-review → pull request)
-and is used daily on a real multi-repo project. It is still early and rough, and there
-is **no download-and-install app yet** — for now you run it by building from source with
-the steps below. Prebuilt installers are the next milestone.
+**Works end-to-end** (issue → plan → your approval → code → self-review → pull request) and
+is used daily on a real multi-repo project. Early and rough; installers are **unsigned**
+until code-signing lands. Auto-update is built in.
 
 ## Try it (run on your own machine)
 
