@@ -11,9 +11,49 @@ Corral is the open-source successor to an internal tool called *Symphony*.
 
 ## Status
 
-🚧 **Early development (S1 — skeleton).** Interfaces and the adapter/registry
-boundary are being established; the orchestrator core is lifted in a later
-milestone. Not yet usable end-to-end. See [docs/development-plan.md](docs/development-plan.md).
+**Works end-to-end** (issue → plan → your approval → code → self-review → pull request)
+and is used daily on a real multi-repo project. It is still early and rough, and there
+is **no download-and-install app yet** — for now you run it by building from source with
+the steps below. Prebuilt installers are the next milestone.
+
+## Try it (run on your own machine)
+
+You don't edit any config files by hand — the app opens a **setup wizard** that walks you
+through everything and stores your keys in your computer's keychain.
+
+### 1. What you need first
+
+- **Node.js 24+** and **pnpm** — the build tools. Get Node from [nodejs.org](https://nodejs.org);
+  then install pnpm with `npm install -g pnpm`.
+- **git** — to download the code and to open pull requests.
+- **Docker Desktop** (recommended) — each task runs in its own isolated container.
+  [Download Docker](https://www.docker.com/products/docker-desktop/). *(Or pick the “Local”
+  backend in the wizard to skip Docker — then the agent runs directly on your machine.)*
+- **One AI provider** — either
+  - an official CLI installed and logged in (Claude Code, OpenAI **codex**, or **gemini**), **or**
+  - an API key you paste into the wizard (Claude / Gemini / GPT).
+- **A tracker** where your tasks live — Notion, GitHub Issues, or Jira.
+- **A git host** where pull requests open — GitHub, GitLab, or Bitbucket.
+
+### 2. Get it running
+
+```bash
+git clone https://github.com/jung519/corral.git
+cd corral
+pnpm install                 # core
+pnpm -C renderer install     # dashboard UI
+pnpm -C desktop install      # desktop shell
+pnpm app                     # builds everything and opens the Corral app
+```
+
+The first launch opens the **setup wizard**: choose your AI provider, connect your tracker
+and repository, and enter your keys (they go straight into the OS keychain — never into a
+file). After that, the dashboard lists your issues: click one, approve the plan Corral
+proposes, and it implements, self-reviews, and opens a pull request for you to merge.
+
+To reopen the app later, just run `pnpm app` again from the `corral` folder.
+
+> Advanced / headless (no GUI) usage and packaging are in [Development](#development) below.
 
 ## Architecture (5 pluggable axes)
 
