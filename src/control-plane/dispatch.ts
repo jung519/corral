@@ -167,6 +167,11 @@ export async function dispatch(
     case 'opsTotals':
       if (!deps.ops) return NO_OPS;
       return { totals: await deps.ops.history.totals(a.days as number | undefined) };
+    case 'opsBudget':
+      if (!deps.ops) return NO_OPS;
+      // The ceiling is shared with the development AI, so this is the day's total for
+      // BOTH — it is what explains a core that has stopped calling models.
+      return { budget: deps.ops.budgetSnapshot() };
     case 'state':
       return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
     case 'candidates':

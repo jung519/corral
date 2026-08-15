@@ -11,6 +11,7 @@ import type { AgentRoutingConfig, Config } from './config/schema.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import type { CredentialRef, CredentialStore } from './credentials/types.js';
 import { DirectionCheckStore, DirectionStore } from './core/direction.js';
+import type { TokenBudget } from './core/token-budget.js';
 import type {
   AgentAdapter,
   ChannelAdapter,
@@ -47,6 +48,8 @@ export interface BootstrapDeps {
   directionStore?: DirectionStore;
   /** Direction validation state (consent + verified hashes), shared with the IPC host. */
   directionCheck?: DirectionCheckStore;
+  /** Daily token ceiling. Shared with the operational AI — one counter, both pillars. */
+  budget?: TokenBudget;
 }
 
 export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promise<App> {
@@ -131,6 +134,7 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     referenceCloneUrl,
     deps.directionStore ?? new DirectionStore(),
     deps.directionCheck ?? new DirectionCheckStore(),
+    deps.budget,
   );
 
   return { config, profile, tracker, repositories: repositoryList, repositoryRouter, agent, workspace, channel, orchestrator };
