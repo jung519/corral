@@ -8,7 +8,7 @@ const make = (key: string, enabled = true): Pipeline =>
     enabled,
     trigger: { kind: 'manual' },
     input: { kind: 'none' },
-    agent: { prompt: { system: 's', user_template: 'u' }, schema: { type: 'object', properties: {} } },
+    agent: { prompt: { system: 's', user_template: 'u' }, schema: { type: 'object', properties: { answer: { type: 'string' } } } },
     output: { kind: 'none' },
   });
 

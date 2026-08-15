@@ -134,7 +134,7 @@ key: no-trigger
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
 output: { kind: none }
 `);
 
@@ -150,7 +150,7 @@ trigger: { kind: manual }
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
 output: { kind: none }
 `);
 
@@ -165,7 +165,7 @@ trigger: { kind: carrier-pigeon }
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
 output: { kind: none }
 `);
 
@@ -182,12 +182,28 @@ trigger: { kind: manual }
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
 output: { kind: none }
 `);
 
     expect(err.issues[0]).toMatchObject({ path: 'key' });
     expect(err.issues[0].message).toMatch(/lowercase/);
+  });
+
+  it('rejects a schema that declares no fields at all', async () => {
+    const err = await load(`
+key: declares-nothing
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: {} }
+output: { kind: none }
+`);
+
+    // Only declared properties survive the answer check, so this pipeline would pay for a
+    // turn and discard everything it got back — reporting success while doing nothing.
+    expect(err.issues[0].message).toMatch(/at least one property/);
   });
 
   it('rejects an allowed-values rule with no list and nowhere to get one', async () => {
@@ -197,7 +213,7 @@ trigger: { kind: manual }
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
   validate:
     allowed_values: { field: items }
 output: { kind: none }
@@ -223,7 +239,7 @@ trigger: { kind: manual }
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
 output: { kind: none }
 `);
 
@@ -238,7 +254,7 @@ trigger: { kind: manual }
 input: { kind: none }
 agent:
   prompt: { system: s, user_template: u }
-  schema: { type: object, properties: {} }
+  schema: { type: object, properties: { answer: { type: string } } }
 output: { kind: none }
 `;
     write('first.yaml', `key: same${body}`);

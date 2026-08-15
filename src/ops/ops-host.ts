@@ -65,6 +65,8 @@ export class OpsHost {
   readonly registry = new PipelineRegistry();
   readonly history: OpsHistoryStore;
   private readonly runner: PipelineRunner;
+  /** Swapped in when a config arrives — see `useOperation`. */
+  private operation: OperationRunner;
   private readonly dir: string;
   /** Why the last load failed, so the UI can show it instead of an empty list. */
   private loadError?: string;
@@ -72,13 +74,24 @@ export class OpsHost {
   constructor(private readonly options: OpsHostOptions) {
     this.dir = pipelinesDir(options.stateDir);
     this.history = options.history ?? new JsonlOpsHistoryStore(options.stateDir, { now: options.now });
+    this.operation = options.operation ?? new UnwiredOperationRunner();
     this.runner = new PipelineRunner({
       resolvers: new Map((options.resolvers ?? [new NoneInputResolver()]).map((r) => [r.kind, r])),
       sinks: new Map((options.sinks ?? [new NoneOutputSink()]).map((s) => [s.kind, s])),
-      operation: options.operation ?? new UnwiredOperationRunner(),
+      // Read through, so a provider swap takes effect without rebuilding the runner.
+      operation: { run: (step, fields) => this.operation.run(step, fields) },
       validator: options.validator ?? new UnwiredAnswerValidator(),
       now: options.now,
     });
+  }
+
+  /**
+   * Point the model step at these providers. Called when a config is loaded — the
+   * operational AI starts before there is one (it needs no config of its own), and the
+   * providers only become known once the development side has read theirs.
+   */
+  useOperation(operation: OperationRunner): void {
+    this.operation = operation;
   }
 
   /**

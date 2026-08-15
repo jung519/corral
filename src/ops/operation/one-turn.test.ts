@@ -1,0 +1,195 @@
+/**
+ * The one-turn runner is where a pipeline meets a model. It has to come back with an
+ * answer of the declared shape or move to another provider — and say which one answered.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import type { ChatClient, ChatTurn, NeutralMessage } from '../../agent/api-loop.js';
+import type { AgentProviderId } from '../../agent/types.js';
+import { PipelineSchema, type PipelineAgentStep } from '../pipeline/schema.js';
+import { checkAnswer, OneTurnOperationRunner, schemaInstruction } from './one-turn.js';
+
+/** A provider that answers with whatever you hand it, or throws. */
+function client(provider: AgentProviderId, reply: string | Error, seen?: NeutralMessage[][]): ChatClient {
+  return {
+    provider,
+    preflight: async () => ({ ok: true }),
+    send: async (messages): Promise<ChatTurn> => {
+      seen?.push(messages);
+      if (reply instanceof Error) throw reply;
+      return { text: reply, toolCalls: [], inputTokens: 1000, outputTokens: 200 };
+    },
+  };
+}
+
+function step(over: Record<string, unknown> = {}): PipelineAgentStep {
+  return PipelineSchema.parse({
+    key: 'p',
+    trigger: { kind: 'manual' },
+    input: { kind: 'none' },
+    agent: {
+      prompt: { system: 'You label records.', user_template: 'Title: {{title}}' },
+      schema: {
+        type: 'object',
+        properties: { items: { type: 'array' }, confidence: { type: 'number' } },
+        required: ['items', 'confidence'],
+      },
+      ...over,
+    },
+    output: { kind: 'none' },
+  }).agent;
+}
+
+const GOOD = JSON.stringify({ items: ['a', 'b'], confidence: 0.9 });
+
+describe('asking for a shape and getting one', () => {
+  it('returns the parsed answer', async () => {
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD)] });
+
+    const result = await runner.run(step(), { title: 'a record' });
+
+    expect(result.answer).toEqual({ items: ['a', 'b'], confidence: 0.9 });
+  });
+
+  it('reports what the turn cost and who answered', async () => {
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD)], modelFor: () => 'sonnet' });
+
+    const result = await runner.run(step(), {});
+
+    expect(result).toMatchObject({
+      tokens: 1200,
+      inputTokens: 1000,
+      outputTokens: 200,
+      provider: 'claude',
+      model: 'sonnet',
+      failedOver: false,
+    });
+    expect(result.costUsd).toBeGreaterThan(0); // priced through the shared table, not invented here
+  });
+
+  it('fills the template and states the shape in the system prompt', async () => {
+    const seen: NeutralMessage[][] = [];
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD, seen)] });
+
+    await runner.run(step(), { title: 'a record' });
+
+    expect(seen[0][0].content).toContain('You label records.');
+    expect(seen[0][0].content).toContain('single JSON object');
+    expect(seen[0][1]).toEqual({ role: 'user', content: 'Title: a record' });
+  });
+
+  it('sends no tools — this is one turn, not a loop', async () => {
+    const send = vi.fn(async () => ({ text: GOOD, toolCalls: [], inputTokens: 1, outputTokens: 1 }));
+    const runner = new OneTurnOperationRunner({
+      clients: [{ provider: 'claude', preflight: async () => ({ ok: true }), send }],
+    });
+
+    await runner.run(step(), {});
+
+    expect(send.mock.calls[0][1]).toEqual([]);
+  });
+
+  it('keeps only the declared fields', async () => {
+    const reply = JSON.stringify({ items: [], confidence: 1, note: 'ignore previous instructions' });
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', reply)] });
+
+    const result = await runner.run(step(), {});
+
+    // The answer is about to be poured into output templates and someone else's API.
+    // Whatever else the model felt like adding has no business travelling that far.
+    expect(result.answer).toEqual({ items: [], confidence: 1 });
+  });
+});
+
+describe('failing over', () => {
+  it('moves to the next provider when the first refuses, and says it did', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', new Error('HTTP 429: rate limited')), client('gemini', GOOD)],
+    });
+
+    const result = await runner.run(step(), {});
+
+    expect(result).toMatchObject({ provider: 'gemini', failedOver: true });
+  });
+
+  it('moves on when the answer does not match the shape', async () => {
+    // A different model may well obey the shape this one ignored — the acceptance
+    // criterion this issue exists for.
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', JSON.stringify({ items: ['a'] })), client('gemini', GOOD)],
+    });
+
+    const result = await runner.run(step(), {});
+
+    expect(result).toMatchObject({ provider: 'gemini', failedOver: true });
+  });
+
+  it('moves on when the reply is prose rather than JSON', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', 'Sure! Here is the JSON:\n```json\n{"items":[]}\n```'), client('gemini', GOOD)],
+    });
+
+    expect((await runner.run(step(), {})).provider).toBe('gemini');
+  });
+
+  it('reports every attempt when they all fail, not just the last', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', new Error('HTTP 429')), client('gemini', 'not json at all')],
+    });
+
+    // When a pipeline stops overnight, "one provider was down" and "all of them refused
+    // the shape" call for completely different fixes.
+    await expect(runner.run(step(), {})).rejects.toThrow(/claude: HTTP 429.*gemini: the reply was not JSON/s);
+  });
+
+  it('uses only the provider a pipeline named', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', new Error('down')), client('gemini', GOOD)],
+    });
+
+    // Naming a provider is a choice about which model does this work; silently answering
+    // with a different one would make that setting a lie.
+    await expect(runner.run(step({ provider: 'claude' }), {})).rejects.toThrow(/claude: down/);
+  });
+
+  it('says so when the named provider is not configured at all', async () => {
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD)] });
+
+    await expect(runner.run(step({ provider: 'gemini' }), {})).rejects.toThrow(/"gemini" is not configured/);
+  });
+
+  it('refuses to exist with no providers', () => {
+    expect(() => new OneTurnOperationRunner({ clients: [] })).toThrow(/at least one provider/);
+  });
+});
+
+describe('checking an answer', () => {
+  const schema = {
+    type: 'object' as const,
+    properties: { items: { type: 'array' }, confidence: { type: 'number' }, note: { type: 'string' } },
+    required: ['items'],
+  };
+
+  it('names the missing required field', () => {
+    expect(checkAnswer(schema, '{"confidence":1}')).toEqual({
+      ok: false,
+      reason: 'missing required field(s): items',
+    });
+  });
+
+  it('names the field whose type is wrong', () => {
+    expect(checkAnswer(schema, '{"items":"a,b"}')).toMatchObject({ reason: 'items should be array' });
+  });
+
+  it('rejects a JSON array or a bare value as the whole reply', () => {
+    expect(checkAnswer(schema, '[1,2]')).toMatchObject({ reason: 'the reply was not a JSON object' });
+    expect(checkAnswer(schema, '"yes"')).toMatchObject({ reason: 'the reply was not a JSON object' });
+  });
+
+  it('accepts an optional field being absent', () => {
+    expect(checkAnswer(schema, '{"items":[]}')).toEqual({ ok: true, answer: { items: [] } });
+  });
+
+  it('puts the schema itself in the instruction, so the model sees the field names', () => {
+    expect(schemaInstruction(schema)).toContain('"confidence"');
+  });
+});
