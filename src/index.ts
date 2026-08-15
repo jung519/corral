@@ -66,6 +66,7 @@ export { workspaces, dockerOptionsFromConfig, type WorkspaceCtx } from './worksp
 export { run, runOrThrow, type ExecResult, type ExecOptions } from './util/exec.js';
 export { channels } from './channel/index.js';
 export { WebChannel, type PendingAction, type IssueDiff } from './channel/web.js';
-export { type ControlPlaneDeps, dispatch, type SetupInput } from './control-plane/dispatch.js';
+export { type ControlPlaneDeps, dispatch } from './control-plane/dispatch.js';
+export { SetupHost, type SetupHostOptions } from './control-plane/setup-host.js';
 export { startIpcHost } from './control-plane/ipc.js';
 export { startWsHost, type WsHost, type WsHostOptions } from './control-plane/ws.js';

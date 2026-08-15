@@ -20,11 +20,13 @@ import { logger } from './core/logger.js';
 import type { ControlPlaneConfig } from './config/schema.js';
 import { ControlPlaneAuth } from './control-plane/auth.js';
 import { startIpcHost } from './control-plane/ipc.js';
+import { SetupHost } from './control-plane/setup-host.js';
 import { startWsHost } from './control-plane/ws.js';
 import type { Orchestrator } from './orchestrator.js';
 
 const configPath = resolve(process.argv[2] ?? 'corral.yaml');
 const stateDir = process.env.CORRAL_STATE_DIR ?? '.corral-state';
+const draftPath = resolve(stateDir, 'wizard-draft.json');
 
 const fileStore = new FileCredentialStore(resolve(stateDir, 'credentials.json'));
 const credentials = new LayeredCredentialStore([new EnvCredentialStore(), fileStore], fileStore);
@@ -39,6 +41,35 @@ const directionCheck = new DirectionCheckStore(resolve(stateDir));
 const auth = new ControlPlaneAuth(resolve(stateDir));
 
 let orchestrator: Orchestrator | undefined;
+let channelStarted = false;
+
+/**
+ * Build the orchestrator from the config now on disk and run it — the startup path and
+ * also what `configSet` calls after the setup wizard writes a config.
+ *
+ * Order matters: bootstrap first, swap second. A config that fails to build (bad token,
+ * unreachable tracker) then leaves the running orchestrator untouched instead of taking
+ * the core down. Errors come back to the caller rather than throwing, so the wizard can
+ * show why.
+ */
+async function reload(): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const config = await loadConfig(configPath);
+    const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck });
+    orchestrator?.stop();
+    orchestrator = app.orchestrator;
+    if (!channelStarted) {
+      await channel.start();
+      channelStarted = true;
+    }
+    await orchestrator.start();
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+const setup = new SetupHost({ configPath, draftPath, credentials, reload });
 
 /**
  * `--revoke <label|all>` drops paired clients; `--pair` forces a fresh pairing code even
@@ -57,23 +88,23 @@ async function main(): Promise<void> {
     logger.info(`revoked ${removed} control-plane token(s)${revoke ? ` for "${revoke}"` : ''}`);
   }
 
-  const deps = { channel, orchestrator: () => orchestrator, directionStore, directionCheck };
+  const deps = { channel, orchestrator: () => orchestrator, directionStore, directionCheck, setup };
   let remote: ControlPlaneConfig | undefined;
 
   if (existsSync(configPath)) {
+    // Whether the remote plane listens is decided once, here. A later `configSet` that
+    // turns it on takes effect on the next core start — you can't open the door you are
+    // already standing in, and locally the desktop respawns the core anyway.
     try {
-      const config = await loadConfig(configPath);
-      remote = config.control_plane;
-      const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck });
-      orchestrator = app.orchestrator;
-      await channel.start();
-      await orchestrator.start();
-      logger.info('corral configured — orchestrator running (ipc)');
-    } catch (err) {
-      // Config present but failed to start — surface, but keep the IPC host alive so
-      // the renderer can still read status and the user can fix/redo setup.
-      logger.error(`config present but failed to start: ${err instanceof Error ? err.message : String(err)}`);
+      remote = (await loadConfig(configPath)).control_plane;
+    } catch {
+      /* reload() reports the real reason below */
     }
+    const started = await reload();
+    // Config present but failed to start — surface, but keep the IPC host alive so the
+    // renderer can still read status and the user can fix/redo setup.
+    if (started.ok) logger.info('corral configured — orchestrator running (ipc)');
+    else logger.error(`config present but failed to start: ${started.error}`);
   } else {
     // Setup mode: no config yet. The IPC host serves status; the desktop writes config
     // + respawns this process once setup completes.

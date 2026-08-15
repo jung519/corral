@@ -10,19 +10,16 @@
  * Transports (`ipc.ts`, `ws.ts`) only move these messages; this file decides what a
  * method does. Adding a transport must never require touching the method table.
  *
- * Setup (config + secrets) is NOT here — the desktop writes those through its own
- * bridge and respawns the core.
+ * Setup (config, secrets, draft, host probes) IS here, because a remote core owns its
+ * own config and there is no other way to reach that disk. One rule holds throughout:
+ * secrets go in and existence comes back — no method ever returns a secret value.
  */
 import type { WebChannel } from '../channel/web.js';
 import type { DirectionCheckStore, DirectionStore } from '../core/direction.js';
 import { bus } from '../core/events.js';
 import type { Orchestrator } from '../orchestrator.js';
-
-/** Config + secrets the setup wizard persists (kept for the headless/browser shape). */
-export interface SetupInput {
-  config: string;
-  secrets: Array<{ service: string; account: string; value: string }>;
-}
+import { detectCli, detectDocker } from './host-probe.js';
+import type { SetupHost } from './setup-host.js';
 
 export interface ControlPlaneDeps {
   channel: WebChannel;
@@ -32,6 +29,9 @@ export interface ControlPlaneDeps {
   directionStore: DirectionStore;
   /** Direction validation state — consent flag read/written from the settings UI. */
   directionCheck: DirectionCheckStore;
+  /** This core's own config/secrets/draft. Absent in tests that only exercise runtime
+   *  methods; the setup methods then answer `NO_SETUP` instead of throwing. */
+  setup?: SetupHost;
 }
 
 /** Wire message shapes. Exported so transports type their payloads identically. */
@@ -51,6 +51,15 @@ export type OutMessage =
   | { kind: 'denied'; reason: string };
 
 const NOT_CONFIGURED = { ok: false, message: 'Corral is not configured yet — finish setup first.' };
+const NO_SETUP = { ok: false, error: 'this core does not expose setup' };
+
+/** A credential ref off the wire. Both halves are required — a blank service or account
+ *  would collide with other entries in the store's flat "service:account" keyspace. */
+function ref(a: Record<string, unknown>): { service: string; account: string } | null {
+  const service = String(a.service ?? '').trim();
+  const account = String(a.account ?? '').trim();
+  return service && account ? { service, account } : null;
+}
 
 /** Run one control-plane method. Throws on an unknown method or an orchestrator error;
  *  transports turn that into `{ kind:'res', id, error }`. */
@@ -73,6 +82,53 @@ export async function dispatch(
     case 'directionConsentSet':
       deps.directionCheck.setConsent(a.value === true);
       return { ok: true, consent: deps.directionCheck.getConsent() };
+    case 'directionWrite':
+      deps.directionStore.write(String(a.text ?? ''));
+      return { ok: true };
+
+    // ── Setup: this core's own config, secrets, draft, and host probes ──────────────
+    case 'configGet':
+      if (!deps.setup) return NO_SETUP;
+      return { exists: deps.setup.configExists(), yaml: deps.setup.configRead() };
+    case 'configSet':
+      if (!deps.setup) return NO_SETUP;
+      // Writes, then rebuilds the orchestrator in place — a remote core has no parent
+      // process to respawn it. `configured` is what the wizard checks to call it done.
+      return { ...(await deps.setup.configWrite(String(a.yaml ?? ''))), configured: !!deps.orchestrator() };
+    case 'secretSet': {
+      if (!deps.setup) return NO_SETUP;
+      const r = ref(a);
+      if (!r) return { ok: false, error: 'service and account are required' };
+      await deps.setup.credentials.set(r, String(a.value ?? ''));
+      return { ok: true };
+    }
+    case 'secretHas': {
+      if (!deps.setup) return NO_SETUP;
+      const r = ref(a);
+      return { has: r ? await deps.setup.credentials.has(r) : false };
+    }
+    case 'secretDelete': {
+      if (!deps.setup) return NO_SETUP;
+      const r = ref(a);
+      if (!r) return { ok: false, error: 'service and account are required' };
+      await deps.setup.credentials.delete(r);
+      return { ok: true };
+    }
+    case 'draftGet':
+      if (!deps.setup) return NO_SETUP;
+      return { json: deps.setup.draftRead() };
+    case 'draftSet':
+      if (!deps.setup) return NO_SETUP;
+      deps.setup.draftWrite(String(a.json ?? ''));
+      return { ok: true };
+    case 'draftClear':
+      if (!deps.setup) return NO_SETUP;
+      deps.setup.draftClear();
+      return { ok: true };
+    case 'detectDocker':
+      return await detectDocker();
+    case 'detectCli':
+      return await detectCli(String(a.provider ?? ''));
     case 'state':
       return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
     case 'candidates':
