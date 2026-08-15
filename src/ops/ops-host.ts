@@ -141,7 +141,7 @@ export class OpsHost {
     for (const pipeline of this.registry.active()) {
       if (this.subscriptions.has(pipeline.key)) continue;
       try {
-        const adapter = triggerRegistry.create(pipeline.trigger, { now: this.options.now });
+        const adapter = triggerRegistry.create(pipeline.trigger, { now: this.options.now, credentials: this.options.credentials });
         this.subscriptions.set(pipeline.key, adapter.start(pipeline, (event) => this.fire(pipeline.key, event)));
       } catch (err) {
         // An unknown kind must not stop the others from running.
