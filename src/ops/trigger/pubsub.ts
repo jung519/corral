@@ -30,25 +30,18 @@
  * is for, and that policy belongs on the subscription where an operator can see and change
  * it — not buried in a counter inside this process (D-note on CRL-18).
  */
-import { fetchJson } from '../../core/fetch-retry.js';
 import { logger } from '../../core/logger.js';
-import type { CredentialRef, CredentialStore } from '../../credentials/types.js';
+import type { CredentialStore } from '../../credentials/types.js';
+import { pubsubClient, type PubSubClient, type ReceivedMessage } from '../google-pubsub.js';
 import type { RunOutcome, RunRecord } from '../pipeline/run.js';
 import type { Pipeline } from '../pipeline/schema.js';
-import { GoogleTokenSource, parseServiceAccountKey } from './google-auth.js';
 import type { FireFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
 
-const SCOPE = 'https://www.googleapis.com/auth/pubsub';
 /** How long a pull waits for a message before returning empty. */
 const PULL_INTERVAL_MS = 2_000;
 
 /** Outcomes a retry would only repeat. Everything else keeps the message. */
 const SETTLED: readonly RunOutcome[] = ['completed', 'skipped', 'reported', 'rejected', 'over_budget'];
-
-interface ReceivedMessage {
-  ackId: string;
-  message: { data?: string; attributes?: Record<string, string>; messageId?: string };
-}
 
 export interface PubSubContext extends TriggerContext {
   credentials?: CredentialStore;
@@ -69,7 +62,7 @@ export class PubSubTrigger implements TriggerAdapter {
     const loop = async (): Promise<void> => {
       let client: PubSubClient;
       try {
-        client = await this.client(subscription, credential);
+        client = await pubsubClient(credential, this.ctx.credentials, this.ctx.now);
       } catch (err) {
         logger.error(`ops: pipeline "${pipeline.key}" cannot reach Pub/Sub — ${message(err)}`);
         return;
@@ -81,7 +74,7 @@ export class PubSubTrigger implements TriggerAdapter {
         try {
           // Never more than the pipeline will run at once: pulling a hundred messages a
           // slot-limited pipeline cannot start just holds them until they time out.
-          received = await client.pull(pipeline.max_concurrent);
+          received = await client.pull(subscription, pipeline.max_concurrent);
         } catch (err) {
           logger.warn(`ops: pull failed for "${pipeline.key}" — ${message(err)}`);
           await sleep(PULL_INTERVAL_MS);
@@ -94,7 +87,7 @@ export class PubSubTrigger implements TriggerAdapter {
 
         // Tracked so shutdown can wait: a message half-processed and never settled would
         // sit until its deadline lapses, which looks like a stall to whoever published it.
-        inFlight = Promise.all(received.map((m) => this.handle(pipeline, m, client, fire))).then(() => {});
+        inFlight = Promise.all(received.map((m) => this.handle(pipeline, subscription, m, client, fire))).then(() => {});
         await inFlight;
       }
     };
@@ -109,13 +102,19 @@ export class PubSubTrigger implements TriggerAdapter {
   }
 
   /** Run one message and settle it according to how the run ended. */
-  private async handle(pipeline: Pipeline, received: ReceivedMessage, client: PubSubClient, fire: FireFn): Promise<void> {
+  private async handle(
+    pipeline: Pipeline,
+    subscription: string,
+    received: ReceivedMessage,
+    client: PubSubClient,
+    fire: FireFn,
+  ): Promise<void> {
     const event = decode(received.message);
     if (event === undefined) {
       // Unreadable now and unreadable on every redelivery. Dropping it is the only way
       // out of a loop that would otherwise never end.
       logger.warn(`ops: dropping an unreadable message on "${pipeline.key}" (${received.message.messageId ?? '?'})`);
-      await client.ack([received.ackId]).catch(() => {});
+      await client.ack(subscription, [received.ackId]).catch(() => {});
       return;
     }
 
@@ -133,67 +132,11 @@ export class PubSubTrigger implements TriggerAdapter {
 
     // No record and no error means the pipeline is gone; a retry finds it just as gone.
     const settled = !threw && (!record || SETTLED.includes(record.outcome));
-    await (settled ? client.ack([received.ackId]) : client.nack([received.ackId])).catch((err: unknown) =>
+    await (settled ? client.ack(subscription, [received.ackId]) : client.nack(subscription, [received.ackId])).catch((err: unknown) =>
       logger.warn(`ops: could not settle a message on "${pipeline.key}" — ${message(err)}`),
     );
   }
 
-  private async client(subscription: string, credential?: CredentialRef): Promise<PubSubClient> {
-    // The emulator's whole contract: this variable set, plain HTTP, no auth. Same code
-    // path otherwise, so what runs locally is what runs in production.
-    const emulator = process.env.PUBSUB_EMULATOR_HOST;
-    if (emulator) {
-      const base = emulator.startsWith('http') ? emulator : `http://${emulator}`;
-      return new PubSubClient(base, subscription, undefined);
-    }
-
-    if (!credential || !this.ctx.credentials) {
-      throw new Error('a pubsub trigger needs a credential (a service-account JSON key)');
-    }
-    const raw = await this.ctx.credentials.get(credential);
-    if (!raw) throw new Error(`no secret stored for ${credential.service}:${credential.account}`);
-
-    const source = new GoogleTokenSource(parseServiceAccountKey(raw), SCOPE, this.ctx.now);
-    return new PubSubClient('https://pubsub.googleapis.com', subscription, source);
-  }
-}
-
-/** The three REST calls a pull subscription needs. */
-export class PubSubClient {
-  constructor(
-    private readonly base: string,
-    /** Full resource name: `projects/<project>/subscriptions/<name>`. */
-    private readonly subscription: string,
-    private readonly tokens?: GoogleTokenSource,
-  ) {}
-
-  private async headers(): Promise<Record<string, string>> {
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
-    if (this.tokens) headers.authorization = `Bearer ${await this.tokens.token()}`;
-    return headers;
-  }
-
-  private async post<T>(action: string, body: unknown): Promise<T> {
-    return fetchJson<T>(
-      `${this.base}/v1/${this.subscription}:${action}`,
-      { method: 'POST', headers: await this.headers(), body: JSON.stringify(body) },
-      { label: 'pubsub', maxRetries: 1 },
-    );
-  }
-
-  async pull(maxMessages: number): Promise<ReceivedMessage[]> {
-    const res = await this.post<{ receivedMessages?: ReceivedMessage[] }>('pull', { maxMessages });
-    return res.receivedMessages ?? [];
-  }
-
-  async ack(ackIds: string[]): Promise<void> {
-    await this.post('acknowledge', { ackIds });
-  }
-
-  /** Deadline 0 = "give it to someone else now" — Pub/Sub's negative acknowledgement. */
-  async nack(ackIds: string[]): Promise<void> {
-    await this.post('modifyAckDeadline', { ackIds, ackDeadlineSeconds: 0 });
-  }
 }
 
 /** Message body → event. `undefined` means it cannot be read at all. */
