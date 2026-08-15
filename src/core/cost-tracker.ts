@@ -12,6 +12,7 @@ import { resolve } from 'node:path';
 import type { MessageKey } from '../profile/i18n.js';
 import { DEFAULT_STATE_DIR } from './issue-state.js';
 import { logger } from './logger.js';
+import type { TokenBudget } from './token-budget.js';
 
 export interface CostEntry {
   costUsd: number;
@@ -27,7 +28,15 @@ export class CostTracker {
   private readonly stateDir: string;
   private readonly file: string;
 
-  constructor(stateDir: string = DEFAULT_STATE_DIR) {
+  /**
+   * @param budget Shared daily ceiling. Every development-AI run funnels through `add`,
+   *   so feeding it here means no call site can forget — and the operational AI's own
+   *   spending lands in the same counter.
+   */
+  constructor(
+    stateDir: string = DEFAULT_STATE_DIR,
+    private readonly budget?: TokenBudget,
+  ) {
     this.stateDir = stateDir;
     this.file = resolve(stateDir, 'costs.json');
     this.load();
@@ -46,6 +55,7 @@ export class CostTracker {
     cur.dispatches += 1;
     this.byIssue.set(identifier, cur);
     this.persist();
+    this.budget?.record(run);
   }
 
   get(identifier: string): CostEntry | undefined {

@@ -22,6 +22,7 @@ import { TimingAgent } from './agent/timing-agent.js';
 import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 import { CostTracker } from './core/cost-tracker.js';
+import type { TokenBudget } from './core/token-budget.js';
 import { bus } from './core/events.js';
 import { renderMarkdown } from './core/markdown.js';
 import {
@@ -64,7 +65,7 @@ const REFERENCE_DIR = '.reference';
 export class Orchestrator {
   private readonly review: ReviewOrchestrator;
   private readonly planCritique: PlanCritiqueOrchestrator;
-  private readonly cost = new CostTracker();
+  private readonly cost: CostTracker;
   private readonly history = new JsonlHistoryStore();
   /** Timing-wrapped agent (measures AI working time); the injected adapter is wrapped. */
   private readonly agent: AgentAdapter;
@@ -91,7 +92,10 @@ export class Orchestrator {
     private readonly directionStore?: DirectionStore,
     /** Direction validation state (consent + per-scope verified hashes). */
     private readonly directionCheck?: DirectionCheckStore,
+    /** Daily token ceiling, shared with the operational AI. */
+    private readonly budget?: TokenBudget,
   ) {
+    this.cost = new CostTracker(undefined, budget);
     // Wrap the agent once so every turn — planning, critique, review — is timed into
     // the issue's "AI working" total (recorded in the history entry on completion).
     this.agent = new TimingAgent(agent, (id, ms) => this.recordAgentMs(id, ms));
@@ -864,6 +868,16 @@ export class Orchestrator {
       logger.child(rt.identifier).warn('dispatch requested while busy; skipping');
       return { ok: false, costUsd: 0, inputTokens: 0, outputTokens: 0, exitCode: null, error: 'crashed' };
     }
+    // Checked before the turn, not after — a ceiling enforced afterwards has already
+    // been exceeded. The agent is never reached, so failover never sees this and does
+    // not waste an attempt on a second provider that shares the same limit.
+    const allowed = this.budget?.check();
+    if (allowed && !allowed.ok) {
+      logger.child(rt.identifier).warn(`dispatch blocked: ${allowed.reason}`);
+      bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: `⛔ ${allowed.reason}` });
+      return { ok: false, costUsd: 0, inputTokens: 0, outputTokens: 0, exitCode: null, error: 'budget' };
+    }
+
     this.busy.add(rt.identifier);
     try {
       const workflow = await renderWorkflow({

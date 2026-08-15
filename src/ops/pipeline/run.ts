@@ -17,6 +17,7 @@
  */
 import { bus } from '../../core/events.js';
 import { ConcurrencyLimiter } from '../../core/concurrency-limiter.js';
+import type { BudgetVerdict, TokenUsage } from '../../core/token-budget.js';
 import type { AnswerValidator, Fields, InputResolver, OperationRunner, OutputSink } from './ports.js';
 import type { Condition, Pipeline } from './schema.js';
 
@@ -29,6 +30,8 @@ export type RunOutcome =
   | 'reported'
   /** The pipeline was already at its concurrency limit; nothing was attempted. */
   | 'throttled'
+  /** The day's shared token ceiling is spent; nothing was attempted. */
+  | 'over_budget'
   | 'input_failed'
   | 'agent_failed'
   | 'rejected'
@@ -65,6 +68,12 @@ export interface RunRecord {
   reviewUrl?: string;
 }
 
+/** The slice of the shared ceiling a run touches. `TokenBudget` satisfies it. */
+export interface RunBudget {
+  check(): BudgetVerdict;
+  record(usage: TokenUsage): void;
+}
+
 export interface RunDeps {
   /** By `input.kind`. */
   resolvers: Map<string, InputResolver>;
@@ -72,6 +81,9 @@ export interface RunDeps {
   validator: AnswerValidator;
   /** By `output.kind`. */
   sinks: Map<string, OutputSink>;
+  /** Daily token ceiling, shared with the development AI. Narrowed to what a run needs,
+   *  so the host can hand over a read-through view without casting. */
+  budget?: RunBudget;
   /** Injectable so tests are deterministic. */
   now?: () => number;
 }
@@ -191,6 +203,15 @@ export class PipelineRunner {
       }
 
       // ── the model turn ───────────────────────────────────────────────────────
+      // The ceiling is shared with the development AI, so this can be spent by work that
+      // has nothing to do with pipelines. Its own outcome, not a failure: a failed run
+      // invites the trigger to redeliver, and redelivering into a spent budget all day
+      // is exactly the retry storm to avoid. There is nothing to fix until tomorrow.
+      const allowed = this.deps.budget?.check();
+      if (allowed && !allowed.ok) {
+        return done('over_budget', { stage: 'agent', reason: allowed.reason });
+      }
+
       this.emit(head, 'agent', 'calling the model');
       let operation;
       try {
@@ -198,6 +219,9 @@ export class PipelineRunner {
       } catch (err) {
         return done('agent_failed', { stage: 'agent', reason: message(err) });
       }
+      // Spent whatever the answer turns out to be worth — a rejected answer still cost
+      // tokens, and a ceiling that only counted useful calls would not be a ceiling.
+      this.deps.budget?.record({ inputTokens: operation.inputTokens ?? 0, outputTokens: operation.outputTokens ?? 0 });
 
       // ── checking the answer ──────────────────────────────────────────────────
       const verdict = await this.deps.validator.check(pipeline.agent, operation.answer);

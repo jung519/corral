@@ -8,6 +8,7 @@
  */
 import { logger } from '../core/logger.js';
 import type { CredentialStore } from '../credentials/types.js';
+import type { TokenBudget } from '../core/token-budget.js';
 import { JsonlOpsHistoryStore } from './history/jsonl-store.js';
 import type { OpsHistoryStore } from './history/store.js';
 import { NoneInputResolver } from './input/none.js';
@@ -33,6 +34,8 @@ export interface OpsHostOptions {
   stateDir: string;
   /** Resolves credentials named by a pipeline (vocabulary fetches, input, output). */
   credentials?: CredentialStore;
+  /** Daily token ceiling, shared with the development AI. */
+  budget?: TokenBudget;
   /** Swap in real steps as they land. */
   operation?: OperationRunner;
   validator?: AnswerValidator;
@@ -55,6 +58,7 @@ export class OpsHost {
   private readonly runner: PipelineRunner;
   /** Swapped in when a config arrives — see `useOperation`. */
   private operation: OperationRunner;
+  private budget?: TokenBudget;
   private readonly dir: string;
   /** Why the last load failed, so the UI can show it instead of an empty list. */
   private loadError?: string;
@@ -63,12 +67,16 @@ export class OpsHost {
     this.dir = pipelinesDir(options.stateDir);
     this.history = options.history ?? new JsonlOpsHistoryStore(options.stateDir, { now: options.now });
     this.operation = options.operation ?? new UnwiredOperationRunner();
+    this.budget = options.budget;
     this.runner = new PipelineRunner({
       resolvers: new Map((options.resolvers ?? [new NoneInputResolver()]).map((r) => [r.kind, r])),
       sinks: new Map((options.sinks ?? [new NoneOutputSink()]).map((s) => [s.kind, s])),
       // Read through, so a provider swap takes effect without rebuilding the runner.
       operation: { run: (step, fields) => this.operation.run(step, fields) },
       validator: options.validator ?? new RuleAnswerValidator({ credentials: options.credentials, now: options.now }),
+      // Read through, like `operation` — the config that carries the limits arrives after
+      // the operational AI has started.
+      budget: { check: () => this.budget?.check() ?? { ok: true }, record: (u) => this.budget?.record(u) },
       now: options.now,
     });
   }
@@ -80,6 +88,12 @@ export class OpsHost {
    */
   useOperation(operation: OperationRunner): void {
     this.operation = operation;
+  }
+
+  /** Point the ceiling check at this counter — same reason as `useOperation`: the limits
+   *  live in the config, which arrives after the operational AI has started. */
+  useBudget(budget: TokenBudget): void {
+    this.budget = budget;
   }
 
   /**
@@ -102,6 +116,12 @@ export class OpsHost {
 
   get error(): string | undefined {
     return this.loadError;
+  }
+
+  /** The day's shared token usage, or undefined when no ceiling is wired yet. Reading it
+   *  is how an operator (and, later, the dashboard) sees why work has paused. */
+  budgetSnapshot(): ReturnType<TokenBudget['snapshot']> | undefined {
+    return this.budget?.snapshot();
   }
 
   /** What the operational dashboard lists. */

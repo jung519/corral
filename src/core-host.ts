@@ -17,6 +17,7 @@ import type { ControlPlaneDeps } from './control-plane/dispatch.js';
 import { SetupHost } from './control-plane/setup-host.js';
 import { startWsHost, type WsHost } from './control-plane/ws.js';
 import { DirectionCheckStore, DirectionStore } from './core/direction.js';
+import { TokenBudget } from './core/token-budget.js';
 import { logger } from './core/logger.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import { opsChatClients, opsModelFor } from './ops/operation/clients.js';
@@ -96,6 +97,9 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
 
   let orchestrator: Orchestrator | undefined;
   let channelStarted = false;
+  // ONE counter for both pillars. Rebuilt on reload so a limit change takes effect, but
+  // the day's tally is on disk — editing the config does not hand back spent tokens.
+  let budget = new TokenBudget({}, stateDir);
 
   /**
    * Build the orchestrator from the config now on disk and run it — the startup path and
@@ -109,7 +113,15 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
   const reload = async (): Promise<{ ok: boolean; error?: string }> => {
     try {
       const config = await loadConfig(configPath);
-      const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck });
+      budget = new TokenBudget(
+        {
+          dailyInputTokens: config.limits.daily_input_tokens,
+          dailyOutputTokens: config.limits.daily_output_tokens,
+        },
+        stateDir,
+      );
+      ops.useBudget(budget);
+      const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck, budget });
       orchestrator?.stop();
       orchestrator = app.orchestrator;
       // The operational AI asks the same providers the development one does (D24). Only
@@ -131,7 +143,7 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
   // The operational AI runs alongside the development one, sharing this core's state
   // directory and control plane but none of its code (docs/module-boundaries.md). It
   // needs no config: with no pipeline files on disk it simply has nothing to run.
-  const ops = await startOpsHost({ stateDir, credentials });
+  const ops = await startOpsHost({ stateDir, credentials, budget });
 
   const deps: ControlPlaneDeps = {
     channel,

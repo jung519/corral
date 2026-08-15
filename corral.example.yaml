@@ -79,6 +79,14 @@ workspace:
   #   mount_host_login: true      # mount ~/.claude into the container (no API key needed).
   #                               # set false to authenticate with an agent API key instead.
 
+# Daily token ceiling, SHARED by the development and operational AI (first come, first
+# served — when the day's tokens are gone, both stop). Counted in tokens rather than
+# money: a price table belongs to the vendor and the vendor changes it, while token
+# counts come back from the response itself. Omit for no ceiling.
+# limits:
+#   daily_input_tokens: 2000000
+#   daily_output_tokens: 200000
+
 channel:
   kind: web               # web | slack
   port: 4400

@@ -272,6 +272,22 @@ export const ChannelSchema = z
   })
   .default({ kind: 'web', port: 4400 });
 
+// ──────────────────────────────────────────────────────────────────── limits
+
+/**
+ * Daily token ceiling, shared by the development and operational AI (first come, first
+ * served). Counted in tokens rather than money: a price table belongs to the vendor and
+ * the vendor changes it, while token counts come back from the response itself.
+ *
+ * Unset = no ceiling.
+ */
+export const LimitsSchema = z
+  .object({
+    daily_input_tokens: z.number().int().nonnegative().optional(),
+    daily_output_tokens: z.number().int().nonnegative().optional(),
+  })
+  .default({});
+
 // ────────────────────────────────────────────────────────────── control plane
 
 /**
@@ -336,6 +352,7 @@ export const ConfigSchema = z.object({
   workspace: WorkspaceSchema,
   channel: ChannelSchema,
   control_plane: ControlPlaneSchema,
+  limits: LimitsSchema,
   review: ReviewSchema,
   plan_review: PlanReviewSchema,
   /** Max issues active (workspaces) at once. */
@@ -350,6 +367,7 @@ export type AgentRoutingConfig = z.infer<typeof AgentRoutingSchema>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceSchema>;
 export type ChannelConfig = z.infer<typeof ChannelSchema>;
 export type ControlPlaneConfig = z.infer<typeof ControlPlaneSchema>;
+export type LimitsConfig = z.infer<typeof LimitsSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type CredentialRefConfig = z.infer<typeof CredentialRefSchema>;
 export type ReviewConfig = z.infer<typeof ReviewSchema>;
