@@ -6,14 +6,12 @@
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
 import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
-import { exec, execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { configExists, readConfig, writeConfig } from './config-store.js';
-import { readDirection, writeDirection } from './direction-store.js';
-import { clearDraft, readDraft, writeDraft } from './draft-store.js';
-import { deleteSecret, hasSecret, setSecret } from './keychain.js';
+import { configExists as localConfigExists } from './config-store.js';
+import * as native from './native-routing.js';
 import { initAutoUpdate } from './auto-updater.js';
 import {
   callCore,
@@ -76,22 +74,27 @@ function createWindow(): void {
   // Ensure the core (IPC control plane) is running whenever a window exists — covers
   // first launch and macOS reopen-after-close. Idempotent (no-op if already up).
   startOrchestrator();
-  const firstRun = !configExists();
+  // Which screen to open first. Only the local config can be checked synchronously, and
+  // in remote mode it is the wrong disk to look at — so we open the dashboard and let the
+  // renderer redirect once it has asked the core (App.svelte does this on mount).
+  const firstRun = !native.isRemote() && !localConfigExists();
   void win.loadURL(rendererUrl(firstRun ? '#/setup' : '#/'));
 }
 
 function registerIpc(): void {
+  // Config, secrets, direction, draft and host probes go through native-routing: they
+  // land on this machine in local mode and on the core's machine in remote mode.
   ipcMain.handle('app:version', () => app.getVersion());
-  ipcMain.handle('config:exists', () => configExists());
-  ipcMain.handle('config:read', () => readConfig());
-  ipcMain.handle('config:write', (_e, yaml: string) => writeConfig(yaml));
+  ipcMain.handle('config:exists', () => native.configExists());
+  ipcMain.handle('config:read', () => native.configRead());
+  ipcMain.handle('config:write', (_e, yaml: string) => native.configWrite(yaml));
 
-  ipcMain.handle('draft:read', () => readDraft());
-  ipcMain.handle('draft:write', (_e, json: string) => writeDraft(json));
-  ipcMain.handle('draft:clear', () => clearDraft());
+  ipcMain.handle('draft:read', () => native.draftRead());
+  ipcMain.handle('draft:write', (_e, json: string) => native.draftWrite(json));
+  ipcMain.handle('draft:clear', () => native.draftClear());
 
-  ipcMain.handle('direction:read', () => readDirection());
-  ipcMain.handle('direction:write', (_e, text: string) => writeDirection(text));
+  ipcMain.handle('direction:read', () => native.directionRead());
+  ipcMain.handle('direction:write', (_e, text: string) => native.directionWrite(text));
 
   // Core connection: run the core here (local) or attach to one elsewhere (remote).
   ipcMain.handle('remote:get', () => {
@@ -119,13 +122,15 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('secret:set', (_e, service: string, account: string, value: string) =>
-    setSecret(service, account, value),
+    native.secretSet(service, account, value),
   );
-  ipcMain.handle('secret:has', (_e, service: string, account: string) => hasSecret(service, account));
-  ipcMain.handle('secret:delete', (_e, service: string, account: string) => deleteSecret(service, account));
+  ipcMain.handle('secret:has', (_e, service: string, account: string) => native.secretHas(service, account));
+  ipcMain.handle('secret:delete', (_e, service: string, account: string) => native.secretDelete(service, account));
 
-  ipcMain.handle('docker:detect', () => detectDocker());
-  ipcMain.handle('cli:detect', (_e, provider: string) => detectCli(provider));
+  ipcMain.handle('docker:detect', () => native.detectDocker());
+  ipcMain.handle('cli:detect', (_e, provider: string) => native.detectCli(provider));
+  // Login capture stays on THIS machine in both modes — it opens a browser, and a VM has
+  // none. The token it returns is saved through `secret:set`, so it still lands on the core.
   ipcMain.handle('claude:setup-token', () => runClaudeSetupToken());
   ipcMain.handle('codex:import-auth', () => importCodexAuth());
   ipcMain.handle('notify', (_e, title: string, body: string) => showNotification(title, body));
@@ -140,8 +145,10 @@ function registerIpc(): void {
 
   // After setup (config + secrets just written): respawn the core so it picks up the
   // new config and the freshly-saved keychain secrets (injected as env on spawn).
+  // A remote core has already reloaded itself inside `config:write` — respawning here
+  // would only drop and re-establish the link for nothing.
   ipcMain.handle('orchestrator:start', () => {
-    restartOrchestrator();
+    if (!native.isRemote()) restartOrchestrator();
     return { ok: true };
   });
 
@@ -163,31 +170,6 @@ function showNotification(title: string, body: string): void {
     }
   });
   n.show();
-}
-
-function detectDocker(): Promise<{ available: boolean; version?: string }> {
-  return new Promise((resolve) => {
-    exec('docker --version', (err, stdout) => {
-      if (err) resolve({ available: false });
-      else resolve({ available: true, version: stdout.trim() });
-    });
-  });
-}
-
-/** The official CLI binary for each agent provider. */
-const CLI_BIN: Record<string, string> = { claude: 'claude', gemini: 'gemini', gpt: 'codex' };
-
-/** Check whether a provider's CLI is installed (runs `<bin> --version`). Binary is
- *  looked up from a fixed whitelist, never interpolated from the provider arg. */
-function detectCli(provider: string): Promise<{ installed: boolean; version?: string }> {
-  const bin = CLI_BIN[provider];
-  if (!bin) return Promise.resolve({ installed: false });
-  return new Promise((resolve) => {
-    execFile(bin, ['--version'], { timeout: 5000 }, (err, stdout) => {
-      if (err) resolve({ installed: false });
-      else resolve({ installed: true, version: stdout.trim().split('\n')[0] });
-    });
-  });
 }
 
 /** Run `claude setup-token` to obtain a long-lived subscription OAuth token at save
