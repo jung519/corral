@@ -36,10 +36,19 @@ export interface ControlPlaneDeps {
 
 /** Wire message shapes. Exported so transports type their payloads identically. */
 export type ReqMessage = { kind: 'req'; id: number; method: string; args?: Record<string, unknown> };
+
+/** Handshake, used by remote transports only — the process-IPC parent is already trusted.
+ *  `pair` exchanges a one-time code for a token; `auth` presents that token. */
+export type AuthMessage =
+  | { kind: 'pair'; code?: string; label?: string }
+  | { kind: 'auth'; token?: string };
+
 export type OutMessage =
   | { kind: 'res'; id: number; result?: unknown; error?: string }
   | { kind: 'event'; event: unknown }
-  | { kind: 'ready' };
+  | { kind: 'ready' }
+  | { kind: 'paired'; token: string }
+  | { kind: 'denied'; reason: string };
 
 const NOT_CONFIGURED = { ok: false, message: 'Corral is not configured yet — finish setup first.' };
 

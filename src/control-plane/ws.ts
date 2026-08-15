@@ -10,18 +10,26 @@
  * cross-platform packaging.
  *
  * ## Security
- * Binds to loopback by default and is **off unless configured**. Authentication is a
- * separate milestone; until it lands, loopback + opt-in is the only barrier, so exposing
- * this on a public interface is logged as a warning.
+ * Off unless configured, loopback by default, and **authenticated** (`auth.ts`): a client
+ * pairs once with a short code, then presents a token. Until it authenticates a socket may
+ * send nothing but the handshake, receives no events, and is dropped after a timeout.
+ * There is no transport encryption — run it behind a tunnel/VPN, hence the warning when
+ * bound to a non-loopback address.
  */
 import { WebSocketServer, type WebSocket } from 'ws';
 import { bus } from '../core/events.js';
 import { logger } from '../core/logger.js';
-import { type ControlPlaneDeps, dispatch, type OutMessage, type ReqMessage } from './dispatch.js';
+import type { ControlPlaneAuth } from './auth.js';
+import { type AuthMessage, type ControlPlaneDeps, dispatch, type OutMessage, type ReqMessage } from './dispatch.js';
+
+/** Time a client has to authenticate before the socket is closed. */
+const AUTH_TIMEOUT_MS = 10_000;
 
 export interface WsHostOptions {
   host: string;
   port: number;
+  /** Credential store. Omit ONLY in tests that exercise the transport itself. */
+  auth?: ControlPlaneAuth;
 }
 
 export interface WsHost {
@@ -44,10 +52,11 @@ function isLoopback(host: string): boolean {
 export function startWsHost(deps: ControlPlaneDeps, opts: WsHostOptions): Promise<WsHost> {
   if (!isLoopback(opts.host)) {
     logger.warn(
-      `control plane bound to ${opts.host} — reachable beyond this machine and NOT authenticated yet. ` +
+      `control plane bound to ${opts.host} — reachable beyond this machine and NOT encrypted. ` +
         `Put it behind a tunnel/VPN or bind 127.0.0.1.`,
     );
   }
+  if (!opts.auth) logger.warn('control plane running WITHOUT authentication (tests only)');
 
   const wss = new WebSocketServer({ host: opts.host, port: opts.port });
   const sockets = new Set<WebSocket>();
@@ -69,37 +78,81 @@ export function startWsHost(deps: ControlPlaneDeps, opts: WsHostOptions): Promis
   });
 
   wss.on('connection', (socket) => {
-    sockets.add(socket);
-    logger.info(`control plane client connected (${sockets.size} total)`);
+    // An unauthenticated socket is only allowed to pair or authenticate; it never reaches
+    // dispatch(). With no auth store (transport tests) the socket starts authenticated.
+    let authed = !opts.auth;
+    // Don't let unauthenticated sockets linger and hold resources.
+    const authTimer = authed
+      ? undefined
+      : setTimeout(() => {
+          logger.warn('ws: closing client that did not authenticate in time');
+          socket.close();
+        }, AUTH_TIMEOUT_MS);
+
+    const pass = (): void => {
+      authed = true;
+      if (authTimer) clearTimeout(authTimer);
+      sockets.add(socket); // only authenticated sockets receive the event fan-out
+      logger.info(`control plane client connected (${sockets.size} total)`);
+      // Unlike IPC (one parent, signalled once at startup), each client needs its own
+      // ready as soon as it is allowed in.
+      sendTo(socket, { kind: 'ready' });
+    };
+
+    const reject = (reason: string): void => {
+      // Never echo the submitted code/token — logs must not become a credential leak.
+      logger.warn(`ws: rejected client (${reason})`);
+      sendTo(socket, { kind: 'denied', reason });
+      socket.close();
+    };
+
+    if (authed) pass();
 
     socket.on('message', (raw) => {
-      let msg: ReqMessage;
+      let msg: ReqMessage | AuthMessage;
       try {
-        msg = JSON.parse(String(raw)) as ReqMessage;
+        msg = JSON.parse(String(raw)) as ReqMessage | AuthMessage;
       } catch {
         logger.warn('ws: dropping unparseable message');
         return;
       }
-      if (!msg || msg.kind !== 'req' || typeof msg.id !== 'number') return;
-      void dispatch(msg.method, msg.args ?? {}, deps)
-        .then((result) => sendTo(socket, { kind: 'res', id: msg.id, result }))
+      if (!msg) return;
+
+      if (!authed) {
+        const auth = opts.auth!;
+        if (msg.kind === 'pair') {
+          const token = auth.redeemCode(String(msg.code ?? ''), String(msg.label ?? 'client'));
+          if (!token) return reject('invalid or expired pairing code');
+          sendTo(socket, { kind: 'paired', token });
+          pass();
+        } else if (msg.kind === 'auth') {
+          if (!auth.verifyToken(String(msg.token ?? ''))) return reject('invalid token');
+          pass();
+        } else {
+          // Anything else before authenticating — including `req` — is refused.
+          reject('not authenticated');
+        }
+        return;
+      }
+
+      if (msg.kind !== 'req' || typeof msg.id !== 'number') return;
+      const req = msg;
+      void dispatch(req.method, req.args ?? {}, deps)
+        .then((result) => sendTo(socket, { kind: 'res', id: req.id, result }))
         .catch((err) =>
-          sendTo(socket, { kind: 'res', id: msg.id, error: err instanceof Error ? err.message : String(err) }),
+          sendTo(socket, { kind: 'res', id: req.id, error: err instanceof Error ? err.message : String(err) }),
         );
     });
 
     socket.on('close', () => {
-      sockets.delete(socket);
-      logger.info(`control plane client disconnected (${sockets.size} left)`);
+      if (authTimer) clearTimeout(authTimer);
+      if (sockets.delete(socket)) logger.info(`control plane client disconnected (${sockets.size} left)`);
     });
     socket.on('error', (err) => {
+      if (authTimer) clearTimeout(authTimer);
       logger.warn(`ws client error: ${err.message}`);
       sockets.delete(socket);
     });
-
-    // Unlike IPC (one parent, signalled once at startup), each client needs its own
-    // ready as soon as it attaches.
-    sendTo(socket, { kind: 'ready' });
   });
 
   return new Promise((resolve, reject) => {
