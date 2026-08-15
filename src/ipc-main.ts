@@ -1,8 +1,9 @@
 /**
  * Desktop core entrypoint. Forked by the Electron app WITH a Node IPC channel (no TCP
  * port). Bootstraps the orchestrator if config exists, then serves the control plane
- * over IPC (see ipc-host.ts). Credentials come from the injected env (the desktop
- * decrypts keychain secrets into CORRAL_* vars); a file store is the fallback.
+ * over IPC and — when configured — WebSocket too (see control-plane/). Credentials come
+ * from the injected env (the desktop decrypts keychain secrets into CORRAL_* vars); a
+ * file store is the fallback.
  *
  *   <electron-node> dist/ipc-main.js [path/to/corral.yaml]
  */
@@ -16,7 +17,9 @@ import { FileCredentialStore } from './credentials/file-store.js';
 import { LayeredCredentialStore } from './credentials/layered.js';
 import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { logger } from './core/logger.js';
-import { startIpcHost } from './ipc-host.js';
+import type { ControlPlaneConfig } from './config/schema.js';
+import { startIpcHost } from './control-plane/ipc.js';
+import { startWsHost } from './control-plane/ws.js';
 import type { Orchestrator } from './orchestrator.js';
 
 const configPath = resolve(process.argv[2] ?? 'corral.yaml');
@@ -34,9 +37,13 @@ const directionCheck = new DirectionCheckStore(resolve(stateDir));
 let orchestrator: Orchestrator | undefined;
 
 async function main(): Promise<void> {
+  const deps = { channel, orchestrator: () => orchestrator, directionStore, directionCheck };
+  let remote: ControlPlaneConfig | undefined;
+
   if (existsSync(configPath)) {
     try {
       const config = await loadConfig(configPath);
+      remote = config.control_plane;
       const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck });
       orchestrator = app.orchestrator;
       await channel.start();
@@ -53,7 +60,18 @@ async function main(): Promise<void> {
     logger.info('corral starting in setup mode (ipc)');
   }
 
-  startIpcHost({ channel, orchestrator: () => orchestrator, directionStore, directionCheck });
+  startIpcHost(deps);
+
+  // Remote transport runs ALONGSIDE the IPC one — a desktop-attached core keeps working
+  // exactly as before while a remote client can also connect. Off unless configured.
+  if (remote?.enabled) {
+    try {
+      await startWsHost(deps, { host: remote.host, port: remote.port });
+    } catch (err) {
+      // A busy port must not take the core down; the IPC plane is still serving.
+      logger.error(`ws control plane failed to start: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
 }
 
 main().catch((err: unknown) => {

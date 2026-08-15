@@ -272,6 +272,24 @@ export const ChannelSchema = z
   })
   .default({ kind: 'web', port: 4400 });
 
+// ────────────────────────────────────────────────────────────── control plane
+
+/**
+ * Remote control plane (WebSocket). **Off by default** — the desktop drives the core
+ * over a process IPC channel, so a local install has no reason to open a port. Turn it
+ * on to operate a core that runs elsewhere (a VM).
+ *
+ * ⚠️ There is no authentication yet (a separate milestone). Until then the loopback
+ * default is the only barrier — do not set `host` to a public interface.
+ */
+export const ControlPlaneSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    host: z.string().default('127.0.0.1'),
+    port: z.number().int().nonnegative().default(4410),
+  })
+  .default({ enabled: false, host: '127.0.0.1', port: 4410 });
+
 // ─────────────────────────────────────────────────────── review / plan-review
 
 const SemgrepSchema = z
@@ -317,6 +335,7 @@ export const ConfigSchema = z.object({
   agent: AgentSchema,
   workspace: WorkspaceSchema,
   channel: ChannelSchema,
+  control_plane: ControlPlaneSchema,
   review: ReviewSchema,
   plan_review: PlanReviewSchema,
   /** Max issues active (workspaces) at once. */
@@ -330,6 +349,7 @@ export type AgentConfig = z.infer<typeof AgentSchema>;
 export type AgentRoutingConfig = z.infer<typeof AgentRoutingSchema>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceSchema>;
 export type ChannelConfig = z.infer<typeof ChannelSchema>;
+export type ControlPlaneConfig = z.infer<typeof ControlPlaneSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type CredentialRefConfig = z.infer<typeof CredentialRefSchema>;
 export type ReviewConfig = z.infer<typeof ReviewSchema>;

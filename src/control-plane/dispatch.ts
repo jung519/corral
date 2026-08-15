@@ -1,22 +1,22 @@
 /**
- * IPC control-plane host. Replaces the HTTP+SSE server (src/server/dashboard.ts):
- * the desktop forks this core with a Node IPC channel, so there's NO TCP port — the
- * renderer↔main bridge relays requests here over `process.send`/`process.on('message')`.
+ * Control-plane protocol — the method table, independent of how the message arrived.
  *
- * Protocol (parent ⇄ child):
- *   parent → child : { kind:'req', id, method, args }
- *   child  → parent: { kind:'res', id, result }  | { kind:'res', id, error }
- *   child  → parent: { kind:'event', event }      (forwarded bus events)
- *   child  → parent: { kind:'ready' }             (once, on startup)
+ * The wire protocol is four message kinds, shared by every transport:
+ *   client → core : { kind:'req',   id, method, args }
+ *   core → client : { kind:'res',   id, result } | { kind:'res', id, error }
+ *   core → client : { kind:'event', event }        (forwarded bus events)
+ *   core → client : { kind:'ready' }               (once per connection)
  *
- * Methods mirror the old HTTP routes 1:1. Setup (config + secrets) is NOT here — the
- * desktop writes config/secrets via its own bridge (keychain) and respawns this child.
+ * Transports (`ipc.ts`, `ws.ts`) only move these messages; this file decides what a
+ * method does. Adding a transport must never require touching the method table.
+ *
+ * Setup (config + secrets) is NOT here — the desktop writes those through its own
+ * bridge and respawns the core.
  */
-import type { WebChannel } from './channel/web.js';
-import type { DirectionCheckStore, DirectionStore } from './core/direction.js';
-import { bus } from './core/events.js';
-import { logger } from './core/logger.js';
-import type { Orchestrator } from './orchestrator.js';
+import type { WebChannel } from '../channel/web.js';
+import type { DirectionCheckStore, DirectionStore } from '../core/direction.js';
+import { bus } from '../core/events.js';
+import type { Orchestrator } from '../orchestrator.js';
 
 /** Config + secrets the setup wizard persists (kept for the headless/browser shape). */
 export interface SetupInput {
@@ -24,7 +24,7 @@ export interface SetupInput {
   secrets: Array<{ service: string; account: string; value: string }>;
 }
 
-export interface IpcHostDeps {
+export interface ControlPlaneDeps {
   channel: WebChannel;
   /** The orchestrator once configured; undefined in setup mode. */
   orchestrator: () => Orchestrator | undefined;
@@ -34,39 +34,22 @@ export interface IpcHostDeps {
   directionCheck: DirectionCheckStore;
 }
 
+/** Wire message shapes. Exported so transports type their payloads identically. */
+export type ReqMessage = { kind: 'req'; id: number; method: string; args?: Record<string, unknown> };
+export type OutMessage =
+  | { kind: 'res'; id: number; result?: unknown; error?: string }
+  | { kind: 'event'; event: unknown }
+  | { kind: 'ready' };
+
 const NOT_CONFIGURED = { ok: false, message: 'Corral is not configured yet — finish setup first.' };
 
-type ReqMessage = { kind: 'req'; id: number; method: string; args?: Record<string, unknown> };
-
-export function startIpcHost(deps: IpcHostDeps): void {
-  const send = process.send?.bind(process);
-  if (!send) {
-    logger.error('startIpcHost: no IPC channel (core was not forked with stdio:ipc)');
-    return;
-  }
-
-  // Forward every bus event to the parent (replaces the SSE stream).
-  bus.subscribe((event) => {
-    try {
-      send({ kind: 'event', event });
-    } catch (err) {
-      logger.warn('ipc event send failed', String(err));
-    }
-  });
-
-  process.on('message', (raw: unknown) => {
-    const msg = raw as ReqMessage;
-    if (!msg || msg.kind !== 'req') return;
-    void dispatch(msg.method, msg.args ?? {}, deps)
-      .then((result) => send({ kind: 'res', id: msg.id, result }))
-      .catch((err) => send({ kind: 'res', id: msg.id, error: err instanceof Error ? err.message : String(err) }));
-  });
-
-  send({ kind: 'ready' });
-  logger.info('ipc control plane ready');
-}
-
-async function dispatch(method: string, a: Record<string, unknown>, deps: IpcHostDeps): Promise<unknown> {
+/** Run one control-plane method. Throws on an unknown method or an orchestrator error;
+ *  transports turn that into `{ kind:'res', id, error }`. */
+export async function dispatch(
+  method: string,
+  a: Record<string, unknown>,
+  deps: ControlPlaneDeps,
+): Promise<unknown> {
   const o = deps.orchestrator();
   const id = () => String(a.identifier ?? '');
   switch (method) {
@@ -74,7 +57,7 @@ async function dispatch(method: string, a: Record<string, unknown>, deps: IpcHos
       return { configured: !!o };
     case 'direction':
       // What the core actually reads from the injected path — lets the renderer confirm
-      // the global Direction reached the core (Phase 0). Injection is wired in Phase 1.
+      // the global Direction reached the core. Injection happens in the orchestrator.
       return { text: deps.directionStore.read(), path: deps.directionStore.path };
     case 'directionConsentGet':
       return { consent: deps.directionCheck.getConsent() };
@@ -84,7 +67,9 @@ async function dispatch(method: string, a: Record<string, unknown>, deps: IpcHos
     case 'state':
       return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
     case 'candidates':
-      return o ? await o.listCandidates({ cursor: a.cursor as string | undefined, limit: a.limit as number | undefined }) : { candidates: [] };
+      return o
+        ? await o.listCandidates({ cursor: a.cursor as string | undefined, limit: a.limit as number | undefined })
+        : { candidates: [] };
     case 'diffs':
       return { diffs: deps.channel.getDiffs(String(a.id ?? '')) };
     case 'start':
