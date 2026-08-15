@@ -13,6 +13,7 @@ export type EventKind =
   | 'activity' // live agent action (tool use / text / cost)
   | 'approval' // approval requested / received
   | 'notice' // generic info
+  | 'run' // operational-AI pipeline run start/end (the unit is a run, not an issue)
   | 'error';
 
 export interface CorralEvent {

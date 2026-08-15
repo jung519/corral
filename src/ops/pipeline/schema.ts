@@ -210,3 +210,4 @@ export type PipelineOutput = z.infer<typeof OutputSchema>;
 export type HttpRequestDef = z.infer<typeof HttpRequestSchema>;
 export type FieldSelector = z.infer<typeof FieldSelectorSchema>;
 export type PipelineValidation = z.infer<typeof ValidationSchema>;
+export type Condition = z.infer<typeof ConditionSchema>;
