@@ -22,6 +22,7 @@ import type { ChatClient, NeutralMessage } from '../../agent/api-loop.js';
 import type { AgentProviderId } from '../../agent/types.js';
 import { logger } from '../../core/logger.js';
 import type { OperationResult, OperationRunner, Fields } from '../pipeline/ports.js';
+import { extractJsonObject } from './json-recovery.js';
 import { fillTemplate } from '../pipeline/run.js';
 import type { PipelineAgentStep } from '../pipeline/schema.js';
 
@@ -59,7 +60,11 @@ export function checkAnswer(schema: PipelineAgentStep['schema'], text: string): 
   try {
     parsed = JSON.parse(text);
   } catch {
-    return { ok: false, reason: 'the reply was not JSON' };
+    // Fences, a "Sure!" opener, a sentence afterwards — the answer inside is still good,
+    // and failing over the packaging would discard a turn already paid for.
+    const recovered = extractJsonObject(text);
+    if (!recovered) return { ok: false, reason: 'the reply was not JSON' };
+    parsed = recovered;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return { ok: false, reason: 'the reply was not a JSON object' };

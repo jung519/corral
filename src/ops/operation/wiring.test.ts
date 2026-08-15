@@ -124,8 +124,21 @@ describe('a pipeline reaching a real provider client', () => {
 
     const { run } = await host.runManually('classify', { data: { title: 'x' } });
 
+    // The opener is unwrapped, so the complaint is about the answer itself rather than
+    // its packaging — which is the whole point of recovering it first.
     expect(run).toMatchObject({ outcome: 'agent_failed', stage: 'agent' });
-    expect(run?.reason).toMatch(/claude: the reply was not JSON/);
+    expect(run?.reason).toMatch(/claude: missing required field\(s\): confidence/);
+  });
+
+  it('accepts a fenced answer end to end', async () => {
+    stubAnthropic('```json\n{"items":["news"],"confidence":0.7}\n```');
+    const host = await hostWithProvider();
+
+    const { run } = await host.runManually('classify', { data: { title: 'x' } });
+
+    // Providers do this even when told not to. Failing here would discard a good answer
+    // that had already been paid for.
+    expect(run).toMatchObject({ outcome: 'completed' });
   });
 });
 
