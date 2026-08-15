@@ -17,6 +17,8 @@ import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loade
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
+import { triggerRegistry } from './trigger/index.js';
+import type { StopFn } from './trigger/types.js';
 import { RuleAnswerValidator } from './validate/rules.js';
 
 /**
@@ -60,6 +62,8 @@ export class OpsHost {
   private operation: OperationRunner;
   private budget?: TokenBudget;
   private readonly dir: string;
+  /** Live subscriptions, by pipeline key. Present only while a pipeline is enabled. */
+  private readonly subscriptions = new Map<string, StopFn>();
   /** Why the last load failed, so the UI can show it instead of an empty list. */
   private loadError?: string;
 
@@ -106,6 +110,7 @@ export class OpsHost {
       const pipelines = await loadPipelines(this.dir);
       this.registry.replaceAll(pipelines);
       this.loadError = undefined;
+      this.syncSubscriptions();
       return { loaded: pipelines.length };
     } catch (err) {
       this.loadError = err instanceof PipelineLoadError ? err.message : String(err);
@@ -116,6 +121,51 @@ export class OpsHost {
 
   get error(): string | undefined {
     return this.loadError;
+  }
+
+  /**
+   * Bring the running subscriptions in line with what is enabled.
+   *
+   * Called after a load and after any toggle, so "disabled" means the trigger actually
+   * stops rather than the runs being refused one at a time — a timer that outlives its
+   * pipeline is work nobody asked for.
+   */
+  syncSubscriptions(): void {
+    for (const [key, stop] of this.subscriptions) {
+      if (this.registry.isEnabled(key)) continue;
+      void stop();
+      this.subscriptions.delete(key);
+      logger.info(`ops: pipeline "${key}" stopped`);
+    }
+
+    for (const pipeline of this.registry.active()) {
+      if (this.subscriptions.has(pipeline.key)) continue;
+      try {
+        const adapter = triggerRegistry.create(pipeline.trigger, { now: this.options.now });
+        this.subscriptions.set(pipeline.key, adapter.start(pipeline, (event) => this.fire(pipeline.key, event)));
+      } catch (err) {
+        // An unknown kind must not stop the others from running.
+        logger.error(`ops: could not start the trigger for "${pipeline.key}" — ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+  }
+
+  /** What a trigger calls. Identical to a manual run — one path into the lifecycle. */
+  private async fire(key: string, event: unknown): Promise<RunRecord | undefined> {
+    return (await this.runManually(key, event)).run;
+  }
+
+  /** Stop every subscription. Called when the core shuts down. */
+  async stop(): Promise<void> {
+    for (const [key, stopFn] of this.subscriptions) {
+      await stopFn();
+      this.subscriptions.delete(key);
+    }
+  }
+
+  /** Pipelines with a live subscription right now. */
+  running(): string[] {
+    return [...this.subscriptions.keys()];
   }
 
   /** The day's shared token usage, or undefined when no ceiling is wired yet. Reading it

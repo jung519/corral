@@ -147,7 +147,10 @@ export async function dispatch(
       if (!deps.ops) return NO_OPS;
       const key = String(a.key ?? '');
       if (!deps.ops.registry.get(key)) return { ok: false, error: `no pipeline named "${key}"` };
-      return { ok: true, enabled: deps.ops.registry.setEnabled(key, a.enabled === true) };
+      const enabled = deps.ops.registry.setEnabled(key, a.enabled === true);
+      // Disabling has to stop the trigger, not merely refuse the runs it keeps making.
+      deps.ops.syncSubscriptions();
+      return { ok: true, enabled };
     }
     case 'opsRun':
       if (!deps.ops) return NO_OPS;
