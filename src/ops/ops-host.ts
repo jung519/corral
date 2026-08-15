@@ -7,6 +7,7 @@
  * reprocessed afterwards.
  */
 import { logger } from '../core/logger.js';
+import type { CredentialStore } from '../credentials/types.js';
 import { JsonlOpsHistoryStore } from './history/jsonl-store.js';
 import type { OpsHistoryStore } from './history/store.js';
 import { NoneInputResolver } from './input/none.js';
@@ -15,6 +16,7 @@ import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loade
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
+import { RuleAnswerValidator } from './validate/rules.js';
 
 /**
  * Stands in for the real one-turn runner until it lands. It fails loudly rather than
@@ -27,24 +29,10 @@ export class UnwiredOperationRunner implements OperationRunner {
   }
 }
 
-/**
- * Stands in for the rule engine. Passes an answer through only when the pipeline asked
- * for no checks; a pipeline that declares rules is refused instead.
- *
- * The alternative — passing everything — would mean that whenever the model step is wired
- * before the rules are, every declared rule silently does nothing. "Don't trust the AI" is
- * the point of having them, so failing closed is the only safe placeholder.
- */
-export class UnwiredAnswerValidator implements AnswerValidator {
-  async check(step: { validate?: Record<string, unknown> }, answer: Record<string, unknown>) {
-    const rules = Object.keys(step.validate ?? {});
-    if (!rules.length) return { ok: true as const, answer };
-    return { ok: false as const, reasons: [`validation rules are not implemented yet (${rules.join(', ')})`] };
-  }
-}
-
 export interface OpsHostOptions {
   stateDir: string;
+  /** Resolves credentials named by a pipeline (vocabulary fetches, input, output). */
+  credentials?: CredentialStore;
   /** Swap in real steps as they land. */
   operation?: OperationRunner;
   validator?: AnswerValidator;
@@ -80,7 +68,7 @@ export class OpsHost {
       sinks: new Map((options.sinks ?? [new NoneOutputSink()]).map((s) => [s.kind, s])),
       // Read through, so a provider swap takes effect without rebuilding the runner.
       operation: { run: (step, fields) => this.operation.run(step, fields) },
-      validator: options.validator ?? new UnwiredAnswerValidator(),
+      validator: options.validator ?? new RuleAnswerValidator({ credentials: options.credentials, now: options.now }),
       now: options.now,
     });
   }
