@@ -70,7 +70,9 @@ proposes, and it implements, self-reviews, and opens a pull request for you to m
 
 To reopen the app later, just run `pnpm app` again from the `corral` folder.
 
-> Advanced / headless (no GUI) usage and packaging are in [Development](#development) below.
+> Want it running on a server instead of your laptop — with the app connecting to it from
+> anywhere? See [Run it on a server](docs/vm-deploy.md). Packaging and other advanced usage
+> are in [Development](#development) below.
 
 ## Architecture (5 pluggable axes)
 
@@ -109,13 +111,36 @@ Requires Node.js >= 24 and pnpm.
 
 ### Run headless (no GUI)
 
+The core runs on its own — no Electron, no renderer, not even a config file to start with.
+It opens a WebSocket **control plane** and waits; you attach the desktop app to it from
+another machine and set it up from there.
+
+```bash
+pnpm install && pnpm build              # core only — renderer/desktop are not needed
+pnpm start corral.yaml                  # control plane on ws://127.0.0.1:4410
+```
+
+It prints a **6-digit pairing code**. In the desktop app: **Settings → Core connection →
+Another computer**, enter the address and the code.
+
+There is no HTTP dashboard and no port to open in a browser — the desktop app *is* the
+client. Binding stays on `127.0.0.1`, so reaching it from elsewhere means an SSH tunnel;
+`--control-plane [host:]port` overrides the address.
+
+If you already have a `corral.yaml`, secrets come from the environment as
+`CORRAL_<SERVICE>_<ACCOUNT>` — the account is the one named in that credential's config
+entry, so `corral.example.yaml` wants `CORRAL_GITHUB_SERVER`, not `..._DEFAULT`:
+
 ```bash
 cp corral.example.yaml corral.yaml      # edit it
-export CORRAL_NOTION_DEFAULT=...        # BYOK secrets (see corral.example.yaml)
-export CORRAL_GITHUB_DEFAULT=...
+export CORRAL_NOTION_DEFAULT=...        # see the header of corral.example.yaml
+export CORRAL_GITHUB_SERVER=...         # matches `account: server` in that file
 export CORRAL_ANTHROPIC_DEFAULT=...
-pnpm build && pnpm start corral.yaml    # control plane on http://localhost:4400
+pnpm start corral.yaml
 ```
+
+Running it on a server long-term (systemd, Docker, provider login without a browser):
+**[docs/vm-deploy.md](docs/vm-deploy.md)**.
 
 ### Run the desktop app (dev)
 
@@ -124,8 +149,11 @@ pnpm build                              # build the core
 pnpm -C renderer dev                    # Vite dev server on :5173 (terminal 1)
 # terminal 2:
 pnpm -C desktop build
-CORRAL_RENDERER_URL=http://localhost:5173 CORRAL_CORE_ENTRY="$PWD/dist/main.js" pnpm -C desktop start
+CORRAL_RENDERER_URL=http://localhost:5173 CORRAL_CORE_ENTRY="$PWD/dist/ipc-main.js" pnpm -C desktop start
 ```
+
+`ipc-main.js` is the entry the desktop forks (it talks over the process IPC channel);
+`main.js` is the headless one and has no such channel.
 
 The wizard writes config to the OS app-data dir and secrets to the OS keychain.
 
