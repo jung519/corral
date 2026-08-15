@@ -113,7 +113,13 @@ export const OutputShapeSchema = z
     properties: z.record(z.string(), z.unknown()),
     required: z.array(z.string()).default([]),
   })
-  .passthrough();
+  .passthrough()
+  // Only declared properties survive the answer check, so a schema that declares none
+  // would pay for a turn and then discard everything it got back — a run that reports
+  // success while doing nothing. Caught here rather than at 3am.
+  .refine((shape) => Object.keys(shape.properties).length > 0, {
+    message: 'schema must declare at least one property — an answer with no declared fields would be discarded',
+  });
 
 export const ValidationSchema = z.object({
   /** Values outside the list are dropped and recorded, never sent on. The list itself can

@@ -33,20 +33,27 @@ function chatClient(provider: AgentProviderId, apiKey: string): ChatClient {
  * Entries without a usable key are dropped with a warning rather than kept as clients
  * that fail on every call — a provider that cannot authenticate is not a fallback, it's
  * an extra failure between the pipeline and an answer.
+ *
+ * Two entries for the SAME provider are kept when they point at different credentials.
+ * That is the multi-account case the development side supports too (`bootstrap.ts` labels
+ * them "#2", "#3"): one account's quota runs out and the next one carries on. Collapsing
+ * them by provider would throw that away.
  */
 export async function opsChatClients(agent: AgentConfig, credentials: CredentialStore): Promise<ChatClient[]> {
   const clients: ChatClient[] = [];
-  const seen = new Set<AgentProviderId>();
+  const seen = new Set<string>();
 
   for (const entry of [agent, ...agent.fallbacks]) {
     if (entry.transport !== 'api' || !entry.credential) continue;
-    if (seen.has(entry.provider)) continue; // the first entry for a provider wins
-    const key = await credentials.get(entry.credential as CredentialRef).catch(() => null);
+    const ref = entry.credential as CredentialRef;
+    const identity = `${entry.provider}:${ref.service}:${ref.account}`;
+    if (seen.has(identity)) continue; // genuinely the same account twice
+    const key = await credentials.get(ref).catch(() => null);
     if (!key) {
-      logger.warn(`ops: no key for ${entry.provider} (${entry.credential.service}:${entry.credential.account}) — skipping`);
+      logger.warn(`ops: no key for ${entry.provider} (${ref.service}:${ref.account}) — skipping`);
       continue;
     }
-    seen.add(entry.provider);
+    seen.add(identity);
     clients.push(chatClient(entry.provider, key));
   }
 

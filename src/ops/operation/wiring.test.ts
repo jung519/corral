@@ -147,6 +147,41 @@ describe('choosing the providers from the shared config', () => {
     expect(clients.map((c) => c.provider)).toEqual(['claude', 'gemini']);
   });
 
+  it('keeps two accounts of the same provider — that is the quota case, not a duplicate', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+    await credentials.set({ service: 'anthropic', account: 'default' }, 'k1');
+    await credentials.set({ service: 'anthropic', account: 'second' }, 'k2');
+
+    const clients = await opsChatClients(
+      agentConfig({
+        fallbacks: [
+          { provider: 'claude', transport: 'api', credential: { service: 'anthropic', account: 'second' }, models: {} },
+        ],
+      }),
+      credentials,
+    );
+
+    // The development side supports this too (bootstrap labels them "#2"): one account's
+    // quota runs out and the next carries on. Collapsing by provider would throw it away.
+    expect(clients).toHaveLength(2);
+  });
+
+  it('collapses a genuinely repeated account', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+    await credentials.set({ service: 'anthropic', account: 'default' }, 'k1');
+
+    const clients = await opsChatClients(
+      agentConfig({
+        fallbacks: [
+          { provider: 'claude', transport: 'api', credential: { service: 'anthropic', account: 'default' }, models: {} },
+        ],
+      }),
+      credentials,
+    );
+
+    expect(clients).toHaveLength(1);
+  });
+
   it('leaves out a cli-transport entry — there is no one-turn call to make', async () => {
     const credentials = new FileCredentialStore(join(dir, 'c.json'));
 
