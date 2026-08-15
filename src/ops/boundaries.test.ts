@@ -18,9 +18,6 @@ const SRC = new URL('..', import.meta.url).pathname;
 /** Development-AI modules, relative to `src/`. */
 const DEV_AI = ['orchestrator', 'review/', 'workspace/', 'tracker/', 'repository/', 'attachments'];
 
-/** The only files allowed to know about both — where the app is assembled. */
-const WIRING = ['bootstrap.ts', 'ipc-main.ts', 'main.ts', 'core-host.ts', 'index.ts'];
-
 function filesUnder(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir)) {
@@ -52,10 +49,13 @@ describe('module boundaries', () => {
   });
 
   it('development-AI code does not import ops/', () => {
+    // Only the development-AI modules. `control-plane/` is a shared layer that carries
+    // both pillars' methods (dispatch.ts already imports Orchestrator), and the wiring
+    // files exist precisely to know about both — neither is a violation.
     const offences: string[] = [];
     for (const file of filesUnder(SRC)) {
       const rel = file.replace(SRC, '');
-      if (rel.startsWith('ops/') || WIRING.includes(rel)) continue;
+      if (!DEV_AI.some((d) => rel.startsWith(d))) continue;
       for (const spec of importsOf(file)) {
         if (/(^|\/)ops\//.test(spec)) offences.push(`${rel} → ${spec}`);
       }

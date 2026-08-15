@@ -18,6 +18,7 @@ import type { WebChannel } from '../channel/web.js';
 import type { DirectionCheckStore, DirectionStore } from '../core/direction.js';
 import { bus } from '../core/events.js';
 import type { Orchestrator } from '../orchestrator.js';
+import type { OpsHost } from '../ops/ops-host.js';
 import { detectCli, detectDocker } from './host-probe.js';
 import type { SetupHost } from './setup-host.js';
 
@@ -32,6 +33,9 @@ export interface ControlPlaneDeps {
   /** This core's own config/secrets/draft. Absent in tests that only exercise runtime
    *  methods; the setup methods then answer `NO_SETUP` instead of throwing. */
   setup?: SetupHost;
+  /** The operational AI. Absent when nothing has been assembled (tests, and any build
+   *  that leaves it out); its methods then answer `NO_OPS`. */
+  ops?: OpsHost;
 }
 
 /** Wire message shapes. Exported so transports type their payloads identically. */
@@ -52,6 +56,7 @@ export type OutMessage =
 
 const NOT_CONFIGURED = { ok: false, message: 'Corral is not configured yet — finish setup first.' };
 const NO_SETUP = { ok: false, error: 'this core does not expose setup' };
+const NO_OPS = { ok: false, error: 'the operational AI is not running on this core' };
 
 /** A credential ref off the wire. Both halves are required — a blank service or account
  *  would collide with other entries in the store's flat "service:account" keyspace. */
@@ -129,6 +134,39 @@ export async function dispatch(
       return await detectDocker();
     case 'detectCli':
       return await detectCli(String(a.provider ?? ''));
+
+    // ── Operational AI: pipelines, manual runs, run history ────────────────────────
+    case 'opsPipelines':
+      if (!deps.ops) return NO_OPS;
+      // The load error rides along so an empty list can say why it is empty.
+      return { pipelines: deps.ops.list(), error: deps.ops.error };
+    case 'opsReload':
+      if (!deps.ops) return NO_OPS;
+      return await deps.ops.load();
+    case 'opsSetEnabled': {
+      if (!deps.ops) return NO_OPS;
+      const key = String(a.key ?? '');
+      if (!deps.ops.registry.get(key)) return { ok: false, error: `no pipeline named "${key}"` };
+      return { ok: true, enabled: deps.ops.registry.setEnabled(key, a.enabled === true) };
+    }
+    case 'opsRun':
+      if (!deps.ops) return NO_OPS;
+      // The one entry point that works before any trigger exists — how a pipeline gets
+      // tried out while it is being written, and how a failed one is reprocessed.
+      return await deps.ops.runManually(String(a.key ?? ''), a.input);
+    case 'opsHistory':
+      if (!deps.ops) return NO_OPS;
+      return {
+        runs: await deps.ops.history.list({
+          days: a.days as number | undefined,
+          pipeline: a.pipeline as string | undefined,
+          outcome: a.outcome as never,
+          limit: a.limit as number | undefined,
+        }),
+      };
+    case 'opsTotals':
+      if (!deps.ops) return NO_OPS;
+      return { totals: await deps.ops.history.totals(a.days as number | undefined) };
     case 'state':
       return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
     case 'candidates':
