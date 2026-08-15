@@ -32,8 +32,19 @@ export interface InputResolver {
 export interface OperationResult {
   /** The structured answer, already shaped by the step's schema. */
   answer: Record<string, unknown>;
-  /** Tokens spent, for the shared ceiling (D11/D12). */
+  /** Tokens spent — THE unit for the shared ceiling (D11/D12). */
   tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  /** What it cost, if the runner worked it out (`agent/pricing.ts`). Informational only:
+   *  vendors change prices, which is exactly why the ceiling counts tokens instead. */
+  costUsd?: number;
+  /** Which provider actually answered — not necessarily the one the pipeline named, and
+   *  the whole point of recording it. */
+  provider?: string;
+  model?: string;
+  /** The first provider failed and another took over. */
+  failedOver?: boolean;
 }
 
 /** One structured-output turn (CRL-13). */

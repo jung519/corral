@@ -1,0 +1,265 @@
+/**
+ * The history is what an operator reads the morning after. It has to hold one line per
+ * run, add up to the same thing the runs did, and survive the ways files actually break.
+ */
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { RunRecord } from '../pipeline/run.js';
+import { JsonlOpsHistoryStore, OPS_HISTORY_DIR } from './jsonl-store.js';
+import { dayKey, summarize } from './store.js';
+
+let dir: string;
+let clock: number;
+const DAY = 86_400_000;
+
+/** A fixed instant so day boundaries are exact: 2026-08-15 12:00 local. */
+const NOON = new Date(2026, 7, 15, 12, 0, 0).getTime();
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), 'corral-ops-history-'));
+  clock = NOON;
+});
+afterEach(() => rmSync(dir, { recursive: true, force: true }));
+
+const store = (retentionDays?: number): JsonlOpsHistoryStore =>
+  new JsonlOpsHistoryStore(dir, { retentionDays, now: () => clock });
+
+function run(over: Partial<RunRecord> = {}): RunRecord {
+  const startedAt = over.startedAt ?? clock;
+  return {
+    id: `classify-${startedAt}-${Math.random()}`,
+    pipeline: 'classify',
+    startedAt,
+    endedAt: startedAt + 1500,
+    outcome: 'completed',
+    tokens: 100,
+    costUsd: 0.01,
+    provider: 'claude',
+    ...over,
+  };
+}
+
+const logFile = (date: string): string => join(dir, OPS_HISTORY_DIR, `${date}.jsonl`);
+
+describe('one run, one line', () => {
+  it('writes what an operator needs to identify the run and what it cost', async () => {
+    const s = store();
+
+    await s.append(run({ startedAt: clock, endedAt: clock + 2400, model: 'sonnet' }));
+
+    const lines = readFileSync(logFile('2026-08-15'), 'utf8').trim().split('\n');
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0])).toMatchObject({
+      v: 1,
+      pipeline: 'classify',
+      outcome: 'completed',
+      tokens: 100,
+      durationMs: 2400,
+      provider: 'claude',
+      model: 'sonnet',
+    });
+  });
+
+  it('files a run under the day it started, not the day it was written', async () => {
+    // A run beginning at 23:59:59 belongs to that day; "now" would push it into the next.
+    const lateLastNight = new Date(2026, 7, 14, 23, 59, 59).getTime();
+
+    await store().append(run({ startedAt: lateLastNight, endedAt: lateLastNight + 3000 }));
+
+    expect(existsSync(logFile('2026-08-14'))).toBe(true);
+    expect(existsSync(logFile('2026-08-15'))).toBe(false);
+  });
+
+  it('appends rather than rewriting, so a crash costs one run at most', async () => {
+    const s = store();
+
+    await s.append(run());
+    await s.append(run());
+    await s.append(run());
+
+    expect(readFileSync(logFile('2026-08-15'), 'utf8').trim().split('\n')).toHaveLength(3);
+  });
+});
+
+describe('the daily totals', () => {
+  it('match the runs that actually happened', async () => {
+    const s = store();
+    await s.append(run({ outcome: 'completed', tokens: 100, costUsd: 0.01 }));
+    await s.append(run({ outcome: 'completed', tokens: 250, costUsd: 0.02, failedOver: true }));
+    await s.append(run({ outcome: 'reported', tokens: 80, costUsd: 0.005, lowConfidence: true }));
+    await s.append(run({ outcome: 'agent_failed', stage: 'agent', tokens: undefined, costUsd: undefined }));
+    await s.append(run({ outcome: 'skipped', stage: 'input', tokens: undefined, costUsd: undefined }));
+
+    const [today] = await s.totals(1);
+
+    expect(today).toMatchObject({
+      date: '2026-08-15',
+      runs: 5,
+      tokens: 430,
+      costUsd: 0.035,
+      failedOver: 1,
+      lowConfidence: 1,
+      failed: 1, // a skip is not a failure; neither is a held-back result
+      byOutcome: { completed: 2, reported: 1, agent_failed: 1, skipped: 1 },
+    });
+  });
+
+  it('counts a low-confidence answer however the pipeline chose to end it', async () => {
+    const s = store();
+    // The same fact, three endings. Without the flag, the middle one is indistinguishable
+    // from a skip_if skip and the day's count would be wrong.
+    await s.append(run({ outcome: 'reported', lowConfidence: true }));
+    await s.append(run({ outcome: 'skipped', lowConfidence: true }));
+    await s.append(run({ outcome: 'completed', lowConfidence: true }));
+    await s.append(run({ outcome: 'skipped' }));
+
+    expect((await s.totals(1))[0].lowConfidence).toBe(3);
+  });
+
+  it('is rebuilt when the file disagrees with the log', async () => {
+    const s = store();
+    await s.append(run({ tokens: 100 }));
+    await s.append(run({ tokens: 100 }));
+
+    // Someone edited it, or we died between the append and the rewrite.
+    writeFileSync(
+      join(dir, OPS_HISTORY_DIR, '2026-08-15.totals.json'),
+      JSON.stringify({ date: '2026-08-15', runs: 99, tokens: 1, byOutcome: {}, costUsd: 0, failedOver: 0, lowConfidence: 0, failed: 0 }),
+    );
+
+    // The log is the truth; the totals file is a cache and gets recomputed.
+    expect((await s.totals(1))[0]).toMatchObject({ runs: 2, tokens: 200 });
+  });
+
+  it('is rebuilt when the file is gone entirely', async () => {
+    const s = store();
+    await s.append(run({ tokens: 42 }));
+    rmSync(join(dir, OPS_HISTORY_DIR, '2026-08-15.totals.json'));
+
+    expect((await s.totals(1))[0]).toMatchObject({ runs: 1, tokens: 42 });
+  });
+
+  it('reports each day separately, newest first', async () => {
+    const s = store();
+    await s.append(run({ startedAt: clock - 2 * DAY }));
+    await s.append(run({ startedAt: clock - DAY }));
+    await s.append(run({ startedAt: clock }));
+
+    expect((await s.totals(3)).map((t) => t.date)).toEqual(['2026-08-15', '2026-08-14', '2026-08-13']);
+  });
+
+  it('says nothing about days with no runs rather than inventing zeroes', async () => {
+    const s = store();
+    await s.append(run());
+
+    expect(await s.totals(7)).toHaveLength(1);
+  });
+});
+
+describe('looking back over N days', () => {
+  beforeEach(async () => {
+    const s = store();
+    await s.append(run({ startedAt: clock - 3 * DAY, outcome: 'agent_failed' }));
+    await s.append(run({ startedAt: clock - DAY, pipeline: 'summarize' }));
+    await s.append(run({ startedAt: clock, outcome: 'completed' }));
+  });
+
+  it('includes only the days asked for', async () => {
+    expect(await store().list({ days: 1 })).toHaveLength(1);
+    expect(await store().list({ days: 2 })).toHaveLength(2);
+    expect(await store().list({ days: 7 })).toHaveLength(3);
+  });
+
+  it('returns the newest run first', async () => {
+    const [newest] = await store().list({ days: 7 });
+
+    expect(dayKey(newest.startedAt)).toBe('2026-08-15');
+  });
+
+  it('filters by pipeline and by outcome', async () => {
+    expect((await store().list({ days: 7, pipeline: 'summarize' })).map((r) => r.pipeline)).toEqual(['summarize']);
+    expect((await store().list({ days: 7, outcome: 'agent_failed' })).map((r) => r.outcome)).toEqual(['agent_failed']);
+  });
+
+  it('stops at the limit instead of reading everything first', async () => {
+    expect(await store().list({ days: 7, limit: 2 })).toHaveLength(2);
+  });
+});
+
+describe('retention', () => {
+  it('drops days past the window and keeps the rest', async () => {
+    const s = store(7);
+    await s.append(run({ startedAt: clock - 30 * DAY }));
+    await s.append(run({ startedAt: clock - 2 * DAY }));
+    await s.append(run({ startedAt: clock }));
+
+    const removed = await s.prune();
+
+    // Both the log and its totals file for the old day.
+    expect(removed).toBe(2);
+    expect(existsSync(logFile('2026-08-15'))).toBe(true);
+    expect(existsSync(logFile('2026-08-13'))).toBe(true);
+  });
+
+  it('leaves alone anything it does not recognise', async () => {
+    const s = store(1);
+    await s.append(run());
+    writeFileSync(join(dir, OPS_HISTORY_DIR, 'notes.txt'), 'mine');
+
+    await s.prune();
+
+    // Pruning deletes files. Anything not matching the naming scheme is somebody else's.
+    expect(readdirSync(join(dir, OPS_HISTORY_DIR))).toContain('notes.txt');
+  });
+
+  it('is fine when there is nothing to prune', async () => {
+    await expect(store(7).prune()).resolves.toBe(0);
+  });
+});
+
+describe('when the files are damaged', () => {
+  it('loses the bad line and keeps the day', async () => {
+    const s = store();
+    await s.append(run({ tokens: 10 }));
+    // A kill mid-append leaves a half-written line.
+    writeFileSync(logFile('2026-08-15'), `${readFileSync(logFile('2026-08-15'), 'utf8')}{"id":"half`, 'utf8');
+    await s.append(run({ tokens: 20 }));
+
+    const totals = (await s.totals(1))[0];
+
+    expect(totals.runs).toBe(2);
+    expect(totals.tokens).toBe(30);
+  });
+
+  it('treats a missing history directory as an empty history', async () => {
+    const s = new JsonlOpsHistoryStore(join(dir, 'nothing-here'), { now: () => clock });
+
+    await expect(s.list()).resolves.toEqual([]);
+    await expect(s.totals()).resolves.toEqual([]);
+    await expect(s.prune()).resolves.toBe(0);
+  });
+});
+
+describe('summing', () => {
+  it('does not let float addition show up as a price', () => {
+    const cents = Array.from({ length: 3 }, () => ({ outcome: 'completed', costUsd: 0.1 }) as never);
+
+    expect(summarize('2026-08-15', cents).costUsd).toBe(0.3);
+  });
+});
+
+describe('no native modules', () => {
+  it('is built out of Node builtins alone', () => {
+    // Electron runs Node 20, so `node:sqlite` isn't there, and a compiled dependency
+    // would mean building per platform. Plain text is what keeps one repo shipping to
+    // macOS and Windows — so this store must not reach for a package to do its job.
+    for (const file of ['./jsonl-store.ts', './store.ts']) {
+      const src = readFileSync(new URL(file, import.meta.url), 'utf8');
+      const specifiers = [...src.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]);
+
+      expect(specifiers.filter((s) => !s.startsWith('node:') && !s.startsWith('.'))).toEqual([]);
+    }
+  });
+});

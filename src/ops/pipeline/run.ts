@@ -49,6 +49,18 @@ export interface RunRecord {
   /** Values the validator discarded (out-of-vocabulary answers, overlong lists). */
   dropped?: string[];
   tokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  costUsd?: number;
+  /** The provider that actually answered, and whether it was the second choice. */
+  provider?: string;
+  model?: string;
+  failedOver?: boolean;
+  /** The answer came back under the confidence threshold. Recorded separately from the
+   *  outcome because `on_low_confidence` can turn the same fact into three different
+   *  endings — without this flag, a low-confidence skip is indistinguishable from a
+   *  `skip_if` skip and the daily count would be wrong. */
+  lowConfidence?: boolean;
   /** Deep link for a human to look at, on a held-back result (D14). */
   reviewUrl?: string;
 }
@@ -189,11 +201,21 @@ export class PipelineRunner {
 
       // ── checking the answer ──────────────────────────────────────────────────
       const verdict = await this.deps.validator.check(pipeline.agent, operation.answer);
-      const tokens = operation.tokens;
+      // Everything the turn cost, carried to whichever ending this run reaches.
+      const spend = {
+        tokens: operation.tokens,
+        inputTokens: operation.inputTokens,
+        outputTokens: operation.outputTokens,
+        costUsd: operation.costUsd,
+        provider: operation.provider,
+        model: operation.model,
+        failedOver: operation.failedOver,
+      };
 
       let answer: Record<string, unknown>;
       let dropped: string[] | undefined;
       let reviewUrl: string | undefined;
+      let lowConfidence: boolean | undefined;
 
       if (verdict.ok) {
         answer = verdict.answer;
@@ -204,33 +226,34 @@ export class PipelineRunner {
           ? fillTemplate(pipeline.on_low_confidence.review_url, fields)
           : undefined;
         const reason = verdict.reasons.join('; ');
+        lowConfidence = true;
         // `report` is the default for a reason: a doubtful answer written into someone's
         // system is worse than no answer, and a human can only look if we say where.
         if (pipeline.on_low_confidence.action === 'report') {
-          return done('reported', { stage: 'validate', reason, tokens, reviewUrl });
+          return done('reported', { stage: 'validate', reason, ...spend, lowConfidence, reviewUrl });
         }
         if (pipeline.on_low_confidence.action === 'skip') {
-          return done('skipped', { stage: 'validate', reason, tokens });
+          return done('skipped', { stage: 'validate', reason, ...spend, lowConfidence });
         }
         answer = verdict.answer;
       } else {
-        return done('rejected', { stage: 'validate', reason: verdict.reasons.join('; '), tokens });
+        return done('rejected', { stage: 'validate', reason: verdict.reasons.join('; '), ...spend });
       }
 
       // ── output ───────────────────────────────────────────────────────────────
       const sink = this.deps.sinks.get(pipeline.output.kind);
       if (!sink) {
-        return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, tokens });
+        return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, ...spend, lowConfidence });
       }
       try {
         await sink.send(pipeline.output, { ...resolved.fields, ...answer });
       } catch (err) {
         // The turn is already spent, so this is the expensive failure — it has to be
         // distinguishable from the cheap ones when someone reads the history.
-        return done('output_failed', { stage: 'output', reason: message(err), tokens, dropped });
+        return done('output_failed', { stage: 'output', reason: message(err), ...spend, dropped, lowConfidence });
       }
 
-      return done('completed', { tokens, dropped, reviewUrl });
+      return done('completed', { ...spend, dropped, reviewUrl, lowConfidence });
     } finally {
       limiter.release(id);
     }
