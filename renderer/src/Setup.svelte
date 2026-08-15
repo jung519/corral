@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
+  import CoreConnection from './CoreConnection.svelte';
   import DirectionSetup from './DirectionSetup.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
   import Wizard from './Wizard.svelte';
@@ -98,6 +99,8 @@
   {:else if s}
     <PipelineSummary {s} />
     <p class="hint">{t('settings.summaryHint')}</p>
+
+    <CoreConnection />
 
     <div class="card">
       {@render head(t('step.ai'), 'ai')}
