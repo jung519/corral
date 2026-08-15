@@ -210,6 +210,7 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
       if (down) return;
       down = true;
       await ws?.close();
+      await ops.stop(); // release trigger subscriptions before anything else winds down
       orchestrator?.stop();
       await channel.stop();
       // Issues mid-flight are not abandoned: their state is on disk, and the next start
