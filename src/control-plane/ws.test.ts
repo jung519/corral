@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { WebSocket } from 'ws';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebChannel } from '../channel/web.js';
 import { ControlPlaneSchema } from '../config/schema.js';
 import { DirectionCheckStore, DirectionStore } from '../core/direction.js';
 import { bus } from '../core/events.js';
+import { ControlPlaneAuth } from './auth.js';
 import { dispatch, type ControlPlaneDeps } from './dispatch.js';
 import { startWsHost, type WsHost } from './ws.js';
 
@@ -124,6 +128,102 @@ describe('ws control plane', () => {
     await collect(host.port, (m) => m.some((x) => x.kind === 'ready'));
     // collect() closes the socket once satisfied; the server should notice.
     await new Promise((r) => setTimeout(r, 200));
+    expect(host.clients).toBe(0);
+  });
+});
+
+describe('ws control plane — authentication', () => {
+  let host: WsHost | undefined;
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'corral-ws-auth-'));
+  });
+  afterEach(async () => {
+    await host?.close();
+    host = undefined;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses a request from an unauthenticated client', async () => {
+    const auth = new ControlPlaneAuth(dir);
+    host = await startWsHost(deps(), { host: '127.0.0.1', port: 0, auth });
+
+    const msgs = await collect(host.port, (m) => m.some((x) => x.kind === 'denied'), {
+      kind: 'req',
+      id: 1,
+      method: 'status',
+    });
+    expect(msgs.find((m) => m.kind === 'denied').reason).toMatch(/not authenticated/);
+    expect(msgs.some((m) => m.kind === 'ready' || m.kind === 'res')).toBe(false);
+  });
+
+  it('pairs with a valid code, then serves requests', async () => {
+    const auth = new ControlPlaneAuth(dir);
+    const code = auth.issueCode();
+    host = await startWsHost(deps(), { host: '127.0.0.1', port: 0, auth });
+
+    const msgs = await collect(host.port, (m) => m.some((x) => x.kind === 'ready'), {
+      kind: 'pair',
+      code,
+      label: 'macbook',
+    });
+    const paired = msgs.find((m) => m.kind === 'paired');
+    expect(paired.token).toBeTruthy();
+    expect(auth.verifyToken(paired.token)).toBe(true);
+  });
+
+  it('denies a wrong pairing code', async () => {
+    const auth = new ControlPlaneAuth(dir);
+    auth.issueCode();
+    host = await startWsHost(deps(), { host: '127.0.0.1', port: 0, auth });
+
+    const msgs = await collect(host.port, (m) => m.some((x) => x.kind === 'denied'), {
+      kind: 'pair',
+      code: '000000',
+      label: 'x',
+    });
+    expect(msgs.find((m) => m.kind === 'denied').reason).toMatch(/pairing code/);
+  });
+
+  it('accepts a stored token on a later connection (survives restart)', async () => {
+    const auth = new ControlPlaneAuth(dir);
+    const token = auth.redeemCode(auth.issueCode(), 'macbook')!;
+
+    // A new auth instance = the core restarted; the token file is the only carry-over.
+    host = await startWsHost(deps(), { host: '127.0.0.1', port: 0, auth: new ControlPlaneAuth(dir) });
+    const msgs = await collect(host.port, (m) => m.some((x) => x.kind === 'ready'), { kind: 'auth', token });
+    expect(msgs.some((m) => m.kind === 'ready')).toBe(true);
+  });
+
+  it('denies a revoked token', async () => {
+    const auth = new ControlPlaneAuth(dir);
+    const token = auth.redeemCode(auth.issueCode(), 'macbook')!;
+    auth.revoke('macbook');
+
+    host = await startWsHost(deps(), { host: '127.0.0.1', port: 0, auth });
+    const msgs = await collect(host.port, (m) => m.some((x) => x.kind === 'denied'), { kind: 'auth', token });
+    expect(msgs.find((m) => m.kind === 'denied').reason).toMatch(/invalid token/);
+  });
+
+  it('does not fan out events to unauthenticated sockets', async () => {
+    const auth = new ControlPlaneAuth(dir);
+    host = await startWsHost(deps(), { host: '127.0.0.1', port: 0, auth });
+    const port = host.port;
+
+    const received = await new Promise<any[]>((resolve) => {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}`);
+      const msgs: any[] = [];
+      socket.on('open', () => {
+        // Connected but never authenticates.
+        setTimeout(() => bus.emitEvent({ identifier: 'ISS-2', kind: 'activity', phase: 'initial', label: '💬 secret' }), 100);
+        setTimeout(() => {
+          socket.close();
+          resolve(msgs);
+        }, 400);
+      });
+      socket.on('message', (raw) => msgs.push(JSON.parse(String(raw))));
+    });
+    expect(received.some((m) => m.kind === 'event')).toBe(false);
     expect(host.clients).toBe(0);
   });
 });

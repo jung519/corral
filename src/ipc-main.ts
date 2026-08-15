@@ -18,6 +18,7 @@ import { LayeredCredentialStore } from './credentials/layered.js';
 import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { logger } from './core/logger.js';
 import type { ControlPlaneConfig } from './config/schema.js';
+import { ControlPlaneAuth } from './control-plane/auth.js';
 import { startIpcHost } from './control-plane/ipc.js';
 import { startWsHost } from './control-plane/ws.js';
 import type { Orchestrator } from './orchestrator.js';
@@ -33,10 +34,29 @@ const channel = new WebChannel();
 const directionStore = new DirectionStore();
 // Direction validation state (consent + verified hashes) — shared by the gate + IPC.
 const directionCheck = new DirectionCheckStore(resolve(stateDir));
+// Remote control-plane credentials (pairing codes + tokens). Unused by the IPC transport,
+// whose parent process is already inside the trust boundary.
+const auth = new ControlPlaneAuth(resolve(stateDir));
 
 let orchestrator: Orchestrator | undefined;
 
+/**
+ * `--revoke <label|all>` drops paired clients; `--pair` forces a fresh pairing code even
+ * when clients already exist (adding a device). Both are one-shot flags handled before the
+ * core starts serving.
+ */
+function flag(name: string): string | undefined {
+  const i = process.argv.indexOf(name);
+  return i === -1 ? undefined : (process.argv[i + 1] ?? '');
+}
+
 async function main(): Promise<void> {
+  const revoke = flag('--revoke');
+  if (revoke !== undefined) {
+    const removed = auth.revoke(revoke || 'all');
+    logger.info(`revoked ${removed} control-plane token(s)${revoke ? ` for "${revoke}"` : ''}`);
+  }
+
   const deps = { channel, orchestrator: () => orchestrator, directionStore, directionCheck };
   let remote: ControlPlaneConfig | undefined;
 
@@ -65,8 +85,17 @@ async function main(): Promise<void> {
   // Remote transport runs ALONGSIDE the IPC one — a desktop-attached core keeps working
   // exactly as before while a remote client can also connect. Off unless configured.
   if (remote?.enabled) {
+    // Show a pairing code when nobody has paired yet, or when --pair asks for another
+    // device. Existing clients keep working with their tokens, so we stay quiet otherwise.
+    if (!auth.hasTokens() || flag('--pair') !== undefined) {
+      const code = auth.issueCode();
+      logger.info(`control plane pairing code: ${code} (valid 5 minutes, single use)`);
+    } else {
+      logger.info(`control plane: ${auth.listLabels().length} paired client(s) — run with --pair to add one`);
+    }
+
     try {
-      await startWsHost(deps, { host: remote.host, port: remote.port });
+      await startWsHost(deps, { host: remote.host, port: remote.port, auth });
     } catch (err) {
       // A busy port must not take the core down; the IPC plane is still serving.
       logger.error(`ws control plane failed to start: ${err instanceof Error ? err.message : String(err)}`);
