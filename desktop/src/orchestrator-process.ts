@@ -8,6 +8,7 @@
 export {
   callCore,
   linkStatus,
+  pairRemote,
   orchestratorRunning,
   restartOrchestrator,
   startOrchestrator,

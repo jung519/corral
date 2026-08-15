@@ -30,6 +30,29 @@ const api = {
     read: (): Promise<string> => ipcRenderer.invoke('direction:read'),
     write: (text: string): Promise<void> => ipcRenderer.invoke('direction:write', text),
   },
+  /** Where the core runs: here (`local`) or on another machine (`remote`, over WebSocket).
+   *  Pairing exchanges a one-time code shown in the remote core's log for a stored token. */
+  remote: {
+    get: (): Promise<{
+      mode: 'local' | 'remote';
+      url: string;
+      label: string;
+      paired: boolean;
+      state: 'connected' | 'connecting' | 'disconnected';
+      denial?: string;
+    }> => ipcRenderer.invoke('remote:get'),
+    setMode: (mode: 'local' | 'remote', url?: string, label?: string): Promise<{ ok: boolean }> =>
+      ipcRenderer.invoke('remote:setMode', mode, url, label),
+    pair: (url: string, code: string, label?: string): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('remote:pair', url, code, label),
+    unpair: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('remote:unpair'),
+    /** Live connection state (a remote link reconnects on its own). Returns an unsubscribe fn. */
+    onState: (cb: (s: { state: string; denial?: string }) => void): (() => void) => {
+      const listener = (_e: unknown, payload: { state: string; denial?: string }): void => cb(payload);
+      ipcRenderer.on('core-link-state', listener);
+      return () => ipcRenderer.off('core-link-state', listener);
+    },
+  },
   secret: {
     set: (service: string, account: string, value: string): Promise<void> =>
       ipcRenderer.invoke('secret:set', service, account, value),

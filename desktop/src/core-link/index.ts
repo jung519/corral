@@ -9,7 +9,7 @@
  * IPC handlers in `main.ts` and the renderer — is unaware of the difference.
  */
 import { BrowserWindow } from 'electron';
-import { readRemote, saveRemoteToken } from '../remote-store.js';
+import { readRemote, saveRemoteToken, writeRemote } from '../remote-store.js';
 import { LocalTransport } from './local.js';
 import { RemoteTransport } from './remote.js';
 import type { CoreMessage, CoreTransport, LinkState } from './types.js';
@@ -133,6 +133,55 @@ export function orchestratorRunning(): boolean {
 /** Current link state (for the UI): connection state plus any refusal reason. */
 export function linkStatus(): { state: LinkState; denial?: string } {
   return { state: transport?.state ?? 'disconnected', denial: lastDenial };
+}
+
+/**
+ * Exchange a one-time pairing code for a token, then connect for real.
+ *
+ * Pairing is deliberately a separate, short-lived connection: the code is single-use and
+ * never persisted, so it can't live in the saved settings the way a URL does. Once the
+ * token is stored, normal startup authenticates with it and the code is irrelevant.
+ */
+export async function pairRemote(opts: { url: string; code: string; label?: string }): Promise<{
+  ok: boolean;
+  error?: string;
+}> {
+  stopOrchestrator(); // don't leave a local core (or an old link) running underneath
+
+  const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
+    let settled = false;
+    const finish = (r: { ok: boolean; error?: string }): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      probe.stop();
+      resolve(r);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: '연결할 수 없습니다 — 주소와 터널을 확인하세요.' }), 10_000);
+
+    const probe = new RemoteTransport(
+      { onMessage: () => {}, onDown: () => {} },
+      {
+        url: opts.url,
+        pairingCode: opts.code,
+        label: opts.label ?? 'desktop',
+        onPaired: (token) => {
+          saveRemoteToken(token);
+          finish({ ok: true });
+        },
+        onDenied: (reason) => finish({ ok: false, error: reason }),
+      },
+    );
+    probe.start();
+  });
+
+  if (result.ok) {
+    writeRemote({ mode: 'remote', url: opts.url, label: opts.label });
+    startOrchestrator(); // reconnect properly, this time with the stored token
+  } else {
+    startOrchestrator(); // restore whatever mode was configured before
+  }
+  return result;
 }
 
 /** Send a request to the core and await its reply (correlated by id). Waits briefly

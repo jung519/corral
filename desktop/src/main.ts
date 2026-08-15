@@ -15,7 +15,15 @@ import { readDirection, writeDirection } from './direction-store.js';
 import { clearDraft, readDraft, writeDraft } from './draft-store.js';
 import { deleteSecret, hasSecret, setSecret } from './keychain.js';
 import { initAutoUpdate } from './auto-updater.js';
-import { callCore, restartOrchestrator, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
+import {
+  callCore,
+  linkStatus,
+  pairRemote,
+  restartOrchestrator,
+  startOrchestrator,
+  stopOrchestrator,
+} from './orchestrator-process.js';
+import { clearRemoteToken, readRemote, writeRemote } from './remote-store.js';
 import { decideGate, fetchManifest, type GateDecision } from './update-gate.js';
 import {
   fetchNotionSchema,
@@ -84,6 +92,31 @@ function registerIpc(): void {
 
   ipcMain.handle('direction:read', () => readDirection());
   ipcMain.handle('direction:write', (_e, text: string) => writeDirection(text));
+
+  // Core connection: run the core here (local) or attach to one elsewhere (remote).
+  ipcMain.handle('remote:get', () => {
+    const saved = readRemote();
+    return {
+      mode: saved.mode,
+      url: saved.url ?? '',
+      label: saved.label ?? '',
+      paired: !!saved.token, // drives whether the UI asks for a pairing code
+      ...linkStatus(),
+    };
+  });
+  ipcMain.handle('remote:setMode', (_e, mode: 'local' | 'remote', url?: string, label?: string) => {
+    writeRemote({ mode, url, label });
+    restartOrchestrator(); // pick up the new mode immediately
+    return { ok: true, ...linkStatus() };
+  });
+  ipcMain.handle('remote:pair', (_e, url: string, code: string, label?: string) => pairRemote({ url, code, label }));
+  ipcMain.handle('remote:unpair', () => {
+    // Forget this device's token; the next remote connection needs a fresh code.
+    clearRemoteToken();
+    writeRemote({ mode: 'local' });
+    restartOrchestrator();
+    return { ok: true };
+  });
 
   ipcMain.handle('secret:set', (_e, service: string, account: string, value: string) =>
     setSecret(service, account, value),

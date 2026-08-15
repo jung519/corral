@@ -21,6 +21,20 @@ declare global {
         read(): Promise<string>;
         write(text: string): Promise<void>;
       };
+      remote: {
+        get(): Promise<{
+          mode: 'local' | 'remote';
+          url: string;
+          label: string;
+          paired: boolean;
+          state: 'connected' | 'connecting' | 'disconnected';
+          denial?: string;
+        }>;
+        setMode(mode: 'local' | 'remote', url?: string, label?: string): Promise<{ ok: boolean }>;
+        pair(url: string, code: string, label?: string): Promise<{ ok: boolean; error?: string }>;
+        unpair(): Promise<{ ok: boolean }>;
+        onState(cb: (s: { state: string; denial?: string }) => void): () => void;
+      };
       secret: {
         set(service: string, account: string, value: string): Promise<void>;
         has(service: string, account: string): Promise<boolean>;
