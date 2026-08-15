@@ -123,9 +123,26 @@ describe('failing over', () => {
     expect(result).toMatchObject({ provider: 'gemini', failedOver: true });
   });
 
-  it('moves on when the reply is prose rather than JSON', async () => {
+  it('moves on when the reply has no JSON in it at all', async () => {
     const runner = new OneTurnOperationRunner({
-      clients: [client('claude', 'Sure! Here is the JSON:\n```json\n{"items":[]}\n```'), client('gemini', GOOD)],
+      clients: [client('claude', 'I could not classify this record.'), client('gemini', GOOD)],
+    });
+
+    expect((await runner.run(step(), {})).provider).toBe('gemini');
+  });
+
+  it('does not fail over for packaging it can unwrap', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', `Sure!\n\`\`\`json\n${GOOD}\n\`\`\``), client('gemini', GOOD)],
+    });
+
+    // A fence is not a reason to spend a second turn on another provider.
+    expect((await runner.run(step(), {})).provider).toBe('claude');
+  });
+
+  it('fails over on a truncated reply instead of salvaging part of it', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', '{"items":["a"],"conf'), client('gemini', GOOD)],
     });
 
     expect((await runner.run(step(), {})).provider).toBe('gemini');
