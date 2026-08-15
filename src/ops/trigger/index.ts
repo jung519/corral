@@ -17,7 +17,7 @@ triggerRegistry.register('pubsub', (_config, ctx) => new PubSubTrigger(ctx));
 
 export { ManualTrigger } from './manual.js';
 export { ScheduleTrigger } from './schedule.js';
-export { PubSubClient, PubSubTrigger, type PubSubContext } from './pubsub.js';
+export { PubSubTrigger, type PubSubContext } from './pubsub.js';
 export { GoogleTokenSource, parseServiceAccountKey, signAssertion } from './google-auth.js';
 export { cronMatches, parseCron } from './cron.js';
 export type { FireFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';

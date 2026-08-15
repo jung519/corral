@@ -13,7 +13,9 @@ import { JsonlOpsHistoryStore } from './history/jsonl-store.js';
 import type { OpsHistoryStore } from './history/store.js';
 import { HttpInputResolver } from './input/http.js';
 import { NoneInputResolver } from './input/none.js';
+import { HttpOutputSink } from './output/http.js';
 import { NoneOutputSink } from './output/none.js';
+import { PubSubOutputSink } from './output/pubsub.js';
 import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
@@ -77,7 +79,15 @@ export class OpsHost {
       resolvers: new Map(
         (options.resolvers ?? [new NoneInputResolver(), new HttpInputResolver(options.credentials)]).map((r) => [r.kind, r]),
       ),
-      sinks: new Map((options.sinks ?? [new NoneOutputSink()]).map((s) => [s.kind, s])),
+      sinks: new Map(
+        (
+          options.sinks ?? [
+            new NoneOutputSink(),
+            new HttpOutputSink(options.credentials),
+            new PubSubOutputSink(options.credentials, options.now),
+          ]
+        ).map((s) => [s.kind, s]),
+      ),
       // Read through, so a provider swap takes effect without rebuilding the runner.
       operation: { run: (step, fields) => this.operation.run(step, fields) },
       validator: options.validator ?? new RuleAnswerValidator({ credentials: options.credentials, now: options.now }),
