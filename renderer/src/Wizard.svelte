@@ -323,9 +323,11 @@
     saving = true;
     try {
       if (!window.corral) throw new Error('Corral desktop bridge unavailable');
-      // Write the config first so it always lands, even if a later step throws.
-      await window.corral.config.write(buildConfigYaml(s, currentLang()));
+      // Secrets before config. Saving the config is what brings a remote core up on it,
+      // and it resolves credentials while doing so — they have to already be there.
       for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
+      const saved = await window.corral.config.write(buildConfigYaml(s, currentLang()));
+      if (!saved.ok) throw new Error(saved.error ?? 'the core could not start on this config');
       // First-run brings the orchestrator up; an inline edit just persists config.
       if (!embedded) await window.corral.startOrchestrator();
       // Keep the (non-secret) draft as the last-applied state so re-opening pre-fills.

@@ -10,7 +10,9 @@ declare global {
       config: {
         exists(): Promise<boolean>;
         read(): Promise<string | null>;
-        write(yaml: string): Promise<void>;
+        /** Saving against a remote core also restarts it on the new config, so failures
+         *  (bad token, unreachable tracker) come back here instead of passing silently. */
+        write(yaml: string): Promise<{ ok: boolean; error?: string }>;
       };
       draft: {
         read(): Promise<string | null>;

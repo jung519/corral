@@ -16,7 +16,9 @@ const api = {
   config: {
     exists: (): Promise<boolean> => ipcRenderer.invoke('config:exists'),
     read: (): Promise<string | null> => ipcRenderer.invoke('config:read'),
-    write: (yaml: string): Promise<void> => ipcRenderer.invoke('config:write', yaml),
+    /** Save the config. Against a remote core this also restarts it on the new config,
+     *  so the result carries why that failed (bad token, unreachable tracker). */
+    write: (yaml: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('config:write', yaml),
   },
   /** In-progress wizard draft (non-secret fields) persisted to userData. */
   draft: {
