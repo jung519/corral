@@ -3,11 +3,14 @@
   import Dashboard from './Dashboard.svelte';
   import History from './History.svelte';
   import Logs from './Logs.svelte';
+  import ModePicker from './ModePicker.svelte';
+  import Pipelines from './Pipelines.svelte';
   import Settings from './Settings.svelte';
   import Toast from './Toast.svelte';
   import Wizard from './Wizard.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
+  import { modeState, setMode, type Mode } from './lib/mode.svelte';
   import { prefs } from './lib/prefs.svelte';
 
   let route = $state(location.hash);
@@ -40,13 +43,29 @@
   });
 
   const isSetup = $derived(route.startsWith('#/setup'));
+  /** null until the user has chosen once — that is what shows the picker. */
+  const mode = $derived(modeState.current);
 
-  const nav = [
+  // Settings is in both lists on purpose: the provider, the models and the token ceiling
+  // are one setup shared by both pillars (D24). Two settings screens would imply two.
+  const DEV_NAV = [
     { hash: '#/', key: 'nav.dashboard' },
     { hash: '#/history', key: 'nav.history' },
     { hash: '#/logs', key: 'nav.logs' },
     { hash: '#/settings', key: 'nav.settings' },
   ];
+  const OPS_NAV = [
+    { hash: '#/', key: 'nav.pipelines' },
+    { hash: '#/logs', key: 'nav.logs' },
+    { hash: '#/settings', key: 'nav.settings' },
+  ];
+  const nav = $derived(mode === 'ops' ? OPS_NAV : DEV_NAV);
+
+  /** Switching returns to that mode's home — the current route may not exist in it. */
+  function switchTo(next: Mode) {
+    setMode(next);
+    location.hash = '#/';
+  }
   function active(hash: string): boolean {
     if (hash === '#/') return route === '' || route === '#/' || route === '#';
     return route.startsWith(hash);
@@ -57,10 +76,19 @@
 
 {#if isSetup}
   <Wizard />
+{:else if !mode}
+  <ModePicker />
 {:else}
   <div class="shell">
     <nav>
       <p class="brand">Corral</p>
+      <!-- Spelled out, not an icon: which pillar you are looking at decides what every
+           screen below means, and an icon would make that a guess. -->
+      <div class="mode">
+        <span class="label">{t('mode.current')}</span>
+        <strong>{t(mode === 'ops' ? 'mode.ops' : 'mode.dev')}</strong>
+        <button onclick={() => switchTo(mode === 'ops' ? 'dev' : 'ops')}>{t('mode.switch')}</button>
+      </div>
       <ul>
         {#each nav as item}
           <li><a href={item.hash} class:active={active(item.hash)}>{t(item.key)}</a></li>
@@ -74,6 +102,8 @@
         <Logs />
       {:else if route.startsWith('#/settings')}
         <Settings />
+      {:else if mode === 'ops'}
+        <Pipelines />
       {:else}
         <Dashboard />
       {/if}
@@ -95,8 +125,30 @@
   .brand {
     font-size: 16px;
     font-weight: 500;
-    margin: 0 0 16px;
+    margin: 0 0 10px;
     padding-left: 8px;
+  }
+  .mode {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 0 8px 12px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+  }
+  .mode .label {
+    color: var(--text-dim);
+  }
+  .mode strong {
+    flex: 1;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text);
+  }
+  .mode button {
+    font-size: 11px;
+    padding: 2px 8px;
   }
   ul {
     list-style: none;

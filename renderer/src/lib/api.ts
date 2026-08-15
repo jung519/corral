@@ -65,6 +65,23 @@ export const getDirectionConsent = (): Promise<{ consent: boolean }> => call('di
 export const setDirectionConsent = (value: boolean): Promise<{ ok: boolean; consent: boolean }> =>
   call('directionConsentSet', { value });
 
+// ── Operational AI ───────────────────────────────────────────────────────────────
+// The same control plane the development screens use — one connection, both pillars.
+
+export interface OpsPipeline {
+  key: string;
+  description?: string;
+  enabled: boolean;
+  trigger: string;
+  activeRuns: number;
+}
+
+/** Registered pipelines. `error` explains an empty list (a broken definition file). */
+export const getPipelines = (): Promise<{ pipelines: OpsPipeline[]; error?: string }> => call('opsPipelines');
+
+/** Re-read the definition files without restarting the core. */
+export const reloadPipelines = (): Promise<{ loaded: number; error?: string }> => call('opsReload');
+
 /** Subscribe to the live event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {
   try {
