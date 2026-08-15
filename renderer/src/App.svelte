@@ -10,7 +10,7 @@
   import Wizard from './Wizard.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
-  import { modeState, setMode, type Mode } from './lib/mode.svelte';
+  import { modeState } from './lib/mode.svelte';
   import { prefs } from './lib/prefs.svelte';
 
   let route = $state(location.hash);
@@ -43,8 +43,11 @@
   });
 
   const isSetup = $derived(route.startsWith('#/setup'));
-  /** null until the user has chosen once — that is what shows the picker. */
+  /** null until the user has chosen once. */
   const mode = $derived(modeState.current);
+  // The picker is a screen inside the app, not a gate in front of it: shown when nothing
+  // has been chosen yet, and reachable from the sidebar afterwards.
+  const picking = $derived(!mode || route.startsWith('#/mode'));
 
   // Settings is in both lists on purpose: the provider, the models and the token ceiling
   // are one setup shared by both pillars (D24). Two settings screens would imply two.
@@ -59,13 +62,8 @@
     { hash: '#/logs', key: 'nav.logs' },
     { hash: '#/settings', key: 'nav.settings' },
   ];
-  const nav = $derived(mode === 'ops' ? OPS_NAV : DEV_NAV);
-
-  /** Switching returns to that mode's home — the current route may not exist in it. */
-  function switchTo(next: Mode) {
-    setMode(next);
-    location.hash = '#/';
-  }
+  // Nothing to navigate to before a mode is chosen — an empty sidebar is honest here.
+  const nav = $derived(!mode ? [] : mode === 'ops' ? OPS_NAV : DEV_NAV);
   function active(hash: string): boolean {
     if (hash === '#/') return route === '' || route === '#/' || route === '#';
     return route.startsWith(hash);
@@ -76,19 +74,19 @@
 
 {#if isSetup}
   <Wizard />
-{:else if !mode}
-  <ModePicker />
 {:else}
   <div class="shell">
     <nav>
       <p class="brand">Corral</p>
-      <!-- Spelled out, not an icon: which pillar you are looking at decides what every
-           screen below means, and an icon would make that a guess. -->
-      <div class="mode">
-        <span class="label">{t('mode.current')}</span>
-        <strong>{t(mode === 'ops' ? 'mode.ops' : 'mode.dev')}</strong>
-        <button onclick={() => switchTo(mode === 'ops' ? 'dev' : 'ops')}>{t('mode.switch')}</button>
-      </div>
+      {#if mode}
+        <!-- Spelled out, not an icon: which pillar you are looking at decides what every
+             screen below means, and an icon would make that a guess. -->
+        <div class="mode">
+          <span class="label">{t('mode.current')}</span>
+          <strong>{t(mode === 'ops' ? 'mode.ops' : 'mode.dev')}</strong>
+          <a class="switch" href="#/mode">{t('mode.switch')}</a>
+        </div>
+      {/if}
       <ul>
         {#each nav as item}
           <li><a href={item.hash} class:active={active(item.hash)}>{t(item.key)}</a></li>
@@ -96,7 +94,9 @@
       </ul>
     </nav>
     <div class="content">
-      {#if route.startsWith('#/history')}
+      {#if picking}
+        <ModePicker current={mode} />
+      {:else if route.startsWith('#/history')}
         <History />
       {:else if route.startsWith('#/logs')}
         <Logs />
@@ -146,9 +146,15 @@
     font-weight: 500;
     color: var(--text);
   }
-  .mode button {
+  .mode .switch {
     font-size: 11px;
     padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-dim);
+  }
+  .mode .switch:hover {
+    background: var(--surface-2);
   }
   ul {
     list-style: none;
