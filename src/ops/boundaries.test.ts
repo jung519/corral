@@ -10,7 +10,7 @@
  * into issue/PR/workspace code is exactly how that neutrality would be lost.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const SRC = new URL('..', import.meta.url).pathname;
@@ -67,15 +67,19 @@ describe('module boundaries', () => {
   it('ops/ imports only shared infrastructure', () => {
     // Whitelist rather than blacklist: a new development-AI directory added later is
     // then off-limits by default instead of silently allowed.
-    const SHARED = ['agent/', 'core/', 'config/', 'credentials/', 'profile/', 'util/', 'control-plane/'];
+    const SHARED = ['agent', 'core', 'config', 'credentials', 'profile', 'util', 'control-plane'];
+    const opsDir = join(SRC, 'ops');
     const outside: string[] = [];
 
-    for (const file of filesUnder(join(SRC, 'ops'))) {
+    for (const file of filesUnder(opsDir)) {
       for (const spec of importsOf(file)) {
         if (!spec.startsWith('.')) continue; // node: and npm packages are fine
-        const target = spec.replace(/^(\.\.\/)+/, '');
-        if (target.startsWith('./') || !target.includes('/')) continue; // within ops/
-        if (!SHARED.some((s) => target.startsWith(s))) outside.push(`${file.replace(SRC, '')} → ${spec}`);
+        // Resolve the specifier for real — `../pipeline/run.js` from `ops/history/` is
+        // still inside ops/, and only a resolved path can tell you that.
+        const target = resolve(dirname(file), spec);
+        if (target.startsWith(opsDir)) continue;
+        const top = target.replace(SRC, '').split('/')[0];
+        if (!SHARED.includes(top)) outside.push(`${file.replace(SRC, '')} → ${spec}`);
       }
     }
 
