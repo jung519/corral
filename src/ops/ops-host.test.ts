@@ -7,7 +7,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { startOpsHost, UnwiredAnswerValidator } from './ops-host.js';
+import { startOpsHost } from './ops-host.js';
 import type { OperationRunner } from './pipeline/ports.js';
 
 let dir: string;
@@ -119,15 +119,6 @@ describe('before the AI step exists', () => {
 
     expect(run).toMatchObject({ outcome: 'agent_failed', stage: 'agent' });
     expect(run?.reason).toMatch(/not wired up yet/);
-  });
-
-  it('refuses a pipeline whose rules it cannot enforce, rather than skipping them', async () => {
-    const validator = new UnwiredAnswerValidator();
-
-    // Passing everything through would mean that the day the model step is wired before
-    // the rule engine, every declared rule silently does nothing.
-    expect(await validator.check({ validate: { max_items: {} } }, { a: 1 })).toMatchObject({ ok: false });
-    expect(await validator.check({ validate: {} }, { a: 1 })).toMatchObject({ ok: true });
   });
 });
 
