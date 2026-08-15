@@ -11,6 +11,7 @@ import type { CredentialStore } from '../credentials/types.js';
 import type { TokenBudget } from '../core/token-budget.js';
 import { JsonlOpsHistoryStore } from './history/jsonl-store.js';
 import type { OpsHistoryStore } from './history/store.js';
+import { HttpInputResolver } from './input/http.js';
 import { NoneInputResolver } from './input/none.js';
 import { NoneOutputSink } from './output/none.js';
 import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
@@ -73,7 +74,9 @@ export class OpsHost {
     this.operation = options.operation ?? new UnwiredOperationRunner();
     this.budget = options.budget;
     this.runner = new PipelineRunner({
-      resolvers: new Map((options.resolvers ?? [new NoneInputResolver()]).map((r) => [r.kind, r])),
+      resolvers: new Map(
+        (options.resolvers ?? [new NoneInputResolver(), new HttpInputResolver(options.credentials)]).map((r) => [r.kind, r]),
+      ),
       sinks: new Map((options.sinks ?? [new NoneOutputSink()]).map((s) => [s.kind, s])),
       // Read through, so a provider swap takes effect without rebuilding the runner.
       operation: { run: (step, fields) => this.operation.run(step, fields) },

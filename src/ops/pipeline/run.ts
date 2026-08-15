@@ -185,6 +185,12 @@ export class PipelineRunner {
       try {
         resolved = await resolver.resolve(pipeline.input, event);
       } catch (err) {
+        // "Gone" is not "broken". A deleted record answers the same way forever, so this
+        // is a conclusion, not a failure — and a queue told otherwise would redeliver it
+        // until its dead-letter policy gave up.
+        if (err instanceof Error && err.name === 'TargetMissingError') {
+          return done('skipped', { stage: 'input', reason: message(err) });
+        }
         return done('input_failed', { stage: 'input', reason: message(err) });
       }
 
