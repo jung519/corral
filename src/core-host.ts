@@ -19,6 +19,8 @@ import { startWsHost, type WsHost } from './control-plane/ws.js';
 import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { logger } from './core/logger.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
+import { opsChatClients, opsModelFor } from './ops/operation/clients.js';
+import { OneTurnOperationRunner } from './ops/operation/one-turn.js';
 import { startOpsHost } from './ops/ops-host.js';
 import { FileCredentialStore } from './credentials/file-store.js';
 import { LayeredCredentialStore } from './credentials/layered.js';
@@ -110,6 +112,11 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
       const app = await bootstrap(config, { credentials, channel, directionStore, directionCheck });
       orchestrator?.stop();
       orchestrator = app.orchestrator;
+      // The operational AI asks the same providers the development one does (D24). Only
+      // `api` entries qualify; with none, its model step stays unwired and says so.
+      const clients = await opsChatClients(config.agent, credentials);
+      if (clients.length) ops.useOperation(new OneTurnOperationRunner({ clients, modelFor: opsModelFor(config.agent) }));
+      else logger.warn('ops: no api-transport provider configured — pipelines cannot run their model step');
       if (!channelStarted) {
         await channel.start();
         channelStarted = true;
