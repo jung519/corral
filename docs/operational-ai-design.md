@@ -152,76 +152,98 @@ corral이 실행·관제하는 것이다. 비즈니스 로직은 실행하지 �
 
 ---
 
-## 5. 파이프라인 스키마 (초안)
+## 5. 파이프라인 스키마
+
+> 구현됨 — `src/ops/pipeline/schema.ts`(정의) · `loader.ts`(적재). 아래는 실제 스키마다.
+> 초안에서 바뀐 부분과 그 이유는 §5.2에 모았다.
 
 도메인 용어를 쓰지 않는다. 아래는 **범용 이름**이며 어떤 프로젝트에도 적용된다.
 
+### 5.1 정의
+
+파이프라인 하나 = 파일 하나. `<상태 디렉터리>/pipelines/*.yaml`에 둔다.
+
 ```yaml
-pipelines:
-  - key: classify-record            # 파이프라인 식별자
-    enabled: true
+key: classify-record              # 식별자 (소문자·숫자·하이픈)
+enabled: true
+description: 들어온 레코드에 라벨을 붙인다
+max_concurrent: 1                 # 이 파이프라인의 동시 실행 수
 
-    trigger:                        # ① 일감 수신
-      kind: pubsub                  # pubsub | http | queue | schedule | manual
-      topic: <topic>
-      subscription: <subscription>
-      max_concurrent: 1             # 한도를 모르면 1부터 (실측 후 상향)
+trigger:                          # ① 일감 수신 — manual | schedule | pubsub
+  kind: pubsub
+  topic: records.created
+  subscription: corral-classify
+  credential: { service: gcp, account: default }
 
-    input:                          # ①-하위: 이벤트 → AI 입력
-      kind: http                    # none(본문 그대로) | http | plugin
-      request:
-        method: POST
-        url: "https://<host>/api/records/{id}"
-        headers: { authorization: "Bearer ${SECRET}" }
-      select:                       # 응답 → 납작한 입력 필드
-        title:   "data.title"
-        detail:  "data.description"   # truncate: 700
-        tags:    "data.keywords"
-      require: [title]              # 없으면 스킵(재시도해도 같음)
-      skip_if: "data.category.items 비어있지 않음"   # 중복 처리 방어
+input:                            # ①-하위: 이벤트 → AI 입력 — none | http
+  kind: http
+  request:
+    method: GET
+    url: "https://<host>/api/records/{{id}}"
+    credential: { service: backend, account: default }
+    timeout_ms: 15000
+  select:                         # 응답 경로 → 납작한 입력 필드
+    title:  "data.title"
+    detail: { path: "data.description", truncate: 700 }
+  require: [title]                # 없으면 스킵(재시도해도 같은 결과다)
+  skip_if: { field: "data.labels", is: non_empty }   # 이미 처리된 것 방어
 
-    agent:                          # ② AI 오퍼레이션
-      provider: claude              # 미지정 시 전역 배치를 따름
-      max_tokens: 4096
-      prompt:
-        system: |
-          <역할·규칙>
-        user_template: |
-          제목: {{title}}
-          설명: {{detail}}
-      schema:                       # 구조화 출력
-        type: object
-        properties:
-          items:      { type: array, items: { type: string } }
-          confidence: { type: number }
-        required: [items, confidence]
-      validate:
-        allowed_values:             # 허용 목록 밖 값은 버리고 기록
-          field: items
-          source: { kind: http, url: "https://<host>/api/vocabulary" }
-        max_items:      { field: items, limit: 4 }
-        min_confidence: { field: confidence, threshold: 0.7 }
-      derive:                       # AI에 묻지 않고 코드로 계산
-        groups: "parent_of(items) 중복 제거"
+agent:                            # ② AI 오퍼레이션 (1턴)
+  provider: claude                # 생략하면 앱 전역 설정을 따른다
+  max_tokens: 4096
+  prompt:
+    system: |
+      <역할·규칙>
+    user_template: |
+      제목: {{title}}
+      설명: {{detail}}
+  schema:                         # 구조화 출력의 모양
+    type: object
+    properties:
+      items:      { type: array, items: { type: string } }
+      confidence: { type: number }
+    required: [items, confidence]
+  validate:                       # AI를 믿지 않는다 — 코드로 다시 검사
+    allowed_values:
+      field: items
+      source: { url: "https://<host>/api/vocabulary" }   # 또는 values: [...]
+      select: "data.values"
+    max_items:      { field: items, limit: 4 }
+    min_confidence: { field: confidence, threshold: 0.7 }
 
-    output:                         # ③ 결과 전달
-      kind: http                    # http | pubsub | queue
-      request:
-        method: PATCH
-        url: "https://<host>/api/records/{id}"
-        body: { groups: "{{groups}}", items: "{{items}}" }
+output:                           # ③ 결과 전달 — none | http | pubsub
+  kind: http
+  request:
+    method: PATCH
+    url: "https://<host>/api/records/{{id}}"
+    body: { labels: "{{items}}" }
 
-    on_low_confidence:              # 저신뢰 처리(D14)
-      action: report                # 저장하지 않고 이력에만 남긴다
-      review_url: "https://<host>/admin/records/{id}"
+on_low_confidence:                # 저신뢰 처리 (D14)
+  action: report                  # report(보내지 않고 이력만) | skip | send
+  review_url: "https://<host>/admin/records/{{id}}"
 ```
 
 **설계 원칙**
 - 필드 이름에 도메인 개념(태그·축제·카테고리)을 넣지 않는다
 - 검증은 **AI를 믿지 않는다** — 프롬프트에 규칙을 적어도 코드에서 다시 검사한다
-- **AI에 묻지 않아도 되는 것은 묻지 않는다**(`derive`) — 모순된 답이 나올 여지를 없앤다
+- 선언으로 표현할 수 있는 것은 **실행할 수 있는 것뿐**이다. 코드가 해석할 수 없는 문장은
+  스키마에 넣지 않는다
+- 선언 스키마는 **코드 오퍼레이션의 부분집합**이다(D10). 선언이 코드보다 많은 것을
+  표현할 수 있게 되는 순간 탈출구가 무의미해진다
 
----
+### 5.2 초안에서 바뀐 것
+
+만들면서 초안이 실행 불가능하거나 코드베이스 규칙과 어긋나는 지점이 드러났다.
+
+| 초안 | 실제 | 왜 |
+|---|---|---|
+| `pipelines:` 를 corral.yaml에 | **`pipelines/` 디렉터리, 파일 하나당 하나** | 설정 마법사의 `buildConfigYaml`은 corral.yaml을 **매번 처음부터 다시 만든다**. 거기 두면 설정을 저장할 때마다 파이프라인이 지워진다. 파일 경계는 UI가 파이프라인을 쓰기 시작할 때 추가·삭제를 파일 하나의 문제로 만들어 준다 |
+| 트리거 `pubsub\|http\|queue\|schedule\|manual` | **`manual\|schedule\|pubsub`** | 실행할 것이 없는 종류를 스키마에 두면 **영영 안 도는 파이프라인을 통과시킨다**. `http` 트리거는 포트를 열어야 해서 큐를 고른 이유(D5)와 정면으로 어긋나고, `queue`는 `pubsub`이 곧 그 구현이라 중복이다 |
+| `skip_if: "…비어있지 않음"` | `skip_if: { field, is: empty\|non_empty }` | 자연어 조건은 코드가 실행할 수 없다 |
+| `derive: "parent_of(items) 중복 제거"` | **없앰** | 임의 식은 선언으로 실행할 수 없다. 코드 플러그인(D9)의 몫이고, 그게 탈출구를 처음부터 설계한 이유다 |
+| `headers: { authorization: "Bearer ${SECRET}" }` | `credential: { service, account }` | corral은 설정 파일에 비밀을 두지 않는다. 어디서나 참조만 두고 값은 자격증명 저장소에서 온다 |
+| `{id}` 와 `{{title}}` 혼용 | **`{{…}}` 하나로** | 두 문법을 둘 이유가 없다 |
+| `max_concurrent`가 트리거 밑 | **파이프라인 밑** | 동시 실행 수는 *일이 어떻게 도착하는지*가 아니라 *일 자체*의 성질이다. 트리거 밑에 두면 수동 실행에는 한도가 없어진다 |
 
 ## 6. 선행 과제 (지금 구조로는 불가능한 것)
 
