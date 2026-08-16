@@ -48,6 +48,17 @@ export class RuleAnswerValidator implements AnswerValidator {
       const { field } = rules.allowed_values;
       const value = result[field];
       if (value !== undefined) {
+        // The load-time check catches this whenever the answer schema declares a type.
+        // It often doesn't — `{ type: array }` says nothing about what is inside — so the
+        // first look at a real value is here. Comparing a record against a list of names
+        // can only ever say "not in the list", which would empty the field and report
+        // success: the pipeline would go on publishing nothing, forever, as a completed run.
+        if (!isComparable(value)) {
+          return {
+            ok: false,
+            reasons: [`"${field}" is not a value allowed_values can compare — it holds ${describe(value)}`],
+          };
+        }
         let allowed: Set<string>;
         try {
           allowed = await this.vocabulary(rules.allowed_values);
@@ -124,6 +135,18 @@ export class RuleAnswerValidator implements AnswerValidator {
 function asList(value: unknown): string[] {
   if (Array.isArray(value)) return value.map((v) => String(v));
   return value === null || value === undefined ? [] : [String(value)];
+}
+
+/** A name, or a list of names. Anything a vocabulary could sensibly hold. */
+function isComparable(value: unknown): boolean {
+  const scalar = (v: unknown): boolean => v === null || ['string', 'number', 'boolean'].includes(typeof v);
+  return Array.isArray(value) ? value.every(scalar) : scalar(value);
+}
+
+/** What it holds instead, in the operator's terms. */
+function describe(value: unknown): string {
+  if (Array.isArray(value)) return 'a list with something other than names in it';
+  return 'a record';
 }
 
 function message(err: unknown): string {
