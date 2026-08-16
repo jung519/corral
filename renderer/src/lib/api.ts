@@ -130,6 +130,49 @@ export const savePipeline = (
 export const setPipelineEnabled = (key: string, enabled: boolean): Promise<{ ok: boolean; enabled?: boolean; error?: string }> =>
   call('opsSetEnabled', { key, enabled });
 
+export interface OpsRun {
+  id: string;
+  pipeline: string;
+  outcome: string;
+  /** Which step ended the run. Absent when it completed. */
+  stage?: string;
+  reason?: string;
+  startedAt: number;
+  durationMs: number;
+  tokens?: number;
+  costUsd?: number;
+  provider?: string;
+  model?: string;
+  failedOver?: boolean;
+  lowConfidence?: boolean;
+  /** Values the checks discarded. */
+  dropped?: string[];
+  /** Where a human can look at a held-back result — the user's own screen, not ours. */
+  reviewUrl?: string;
+}
+
+export interface OpsDailyTotals {
+  date: string;
+  runs: number;
+  byOutcome: Record<string, number>;
+  tokens: number;
+  costUsd: number;
+  failedOver: number;
+  lowConfidence: number;
+  failed: number;
+}
+
+/** Recent runs, newest first. */
+export const getRuns = (query: {
+  days?: number;
+  pipeline?: string;
+  outcome?: string;
+  limit?: number;
+}): Promise<{ runs: OpsRun[] }> => call('opsHistory', query);
+
+/** Per-day summaries, newest first. */
+export const getTotals = (days?: number): Promise<{ totals: OpsDailyTotals[] }> => call('opsTotals', { days });
+
 /** Subscribe to the live event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {
   try {
