@@ -151,6 +151,11 @@ export async function dispatch(
       deps.ops.syncSubscriptions();
       return { ok: true, enabled };
     }
+    case 'opsDelete':
+      if (!deps.ops) return NO_OPS;
+      // The trigger is stopped before the file goes, and any run already going is left to
+      // finish — see `OpsHost.remove`.
+      return await deps.ops.remove(String(a.key ?? ''));
     case 'opsSave':
       if (!deps.ops) return NO_OPS;
       // Issues come back with the same dotted field paths the loader uses, so an editor

@@ -6,6 +6,8 @@
  * how a pipeline gets tried out while it's being written, and how a failed one gets
  * reprocessed afterwards.
  */
+import { rm } from 'node:fs/promises';
+import { join } from 'node:path';
 import { logger } from '../core/logger.js';
 import type { CredentialStore } from '../credentials/types.js';
 import type { TokenBudget } from '../core/token-budget.js';
@@ -17,7 +19,7 @@ import { HttpOutputSink } from './output/http.js';
 import { NoneOutputSink } from './output/none.js';
 import { PubSubOutputSink } from './output/pubsub.js';
 import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
-import { savePipeline, type SaveResult } from './pipeline/writer.js';
+import { findPipelineFile, savePipeline, type SaveResult } from './pipeline/writer.js';
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
@@ -238,6 +240,42 @@ export class OpsHost {
     const result = await savePipeline(this.dir, definition, options);
     if (result.ok) await this.load();
     return result;
+  }
+
+  /**
+   * Delete a pipeline: its file goes, and so does its trigger.
+   *
+   * **The trigger stops first.** Removing the file and reloading afterwards would leave a
+   * window in which a timer or a queue could start one more run of something already on
+   * its way out.
+   *
+   * **A run already going is left to finish.** Killing one mid-flight can leave half of it
+   * written into someone's system; deleting a definition is not a reason to do that. It
+   * holds its own copy of the definition, so it completes on the pipeline it started with.
+   *
+   * **History stays.** What ran is a separate fact from what is configured — deleting the
+   * record of last night's failures along with the definition would remove the only way to
+   * find out why it was deleted.
+   */
+  async remove(key: string): Promise<{ ok: boolean; file?: string; error?: string }> {
+    if (!this.registry.get(key)) return { ok: false, error: `no pipeline named "${key}"` };
+
+    // Whatever the file is actually called. Assuming `<key>.yaml` would silently miss a
+    // hand-named file and leave the pipeline behind — the same reason `savePipeline` looks
+    // it up rather than guessing.
+    const file = await findPipelineFile(this.dir, key);
+    if (!file) return { ok: false, error: `no file defines "${key}" — nothing to delete` };
+
+    const stop = this.subscriptions.get(key);
+    if (stop) {
+      await stop();
+      this.subscriptions.delete(key);
+      logger.info(`ops: pipeline "${key}" stopped`);
+    }
+
+    await rm(join(this.dir, file));
+    await this.load();
+    return { ok: true, file };
   }
 
   /**
