@@ -13,14 +13,18 @@ import type { InputResolver, ResolvedInput } from '../pipeline/ports.js';
 import { readPath } from '../pipeline/run.js';
 import type { FieldSelector, PipelineInput } from '../pipeline/schema.js';
 
-/** Pull a value out of a document, honouring the selector's truncation. */
+/** Pull a value out of a document, honouring the selector's caps. */
 export function selectField(source: unknown, selector: FieldSelector): unknown {
   const path = typeof selector === 'string' ? selector : selector.path;
   const value = readPath(source, path);
-  const truncate = typeof selector === 'string' ? undefined : selector.truncate;
-  // Long free text is the usual reason a prompt gets expensive, so the cap lives in the
-  // definition rather than in whatever the prompt author remembered to write.
-  return truncate && typeof value === 'string' && value.length > truncate ? value.slice(0, truncate) : value;
+  if (typeof selector === 'string') return value;
+  // A long piece of text and a long list are the two ways a prompt gets expensive, so both
+  // caps live in the definition rather than in whatever the prompt author remembered to
+  // write.
+  const { truncate, limit } = selector;
+  if (truncate && typeof value === 'string' && value.length > truncate) return value.slice(0, truncate);
+  if (limit && Array.isArray(value) && value.length > limit) return value.slice(0, limit);
+  return value;
 }
 
 /** Apply a `select` map to a document. */

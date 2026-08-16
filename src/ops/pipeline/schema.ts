@@ -15,13 +15,23 @@ import { z } from 'zod';
 import { CredentialRefSchema } from '../../config/schema.js';
 
 /**
- * Where a value comes from in a JSON response: a dotted path, optionally truncated.
- * Long free text blows up prompt cost, so the truncation lives in the definition rather
- * than in whatever prompt the user happens to write.
+ * Where a value comes from in a JSON response: a dotted path, optionally cut down.
+ *
+ * Prompt cost is the reason both caps live here rather than in whatever prompt the user
+ * happens to write: `truncate` for a long piece of text, `limit` for a long list. A
+ * pipeline that reads "everything since yesterday" gets whatever yesterday happened to
+ * hold, and the day it holds five hundred records is not the day to find that out.
  */
 export const FieldSelectorSchema = z.union([
   z.string().min(1),
-  z.object({ path: z.string().min(1), truncate: z.number().int().positive().optional() }),
+  z.object({
+    path: z.string().min(1),
+    /** Characters, on a string. */
+    truncate: z.number().int().positive().optional(),
+    /** Items, on a list. The first `limit`, since a source that orders its results puts
+     *  the ones worth reading first. */
+    limit: z.number().int().positive().optional(),
+  }),
 ]);
 
 /** A structured condition. Free-text conditions can't be executed, so there aren't any. */

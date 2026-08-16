@@ -228,6 +228,13 @@ export class PipelineRunner {
         return done('input_failed', { stage: 'input', reason: message(err) });
       }
 
+      // What arrived, plus what was read because of it. A pubsub event carries the
+      // identifier and a scheduled tick carries the time, and both are gone the moment
+      // `select` names paths in the *response* — leaving `{{id}}` in the output URL to
+      // render as nothing at all. Selected names win, so a `select` still decides what a
+      // name means.
+      const fields = { ...asFields(event), ...resolved.fields };
+
       // ── the two reasons not to spend a turn ──────────────────────────────────
       const { skip_if: skipIf, require } = pipeline.input;
       if (skipIf && conditionHolds(skipIf, resolved.raw)) {
@@ -235,7 +242,7 @@ export class PipelineRunner {
         // redelivery must not cost a second turn or overwrite a good answer.
         return done('skipped', { stage: 'input', reason: `skip_if matched (${skipIf.field} is ${skipIf.is})` });
       }
-      const missing = require.filter((name) => isEmpty(resolved.fields[name]));
+      const missing = require.filter((name) => isEmpty(fields[name]));
       if (missing.length) {
         // Skipped, not failed: the source genuinely lacks the field, so retrying fetches
         // the same gap. Treating it as an error would retry forever.
@@ -255,7 +262,7 @@ export class PipelineRunner {
       this.emit(head, 'agent', 'calling the model');
       let operation;
       try {
-        operation = await this.deps.operation.run(pipeline.agent, resolved.fields);
+        operation = await this.deps.operation.run(pipeline.agent, fields);
       } catch (err) {
         return done('agent_failed', { stage: 'agent', reason: message(err) });
       }
@@ -285,9 +292,9 @@ export class PipelineRunner {
         answer = verdict.answer;
         dropped = verdict.dropped;
       } else if ('lowConfidence' in verdict) {
-        const fields = { ...resolved.fields, ...verdict.answer };
+        const withAnswer = { ...fields, ...verdict.answer };
         reviewUrl = pipeline.on_low_confidence.review_url
-          ? fillTemplate(pipeline.on_low_confidence.review_url, fields)
+          ? fillTemplate(pipeline.on_low_confidence.review_url, withAnswer)
           : undefined;
         const reason = verdict.reasons.join('; ');
         lowConfidence = true;
@@ -310,7 +317,7 @@ export class PipelineRunner {
         return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, ...spend, lowConfidence });
       }
       try {
-        await sink.send(pipeline.output, { ...resolved.fields, ...answer });
+        await sink.send(pipeline.output, { ...fields, ...answer });
       } catch (err) {
         // The turn is already spent, so this is the expensive failure — it has to be
         // distinguishable from the cheap ones when someone reads the history.
@@ -322,6 +329,11 @@ export class PipelineRunner {
       limiter.release(id);
     }
   }
+}
+
+/** An event is whatever the trigger handed over; only an object contributes names. */
+function asFields(event: unknown): Fields {
+  return event && typeof event === 'object' && !Array.isArray(event) ? (event as Fields) : {};
 }
 
 function message(err: unknown): string {
