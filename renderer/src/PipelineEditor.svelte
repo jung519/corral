@@ -37,9 +37,61 @@
   let description = $state('');
 
   let triggerKind = $state<'manual' | 'schedule' | 'pubsub'>('manual');
-  let cron = $state('0 3 * * *');
   let topic = $state('');
   let subscription = $state('');
+
+  // ── when a schedule runs ────────────────────────────────────────────────────────
+  // Picked by default, typed if you'd rather. Either way what gets saved is a cron
+  // expression — the file keeps the format it always had, and someone who opens the YAML
+  // sees the same five fields whichever way it was written here.
+  let cronMode = $state<'pick' | 'manual'>('pick');
+  let cron = $state('0 3 * * *');
+  let every = $state<'hour' | 'day' | 'week' | 'month'>('day');
+  let atMinute = $state(0);
+  let atHour = $state(9);
+  let onWeekday = $state(1);
+  let onDay = $state(1);
+  /**
+   * Which clock the time above is on. Defaults to this computer's, and is always written —
+   * a schedule set here should keep meaning the same hour after the core moves to a server
+   * whose clock is almost certainly UTC.
+   */
+  let timezone = $state(localZone());
+
+  function localZone(): string {
+    try {
+      return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
+    } catch {
+      return 'UTC';
+    }
+  }
+
+  /** Every zone the runtime knows. A long list, but typing jumps straight to a name. */
+  const ZONES: string[] = (() => {
+    try {
+      const all = (Intl as { supportedValuesOf?: (k: string) => string[] }).supportedValuesOf?.('timeZone');
+      if (all?.length) return all;
+    } catch {
+      /* older runtime — fall through */
+    }
+    return [localZone(), 'UTC'].filter((z, i, a) => a.indexOf(z) === i);
+  })();
+
+  const WEEKDAYS = ['weekday.sun', 'weekday.mon', 'weekday.tue', 'weekday.wed', 'weekday.thu', 'weekday.fri', 'weekday.sat'];
+  const pad = (n: number) => String(n).padStart(2, '0');
+
+  /** The picked schedule, as the cron it will be saved as. */
+  const pickedCron = $derived(
+    every === 'hour'
+      ? `${atMinute} * * * *`
+      : every === 'day'
+        ? `${atMinute} ${atHour} * * *`
+        : every === 'week'
+          ? `${atMinute} ${atHour} * * ${onWeekday}`
+          : `${atMinute} ${atHour} ${onDay} * *`,
+  );
+  /** What actually goes in the file. */
+  const cronToSave = $derived(cronMode === 'pick' ? pickedCron : cron);
 
   let inputKind = $state<'none' | 'http'>('none');
   let inputUrl = $state('');
@@ -91,7 +143,7 @@
   function buildDefinition(): Record<string, unknown> {
     const trigger =
       triggerKind === 'schedule'
-        ? { kind: 'schedule', cron }
+        ? { kind: 'schedule', cron: cronToSave, timezone }
         : triggerKind === 'pubsub'
           ? { kind: 'pubsub', topic, subscription }
           : { kind: 'manual' };
@@ -185,7 +237,13 @@
 
     <div class="body">
       {#if step === 0}
-        <label class="field"><span>{t('editor.key')}</span><input bind:value={key} placeholder="classify-record" spellcheck="false" /></label>
+        <label class="field">
+          <span>{t('editor.key')}</span>
+          <input bind:value={key} placeholder="classify-record" spellcheck="false" />
+          <!-- It is an identifier, not a title: it becomes the file name, the history key
+               and the URL. Saying so beats being refused on save. -->
+          <small>{t('editor.keyHint')}</small>
+        </label>
         <label class="field"><span>{t('editor.description')}</span><input bind:value={description} /></label>
 
         <label class="field">
@@ -197,7 +255,68 @@
           </select>
         </label>
         {#if triggerKind === 'schedule'}
-          <label class="field"><span>cron</span><input bind:value={cron} spellcheck="false" /></label>
+          <div class="sched">
+            <div class="tabs">
+              <button class="tab" class:on={cronMode === 'pick'} onclick={() => (cronMode = 'pick')}>{t('editor.cron.pick')}</button>
+              <button class="tab" class:on={cronMode === 'manual'} onclick={() => (cronMode = 'manual')}>{t('editor.cron.manual')}</button>
+            </div>
+
+            {#if cronMode === 'pick'}
+              <div class="row">
+                <label class="field"
+                  ><span>{t('editor.every')}</span>
+                  <select bind:value={every}>
+                    <option value="hour">{t('editor.every.hour')}</option>
+                    <option value="day">{t('editor.every.day')}</option>
+                    <option value="week">{t('editor.every.week')}</option>
+                    <option value="month">{t('editor.every.month')}</option>
+                  </select></label
+                >
+                {#if every === 'week'}
+                  <label class="field"
+                    ><span>{t('editor.onWeekday')}</span>
+                    <select bind:value={onWeekday}>
+                      {#each WEEKDAYS as day, i}<option value={i}>{t(day)}</option>{/each}
+                    </select></label
+                  >
+                {:else if every === 'month'}
+                  <label class="field"
+                    ><span>{t('editor.onDay')}</span>
+                    <select bind:value={onDay}>
+                      {#each Array.from({ length: 31 }, (_, i) => i + 1) as d}<option value={d}>{d}</option>{/each}
+                    </select></label
+                  >
+                {/if}
+                {#if every !== 'hour'}
+                  <label class="field narrow"
+                    ><span>{t('editor.atHour')}</span>
+                    <select bind:value={atHour}>
+                      {#each Array.from({ length: 24 }, (_, i) => i) as h}<option value={h}>{pad(h)}</option>{/each}
+                    </select></label
+                  >
+                {/if}
+                <label class="field narrow"
+                  ><span>{t('editor.atMinute')}</span>
+                  <select bind:value={atMinute}>
+                    {#each Array.from({ length: 60 }, (_, i) => i) as m}<option value={m}>{pad(m)}</option>{/each}
+                  </select></label
+                >
+              </div>
+              <!-- The file is the source of truth, so show what will land in it. -->
+              <p class="built">cron <code>{pickedCron}</code></p>
+            {:else}
+              <label class="field"><span>{t('editor.cronExpr')}</span><input bind:value={cron} spellcheck="false" placeholder="0 9 * * *" /></label>
+              <p class="hint">{t('editor.cronExprHint')}</p>
+            {/if}
+
+            <label class="field">
+              <span>{t('editor.timezone')}</span>
+              <select bind:value={timezone}>
+                {#each ZONES as zone}<option value={zone}>{zone}</option>{/each}
+              </select>
+              <small>{t('editor.timezoneHint')}</small>
+            </label>
+          </div>
         {:else if triggerKind === 'pubsub'}
           <label class="field"><span>topic</span><input bind:value={topic} spellcheck="false" /></label>
           <label class="field"><span>subscription</span><input bind:value={subscription} spellcheck="false" placeholder="projects/p/subscriptions/s" /></label>
@@ -392,6 +511,49 @@
   .mono {
     font-family: var(--mono, ui-monospace, Menlo, monospace);
     font-size: 12px;
+  }
+  .field small {
+    color: var(--text-dim);
+    font-size: 11px;
+    opacity: 0.85;
+  }
+  /* The schedule picker. Its own block so the tabs, the selects and the cron it builds
+     read as one control rather than four stacked fields. */
+  .sched {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .sched .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 12px;
+  }
+  .sched .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .sched .row .field {
+    flex: 1;
+    min-width: 110px;
+  }
+  .sched .row .narrow {
+    flex: 0 0 84px;
+    min-width: 0;
+  }
+  .built {
+    margin: 4px 0 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+  }
+  .built code {
+    color: var(--text);
+    background: var(--surface-2);
+    padding: 1px 6px;
+    border-radius: 4px;
   }
   .two {
     display: grid;
