@@ -196,6 +196,9 @@ trigger:                          # ① 일감 수신 — manual | schedule | pu
   topic: records.created
   subscription: corral-classify
   credential: { service: gcp, account: default }
+  # kind: schedule 이면
+  #   cron: "0 9 * * *"
+  #   timezone: Asia/Seoul       # 어느 시계의 9시인지. 생략하면 코어가 도는 컴퓨터
 
 input:                            # ①-하위: 이벤트 → AI 입력 — none | http
   kind: http

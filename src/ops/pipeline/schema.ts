@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import { CredentialRefSchema } from '../../config/schema.js';
+import { isTimeZone } from '../trigger/cron.js';
 
 /**
  * Where a value comes from in a JSON response: a dotted path, optionally cut down.
@@ -53,7 +54,19 @@ export const ScheduleTriggerSchema = z.object({
   kind: z.literal('schedule'),
   /** Standard 5-field cron. Validated for shape here, for meaning by the adapter. */
   cron: z.string().min(1),
-  timezone: z.string().optional(),
+  /**
+   * Which clock "09:00" is on, as an IANA name (`Asia/Seoul`, `UTC`).
+   *
+   * Omitted means the machine running the core — fine on a laptop, and the reason a
+   * schedule set at home runs at a different hour once the core moves to a VM. Refused
+   * here when the runtime does not know the name, because the alternative is a pipeline
+   * that loads cleanly and then fires at the wrong time forever.
+   */
+  timezone: z
+    .string()
+    .min(1)
+    .refine(isTimeZone, (tz) => ({ message: `"${tz}" is not a time zone this machine knows (expected an IANA name like "Asia/Seoul")` }))
+    .optional(),
 });
 
 export const PubSubTriggerSchema = z.object({
