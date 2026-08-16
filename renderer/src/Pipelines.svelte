@@ -1,53 +1,68 @@
 <script lang="ts">
   /**
-   * The operations mode's landing screen.
+   * The operations dashboard. One row per pipeline.
    *
-   * Built on the same bones as the development dashboard — a `header` with the connection
-   * dot and a count, `main` split into labelled sections, one row per thing, a live
-   * timeline at the bottom. Both pillars are the same app, and a screen that invented its
-   * own layout would read as a different product bolted on.
+   * Same bones as the development dashboard — shared header, labelled sections, a live
+   * timeline — because both pillars are the same app and a screen that invented its own
+   * layout would read as a different product bolted on.
    *
-   * The dashboard proper — today's usage against the shared ceiling, per-pipeline run
-   * counts, manual runs — is its own issue. What is here is what the core can already
-   * answer.
+   * The header carries today's token usage even though nothing here may have caused it:
+   * the ceiling is shared with the development AI, so a pipeline can stop for a reason
+   * that has nothing to do with pipelines, and an operator staring at a stalled list
+   * deserves to see that immediately rather than deduce it.
    */
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
   import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
+  import { toast } from './lib/toast.svelte';
   import type { CorralEvent } from './lib/types';
 
-  let pipelines = $state<api.OpsPipeline[]>([]);
-  let error = $state<string | undefined>();
+  let overview = $state<api.OpsOverview>({ pipelines: [], counts: {} });
   let online = $state(false);
   let loading = $state(true);
   let live = $state<CorralEvent[]>([]);
 
+  const budget = $derived(overview.budget);
+  const hasLimit = $derived(Boolean(budget?.limits.dailyInputTokens || budget?.limits.dailyOutputTokens));
+  const usedPercent = $derived(Math.round((budget?.used ?? 0) * 100));
+
   async function refresh() {
     try {
-      const res = await api.getPipelines();
-      pipelines = res.pipelines;
-      error = res.error;
+      overview = await api.getOverview();
       online = true;
-    } catch (err) {
+    } catch {
       online = false;
-      error = err instanceof Error ? err.message : String(err);
     } finally {
       loading = false;
     }
   }
 
   async function reload() {
-    loading = true;
-    await api.reloadPipelines().catch(() => {});
+    const r = await api.reloadPipelines().catch(() => ({ loaded: 0, error: 'reload failed' }));
+    if (r.error) toast(r.error, 'error');
+    await refresh();
+  }
+
+  async function run(key: string) {
+    const r = await api.runPipeline(key);
+    // A manual run is how a pipeline gets tried out, so the reason it stopped matters
+    // more than the fact that it did.
+    if (!r.ok) toast(r.error ?? `${key}: ${r.run?.outcome ?? 'failed'} — ${r.run?.reason ?? ''}`, 'error');
+    else toast(`${key}: ${t('ops.ran')}`);
+    await refresh();
+  }
+
+  async function toggle(key: string, enabled: boolean) {
+    await api.setPipelineEnabled(key, enabled);
     await refresh();
   }
 
   onMount(() => {
     void refresh();
-    // Runs are seconds long and there are many; the timeline is how you see the thing
-    // working at all without opening a log file.
+    // Runs are seconds long and there are many of them; without this the list would only
+    // ever be as fresh as the last poll.
     const unsub = api.subscribeEvents((e) => {
       if (e.kind !== 'run') return;
       live = [...live, e].slice(-200);
@@ -61,32 +76,63 @@
   });
 </script>
 
-<PageHeader title={t('nav.pipelines')} {online} meta="{pipelines.length} {t('ops.count')}">
-  <Button onclick={reload} disabled={loading}>{t('ops.reload')}</Button>
+<PageHeader
+  title={t('nav.pipelines')}
+  {online}
+  meta={hasLimit
+    ? `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0} · ${usedPercent}%`
+    : `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0}`}
+>
+  <Button onclick={reload}>{t('ops.reload')}</Button>
 </PageHeader>
 
 <main>
-  {#if error}
+  {#if hasLimit}
+    <div class="budget" class:warn={usedPercent >= 80}>
+      <div class="bar"><span style:width="{Math.min(100, usedPercent)}%"></span></div>
+      <span class="budget-text">{t('ops.limitUsed')} {usedPercent}%</span>
+    </div>
+  {/if}
+
+  {#if overview.error}
     <!-- A broken definition file leaves the list empty; saying why beats an empty page. -->
-    <div class="setup-banner"><span>{error}</span></div>
+    <div class="banner"><span>{overview.error}</span></div>
   {/if}
 
   <section>
     <h2>{t('nav.pipelines')}</h2>
-    {#if !loading && pipelines.length === 0}
-      <p class="dim">{t('ops.none')}</p>
-      <p class="dim small">{t('ops.noneHint')}</p>
+    {#if !loading && overview.pipelines.length === 0}
+      <div class="empty">
+        <p>{t('ops.none')}</p>
+        <p class="dim">{t('ops.noneHint')}</p>
+        <p class="dim">{t('ops.noneHint2')}</p>
+      </div>
     {:else}
-      {#each pipelines as p (p.key)}
+      {#each overview.pipelines as p (p.key)}
+        {@const c = overview.counts[p.key]}
         <div class="row">
           <span class="dot" class:on={p.enabled}></span>
-          <span class="key">{p.key}</span>
-          <span class="desc">{p.description ?? ''}</span>
-          {#if p.activeRuns > 0}
-            <span class="working"><span class="spin" aria-hidden="true"></span>{p.activeRuns}</span>
-          {/if}
-          <span class="trigger">{p.trigger}</span>
-          <span class="state">{p.enabled ? t('ops.enabled') : t('ops.disabled')}</span>
+          <div class="who">
+            <span class="key">{p.key}</span>
+            <span class="desc">{p.description ?? ''}</span>
+          </div>
+          <span class="route">{p.trigger} → {p.provider ?? t('ops.defaultProvider')}</span>
+
+          <span class="counts">
+            <span class="today">{c?.runs ?? 0} {t('ops.today')}</span>
+            {#if p.activeRuns > 0}
+              <span class="working"><span class="spin" aria-hidden="true"></span>{p.activeRuns}</span>
+            {/if}
+            {#if c?.lowConfidence}<span class="low" title={t('ops.lowConfidence')}>◐ {c.lowConfidence}</span>{/if}
+            {#if c?.failed}<span class="failed" title={t('ops.failed')}>✕ {c.failed}</span>{/if}
+          </span>
+
+          <span class="actions">
+            <Button onclick={() => run(p.key)}>{t('ops.run')}</Button>
+            <button class="ghost" onclick={() => toggle(p.key, !p.enabled)}>
+              {p.enabled ? t('ops.turnOff') : t('ops.turnOn')}
+            </button>
+          </span>
         </div>
       {/each}
     {/if}
@@ -96,7 +142,10 @@
     <h2>{t('dash.timeline')}</h2>
     <div class="timeline">
       {#each live.slice().reverse() as e}
-        <div class="event" title={e.label}><span class="ev-id">{String(e.data?.pipeline ?? e.identifier)}</span> {e.label}</div>
+        <div class="event" title={e.label}>
+          <span class="ev-id">{String(e.data?.pipeline ?? e.identifier)}</span>
+          {e.label}
+        </div>
       {/each}
     </div>
   </section>
@@ -115,6 +164,32 @@
     text-transform: uppercase;
     color: var(--text-dim);
     margin: 0 0 10px;
+  }
+  .budget {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .bar {
+    flex: 1;
+    height: 6px;
+    border-radius: 999px;
+    background: var(--surface-2);
+    overflow: hidden;
+  }
+  .bar span {
+    display: block;
+    height: 100%;
+    background: var(--accent);
+  }
+  .budget.warn .bar span {
+    background: var(--red, #f85149);
+  }
+  .budget-text {
+    font-size: 12px;
+    color: var(--text-dim);
+    white-space: nowrap;
   }
   .dot {
     width: 8px;
@@ -137,28 +212,49 @@
     margin-bottom: 8px;
     font-size: 13px;
   }
+  .who {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
   .key {
     font-weight: 500;
     color: var(--text);
   }
   .desc {
-    flex: 1;
-    min-width: 0;
     color: var(--text-dim);
+    font-size: 12px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .trigger,
-  .state {
+  .route {
     color: var(--text-dim);
     font-size: 12px;
+    white-space: nowrap;
+  }
+  .counts {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .today {
+    color: var(--text-dim);
+  }
+  .low {
+    color: var(--amber, #d29922);
+  }
+  .failed {
+    color: var(--red, #f85149);
   }
   .working {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 12px;
     color: var(--accent);
   }
   .spin {
@@ -174,18 +270,26 @@
       transform: rotate(360deg);
     }
   }
+  .actions {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .empty {
+    padding: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+  }
+  .empty p {
+    margin: 0 0 4px;
+    font-size: 13px;
+  }
   .dim {
     color: var(--text-dim);
-    font-size: 13px;
-    margin: 0 0 4px;
-  }
-  .small {
     font-size: 12px;
   }
-  .setup-banner {
-    display: flex;
-    align-items: center;
-    gap: 12px;
+  .banner {
     padding: 10px 14px;
     margin-bottom: 16px;
     border: 1px solid var(--red, #f85149);

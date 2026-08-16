@@ -73,14 +73,50 @@ export interface OpsPipeline {
   description?: string;
   enabled: boolean;
   trigger: string;
+  /** Undefined = follows the app's configured provider. */
+  provider?: string;
   activeRuns: number;
 }
 
-/** Registered pipelines. `error` explains an empty list (a broken definition file). */
-export const getPipelines = (): Promise<{ pipelines: OpsPipeline[]; error?: string }> => call('opsPipelines');
+export interface OpsCounts {
+  runs: number;
+  failed: number;
+  lowConfidence: number;
+  tokens: number;
+}
+
+export interface OpsBudget {
+  date: string;
+  inputTokens: number;
+  outputTokens: number;
+  limits: { dailyInputTokens?: number; dailyOutputTokens?: number };
+  /** 0–1 of the tightest configured ceiling; 0 when none is set. */
+  used: number;
+}
+
+export interface OpsOverview {
+  pipelines: OpsPipeline[];
+  /** Today's numbers, by pipeline key. Absent key = nothing ran today. */
+  counts: Record<string, OpsCounts>;
+  /** Shared with the development AI, so it can move without anything here running. */
+  budget?: OpsBudget;
+  /** Why the list is empty (a broken definition file). */
+  error?: string;
+}
+
+/** Everything the operations dashboard shows, in one call. */
+export const getOverview = (): Promise<OpsOverview> => call('opsPipelines');
 
 /** Re-read the definition files without restarting the core. */
 export const reloadPipelines = (): Promise<{ loaded: number; error?: string }> => call('opsReload');
+
+/** Run one pipeline now, with a body the caller supplies. */
+export const runPipeline = (key: string, input?: unknown): Promise<{ ok: boolean; error?: string; run?: { outcome: string; reason?: string } }> =>
+  call('opsRun', { key, input: input ?? {} });
+
+/** Turn a pipeline's trigger on or off for this process. */
+export const setPipelineEnabled = (key: string, enabled: boolean): Promise<{ ok: boolean; enabled?: boolean; error?: string }> =>
+  call('opsSetEnabled', { key, enabled });
 
 /** Subscribe to the live event stream; returns an unsubscribe fn. */
 export function subscribeEvents(onEvent: (e: CorralEvent) => void): () => void {

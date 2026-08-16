@@ -10,7 +10,7 @@ import { logger } from '../core/logger.js';
 import type { CredentialStore } from '../credentials/types.js';
 import type { TokenBudget } from '../core/token-budget.js';
 import { JsonlOpsHistoryStore } from './history/jsonl-store.js';
-import type { OpsHistoryStore } from './history/store.js';
+import type { OpsHistoryStore, OpsPipelineCounts } from './history/store.js';
 import { HttpInputResolver } from './input/http.js';
 import { NoneInputResolver } from './input/none.js';
 import { HttpOutputSink } from './output/http.js';
@@ -188,14 +188,42 @@ export class OpsHost {
   }
 
   /** What the operational dashboard lists. */
-  list(): Array<{ key: string; description?: string; enabled: boolean; trigger: string; activeRuns: number }> {
+  list(): Array<{
+    key: string;
+    description?: string;
+    enabled: boolean;
+    trigger: string;
+    /** The provider the pipeline names, or undefined to follow the app's setting. */
+    provider?: string;
+    activeRuns: number;
+  }> {
     return this.registry.all().map((p) => ({
       key: p.key,
       description: p.description,
       enabled: this.registry.isEnabled(p.key),
       trigger: p.trigger.kind,
+      provider: p.agent.provider,
       activeRuns: this.runner.activeCount(p.key),
     }));
+  }
+
+  /**
+   * Everything the operations dashboard shows, in one answer.
+   *
+   * One call rather than three: the screen polls, and a dashboard that made a round trip
+   * per panel would triple its own cost to show numbers that all describe the same
+   * moment. The budget rides along because the ceiling is shared with the development AI
+   * — usage can climb while every pipeline here sits idle, so it has to be on screen even
+   * when nothing on this screen caused it.
+   */
+  async overview(): Promise<{
+    pipelines: ReturnType<OpsHost['list']>;
+    counts: Record<string, OpsPipelineCounts>;
+    budget?: ReturnType<TokenBudget['snapshot']>;
+    error?: string;
+  }> {
+    const counts = await this.history.countsByPipeline(1).catch(() => ({}));
+    return { pipelines: this.list(), counts, budget: this.budgetSnapshot(), error: this.loadError };
   }
 
   /**

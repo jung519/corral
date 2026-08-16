@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebChannel } from '../channel/web.js';
 import { DirectionCheckStore, DirectionStore } from '../core/direction.js';
+import { TokenBudget } from '../core/token-budget.js';
 import { OpsHost, startOpsHost } from '../ops/ops-host.js';
 import type { OperationRunner } from '../ops/pipeline/ports.js';
 import { dispatch, type ControlPlaneDeps } from './dispatch.js';
@@ -75,6 +76,38 @@ describe('over the control plane', () => {
     expect((await dispatch('opsSetEnabled', { key: 'echo', enabled: false }, d)) as any).toEqual({ ok: true, enabled: false });
     expect(((await dispatch('opsHistory', { days: 1 }, d)) as any).runs).toHaveLength(1);
     expect(((await dispatch('opsTotals', { days: 1 }, d)) as any).totals[0].runs).toBe(1);
+  });
+
+  it('answers the whole dashboard in one call', async () => {
+    writePipeline('echo.yaml', PIPELINE);
+    const budget = new TokenBudget({ dailyInputTokens: 1000 }, dir);
+    const d = deps(await startOpsHost({ stateDir: dir, operation: stubModel, budget }));
+    await dispatch('opsRun', { key: 'echo', input: { data: { title: 'x' } } }, d);
+
+    const view = (await dispatch('opsPipelines', {}, d)) as any;
+
+    // One round trip, so every panel describes the same moment — and so a polling
+    // dashboard does not cost three requests per tick.
+    expect(view.pipelines[0]).toMatchObject({ key: 'echo', enabled: true, trigger: 'manual' });
+    expect(view.counts.echo).toMatchObject({ runs: 1, failed: 0 });
+    expect(view.budget).toMatchObject({ inputTokens: expect.any(Number) });
+  });
+
+  it('leaves the budget out when no ceiling is wired, rather than inventing zeroes', async () => {
+    const d = deps(await startOpsHost({ stateDir: dir }));
+
+    expect(((await dispatch('opsPipelines', {}, d)) as any).budget).toBeUndefined();
+  });
+
+  it('carries the shared budget even when no pipeline caused the usage', async () => {
+    const budget = new TokenBudget({ dailyInputTokens: 1000 }, dir);
+    budget.record({ inputTokens: 400, outputTokens: 0 }); // as if an issue had been planned
+    const d = deps(await startOpsHost({ stateDir: dir, budget }));
+
+    const view = (await dispatch('opsPipelines', {}, d)) as any;
+
+    // A pipeline can stop for a reason that has nothing to do with pipelines.
+    expect(view.budget).toMatchObject({ inputTokens: 400, used: 0.4 });
   });
 
   it('reports a load error alongside the empty list', async () => {

@@ -59,6 +59,14 @@ export interface OpsHistoryQuery {
   limit?: number;
 }
 
+/** Today's numbers for one pipeline, which is what a dashboard row shows. */
+export interface OpsPipelineCounts {
+  runs: number;
+  failed: number;
+  lowConfidence: number;
+  tokens: number;
+}
+
 export interface OpsHistoryStore {
   /** Record a finished run. */
   append(record: RunRecord): Promise<void>;
@@ -66,6 +74,14 @@ export interface OpsHistoryStore {
   list(query?: OpsHistoryQuery): Promise<OpsRunRecord[]>;
   /** Per-day summaries, newest day first. */
   totals(days?: number): Promise<OpsDailyTotals[]>;
+  /**
+   * Runs grouped by pipeline over the last `days`.
+   *
+   * Grouped here rather than on the client: at operational volume a day is thousands of
+   * runs, and shipping all of them so a dashboard can count them would make the list
+   * heavier the busier the system gets — exactly backwards.
+   */
+  countsByPipeline(days?: number): Promise<Record<string, OpsPipelineCounts>>;
   /** Drop anything past the retention window. Returns how many files went. */
   prune(): Promise<number>;
 }

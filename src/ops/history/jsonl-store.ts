@@ -32,11 +32,13 @@ import { logger } from '../../core/logger.js';
 import type { RunRecord } from '../pipeline/run.js';
 import {
   dayKey,
+  FAILURE_OUTCOMES,
   OPS_HISTORY_SCHEMA_VERSION,
   summarize,
   type OpsDailyTotals,
   type OpsHistoryQuery,
   type OpsHistoryStore,
+  type OpsPipelineCounts,
   type OpsRunRecord,
 } from './store.js';
 
@@ -168,6 +170,20 @@ export class JsonlOpsHistoryStore implements OpsHistoryStore {
     } catch {
       return undefined;
     }
+  }
+
+  async countsByPipeline(days = 1): Promise<Record<string, OpsPipelineCounts>> {
+    const out: Record<string, OpsPipelineCounts> = {};
+    for (const date of this.recentDays(days)) {
+      for (const r of this.read(date)) {
+        const c = (out[r.pipeline] ??= { runs: 0, failed: 0, lowConfidence: 0, tokens: 0 });
+        c.runs++;
+        c.tokens += r.tokens ?? 0;
+        if (r.lowConfidence) c.lowConfidence++;
+        if (FAILURE_OUTCOMES.includes(r.outcome)) c.failed++;
+      }
+    }
+    return out;
   }
 
   async prune(): Promise<number> {
