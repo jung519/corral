@@ -17,6 +17,7 @@ import { HttpOutputSink } from './output/http.js';
 import { NoneOutputSink } from './output/none.js';
 import { PubSubOutputSink } from './output/pubsub.js';
 import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
+import { savePipeline, type SaveResult } from './pipeline/writer.js';
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
@@ -224,6 +225,19 @@ export class OpsHost {
   }> {
     const counts = await this.history.countsByPipeline(1).catch(() => ({}));
     return { pipelines: this.list(), counts, budget: this.budgetSnapshot(), error: this.loadError };
+  }
+
+  /**
+   * Validate a definition and write it as a file, then pick it up.
+   *
+   * The reload is part of saving: an operator who just pressed save expects the pipeline
+   * to be there, and a definition that needs a restart to appear would make the app feel
+   * like it had not really saved.
+   */
+  async save(definition: unknown, options: { overwrite?: boolean } = {}): Promise<SaveResult> {
+    const result = await savePipeline(this.dir, definition, options);
+    if (result.ok) await this.load();
+    return result;
   }
 
   /**
