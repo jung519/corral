@@ -64,7 +64,11 @@ button:disabled {
   cursor: default;
 }
 
-input,
+/* Text fields fill their row. A radio or a checkbox must not: the platform draws those at
+   a fixed size, so `width: 100%` leaves the control floating in the middle of an
+   overwide box with its label shoved to the far edge — which is what every option list in
+   the app looked like. */
+input:not([type='radio']):not([type='checkbox']),
 textarea,
 select {
   font: inherit;

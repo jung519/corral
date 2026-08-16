@@ -1149,7 +1149,6 @@
     cursor: pointer;
   }
   .check input {
-    width: auto;
     margin: 0;
   }
   .testrow {
