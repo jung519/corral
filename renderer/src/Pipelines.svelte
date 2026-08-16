@@ -41,12 +41,6 @@
     }
   }
 
-  async function reload() {
-    const r = await api.reloadPipelines().catch(() => ({ loaded: 0, error: 'reload failed' }));
-    if (r.error) toast(r.error, 'error');
-    await refresh();
-  }
-
   async function run(key: string) {
     const r = await api.runPipeline(key);
     // A manual run is how a pipeline gets tried out, so the reason it stopped matters
@@ -85,7 +79,6 @@
     ? `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0} · ${usedPercent}%`
     : `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0}`}
 >
-  <button class="ghost" onclick={reload}>{t('ops.reload')}</button>
   <Button class="primary" onclick={() => (adding = true)}>{t('ops.add')}</Button>
 </PageHeader>
 

@@ -117,15 +117,6 @@ describe('over the control plane', () => {
     expect((await dispatch('opsPipelines', {}, d)) as any).toMatchObject({ pipelines: [], error: expect.stringContaining('broken.yaml') });
   });
 
-  it('picks up a definition added while the core was running', async () => {
-    const d = deps(await startOpsHost({ stateDir: dir }));
-    expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines).toEqual([]);
-
-    writePipeline('echo.yaml', PIPELINE);
-
-    expect((await dispatch('opsReload', {}, d)) as any).toEqual({ loaded: 1 });
-  });
-
   it('saves a definition and picks it up without a restart', async () => {
     const d = deps(await startOpsHost({ stateDir: dir, operation: stubModel }));
 
@@ -181,18 +172,22 @@ describe('over the control plane', () => {
       d,
     );
 
-    // The app is a convenient way to write the file, not a database that owns it.
+    // The app is a convenient way to write the file, not a database that owns it — what
+    // it wrote is still ordinary YAML someone can edit. Picking the edit up is a restart,
+    // deliberately: editing a program's files behind its back is the editor's risk to
+    // carry, not something the app owes a button for.
     const file = join(dir, 'pipelines', 'both-ways.yaml');
     writeFileSync(file, readFileSync(file, 'utf8').replace('key: both-ways', 'key: both-ways\ndescription: edited by hand'));
-    await dispatch('opsReload', {}, d);
 
-    expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines[0].description).toBe('edited by hand');
+    const restarted = deps(await startOpsHost({ stateDir: dir }));
+
+    expect(((await dispatch('opsPipelines', {}, restarted)) as any).pipelines[0].description).toBe('edited by hand');
   });
 
   it('declines cleanly on a core with no operational AI', async () => {
     const d = deps(undefined);
 
-    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsReload', 'opsSave']) {
+    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave']) {
       expect(await dispatch(method, {}, d)).toMatchObject({ ok: false });
     }
   });
