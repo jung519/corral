@@ -210,6 +210,31 @@ describe('the model being unsure', () => {
   });
 });
 
+describe('an answer the rule cannot be applied to', () => {
+  it('refuses a list of records rather than emptying it', async () => {
+    // `{ type: array }` says nothing about what is inside, so this cannot be settled
+    // until a value turns up. Comparing a record against a list of names can only say
+    // "not in the list" — every item would be dropped and the run would report success
+    // while publishing an empty list, every time, forever.
+    const v = new RuleAnswerValidator();
+
+    const verdict = await v.check(step({ allowed_values: { field: 'items', values: ['news'] } }), {
+      items: [{ label: 'news' }],
+    });
+
+    expect(verdict).toEqual({ ok: false, reasons: [expect.stringContaining('allowed_values can compare')] });
+  });
+
+  it('still accepts names, and a single name', async () => {
+    const v = new RuleAnswerValidator();
+    const rule = step({ allowed_values: { field: 'items', values: ['news', '7'] } });
+
+    expect(await v.check(rule, { items: ['news'] })).toMatchObject({ ok: true });
+    expect(await v.check(rule, { items: 7 })).toMatchObject({ ok: true });
+    expect(await v.check(rule, { items: null })).toMatchObject({ ok: true });
+  });
+});
+
 describe('a pipeline with no rules', () => {
   it('passes the answer straight through', async () => {
     const v = new RuleAnswerValidator();

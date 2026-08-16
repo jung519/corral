@@ -245,6 +245,53 @@ output: { kind: none }
 
     expect(new Set(err.issues.map((i) => i.file))).toEqual(new Set(['a.yaml', 'b.yaml']));
   });
+
+  /**
+   * A rule that cannot do its job is the worst kind of broken, because nothing looks
+   * broken: only declared properties survive the answer check, so a rule pointing anywhere
+   * else examines a field that is never there. `allowed_values` and `max_items` then pass
+   * everything and `min_confidence` rejects everything — the same mistake, three
+   * behaviours, none of them the one that was meant.
+   */
+  const withRule = (properties: string, validate: string): string => `
+key: mismatched
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: ${properties} }
+  validate:${validate}
+output: { kind: none }
+`;
+
+  it('refuses a rule that names a field the answer schema does not declare', async () => {
+    const err = await load(withRule('{ items: { type: array } }', '\n    allowed_values: { field: labels, values: [a] }'));
+
+    expect(err.issues).toContainEqual(
+      expect.objectContaining({ path: 'agent.validate.allowed_values.field', message: expect.stringContaining('not declared') }),
+    );
+  });
+
+  it('refuses a rule the declared type cannot support', async () => {
+    const err = await load(withRule('{ note: { type: string } }', '\n    max_items: { field: note, limit: 3 }'));
+
+    expect(err.issues).toContainEqual(
+      expect.objectContaining({ path: 'agent.validate.max_items.field', message: expect.stringContaining('declared string') }),
+    );
+  });
+
+  it('refuses allowed_values on a record', async () => {
+    const err = await load(withRule('{ rec: { type: object } }', '\n    allowed_values: { field: rec, values: [a] }'));
+
+    expect(err.issues).toContainEqual(expect.objectContaining({ path: 'agent.validate.allowed_values.field' }));
+  });
+
+  it('leaves an undeclared type to the validator, which sees the real value', async () => {
+    // `{ type: array }` with no `items` is the common case and perfectly legitimate.
+    write('ok.yaml', withRule('{ items: { type: array } }', '\n    allowed_values: { field: items, values: [a] }'));
+
+    await expect(loadPipelines(dir)).resolves.toHaveLength(1);
+  });
 });
 
 describe('two pipelines under one key', () => {

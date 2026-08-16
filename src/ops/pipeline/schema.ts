@@ -149,6 +149,13 @@ export const ValidationSchema = z.object({
   min_confidence: z.object({ field: z.string().min(1), threshold: z.number().min(0).max(1) }).optional(),
 });
 
+/** What each rule needs the field to be, when the answer schema says what it is. */
+const RULE_EXPECTS: Record<string, { type?: string; not?: string; why: string }> = {
+  max_items: { type: 'array', why: 'counts the items in a list' },
+  min_confidence: { type: 'number', why: 'compares a number against a threshold' },
+  allowed_values: { not: 'object', why: 'compares values against a list of allowed ones' },
+};
+
 export const AgentStepSchema = z.object({
   /** Omitted = use the app's configured provider. Operational and development AI share
    *  the same provider settings and the same token ceiling (D24, D12). */
@@ -163,7 +170,56 @@ export const AgentStepSchema = z.object({
   /** The structured answer's shape. Requested from the model and checked on return. */
   schema: OutputShapeSchema,
   validate: ValidationSchema.default({}),
-});
+})
+  /**
+   * A rule that cannot do its job is refused here rather than skipped at 3am.
+   *
+   * Only declared properties survive the answer check, so a rule naming anything else is
+   * examining a field that will never be there — `allowed_values` and `max_items` would
+   * quietly pass everything, while `min_confidence` would reject everything. Three rules,
+   * the same mistake, three different behaviours, none of them the one that was meant.
+   */
+  .superRefine((step, ctx) => {
+    const properties = step.schema.properties;
+    for (const [rule, field] of [
+      ['allowed_values', step.validate.allowed_values?.field],
+      ['max_items', step.validate.max_items?.field],
+      ['min_confidence', step.validate.min_confidence?.field],
+    ] as const) {
+      if (!field) continue;
+      const path = ['validate', rule, 'field'];
+      if (!(field in properties)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `"${field}" is not declared in the answer schema, so this rule would never see a value`,
+        });
+        continue;
+      }
+
+      // The declared type is optional in JSON Schema and in the answers people write, so
+      // a missing one is not a problem — it just means this cannot be settled until a
+      // value turns up, and the validator refuses it then.
+      const declared = (properties[field] as { type?: unknown } | null)?.type;
+      if (typeof declared !== 'string') continue;
+      const expects = RULE_EXPECTS[rule];
+      if (!expects) continue;
+      if (expects.type && declared !== expects.type) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `${rule} ${expects.why}, but "${field}" is declared ${declared}`,
+        });
+      }
+      if (expects.not && declared === expects.not) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `${rule} ${expects.why}, but "${field}" is declared ${declared}`,
+        });
+      }
+    }
+  });
 
 // ─────────────────────────────────────────────────────────────── ④ output
 //
