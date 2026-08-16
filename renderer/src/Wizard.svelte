@@ -783,9 +783,6 @@
     {:else if step === 4}
       <h1>{t('step.channel')}</h1>
       <div class="two">
-        {#if !hasBridge}
-          <label class="field"><span>{t('field.port')}</span><input type="number" bind:value={s.port} /></label>
-        {/if}
         <label class="field"
           ><span>{t('field.maxActive')}</span>
           <select bind:value={s.maxActive}>
