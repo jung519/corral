@@ -6,7 +6,7 @@
  * and the shared control plane, and `ops/` is not allowed to reach across (the boundary
  * test enforces exactly that). The shared layer is where the two are allowed to meet.
  */
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -184,10 +184,87 @@ describe('over the control plane', () => {
     expect(((await dispatch('opsPipelines', {}, restarted)) as any).pipelines[0].description).toBe('edited by hand');
   });
 
+  describe('deleting one', () => {
+    it('removes the file and the pipeline with it', async () => {
+      writePipeline('echo.yaml', PIPELINE);
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      expect((await dispatch('opsDelete', { key: 'echo' }, d)) as any).toMatchObject({ ok: true, file: 'echo.yaml' });
+
+      expect(existsSync(join(dir, 'pipelines', 'echo.yaml'))).toBe(false);
+      expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines).toEqual([]);
+    });
+
+    it('finds the file by its key, whatever it is called', async () => {
+      // Assuming `<key>.yaml` would leave a hand-named file behind, and the pipeline with
+      // it — the same reason saving looks the file up rather than guessing.
+      writePipeline('some-other-name.yml', PIPELINE);
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      expect((await dispatch('opsDelete', { key: 'echo' }, d)) as any).toMatchObject({ ok: true, file: 'some-other-name.yml' });
+      expect(existsSync(join(dir, 'pipelines', 'some-other-name.yml'))).toBe(false);
+    });
+
+    it('stops the trigger, so nothing fires afterwards', async () => {
+      writePipeline('nightly.yaml', PIPELINE.replace('trigger: { kind: manual }', 'trigger: { kind: schedule, cron: "* * * * *" }'));
+      const ops = await startOpsHost({ stateDir: dir });
+      expect(ops.running()).toEqual(['echo']);
+
+      await dispatch('opsDelete', { key: 'echo' }, deps(ops));
+
+      expect(ops.running()).toEqual([]);
+    });
+
+    it('keeps the run history — what ran is not what is configured', async () => {
+      writePipeline('echo.yaml', PIPELINE);
+      const ops = await startOpsHost({ stateDir: dir, operation: stubModel });
+      const d = deps(ops);
+      await dispatch('opsRun', { key: 'echo', input: { data: { title: 'hello' } } }, d);
+
+      await dispatch('opsDelete', { key: 'echo' }, d);
+
+      // Deleting the record of last night's failures along with the definition would
+      // remove the only way to find out why it was deleted.
+      expect((await ops.history.list({ days: 1 })).map((r) => r.pipeline)).toEqual(['echo']);
+    });
+
+    it('lets a run that is already going finish', async () => {
+      // Killing one mid-flight can leave half of it written into someone's system.
+      // Deleting a definition is not a reason to do that — and the dialog says so.
+      writePipeline('echo.yaml', PIPELINE);
+      let release!: () => void;
+      const held = new Promise<void>((r) => (release = r));
+      const slow: OperationRunner = {
+        run: async () => {
+          await held;
+          return { answer: { answer: 'finished anyway' }, tokens: 1 };
+        },
+      };
+      const ops = await startOpsHost({ stateDir: dir, operation: slow });
+      const d = deps(ops);
+
+      const running = dispatch('opsRun', { key: 'echo', input: { data: { title: 'x' } } }, d);
+      await dispatch('opsDelete', { key: 'echo' }, d);
+      release();
+
+      expect((await running) as any).toMatchObject({ ok: true, run: { outcome: 'completed' } });
+      expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines).toEqual([]);
+    });
+
+    it('says so rather than quietly succeeding on a key that is not there', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      expect((await dispatch('opsDelete', { key: 'nope' }, d)) as any).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('nope'),
+      });
+    });
+  });
+
   it('declines cleanly on a core with no operational AI', async () => {
     const d = deps(undefined);
 
-    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave']) {
+    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete']) {
       expect(await dispatch(method, {}, d)).toMatchObject({ ok: false });
     }
   });

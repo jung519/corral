@@ -71,6 +71,20 @@
     await refresh();
   }
 
+  // Destructive and not undoable, so it asks first — and it lives here rather than on a
+  // row in the list, where it would sit one slip away from the pipeline next to it.
+  async function remove() {
+    if (!confirm(t('detail.deleteConfirm').replace('{key}', pipelineKey))) return;
+    const r = await api.deletePipeline(pipelineKey).catch((e: unknown) => ({ ok: false, error: String(e) }));
+    if (!r.ok) {
+      toast(r.error ?? 'delete failed', 'error');
+      return;
+    }
+    toast(`${pipelineKey}: ${t('detail.deleted')}`);
+    // Nothing left to show on this screen.
+    location.hash = '#/';
+  }
+
   onMount(() => {
     void refresh();
     const unsub = api.subscribeEvents((e) => {
@@ -87,6 +101,7 @@
 
 <PageHeader title={pipelineKey} {online} meta={today ? `${today.runs} ${t('ops.today')}` : ''}>
   <a class="ghost back" href="#/">{t('detail.back')}</a>
+  <button class="ghost danger" onclick={remove}>{t('detail.delete')}</button>
   <Button onclick={run}>{t('ops.run')}</Button>
 </PageHeader>
 
@@ -169,6 +184,19 @@
     border-radius: 6px;
     color: var(--text-dim);
     font-size: 12px;
+  }
+  .danger {
+    padding: 4px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: transparent;
+    color: var(--text-dim);
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .danger:hover {
+    border-color: color-mix(in srgb, var(--red, #f85149) 45%, var(--border));
+    color: var(--red, #f85149);
   }
   .cards {
     display: grid;

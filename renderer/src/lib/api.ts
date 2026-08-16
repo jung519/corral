@@ -120,6 +120,10 @@ export interface SaveIssue {
 }
 
 /** Validate and write a definition. Refused unless `overwrite` when the key exists. */
+/** Delete a pipeline — its file and its trigger. Run history is kept. */
+export const deletePipeline = (key: string): Promise<{ ok: boolean; file?: string; error?: string }> =>
+  call('opsDelete', { key });
+
 export const savePipeline = (
   definition: unknown,
   overwrite = false,
