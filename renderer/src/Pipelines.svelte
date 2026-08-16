@@ -13,6 +13,7 @@
    */
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
   import type { CorralEvent } from './lib/types';
@@ -60,12 +61,9 @@
   });
 </script>
 
-<header>
-  <span class="dot" class:on={online}></span>
-  <h1>Corral</h1>
-  <span class="count">{pipelines.length} {t('ops.count')}</span>
+<PageHeader title={t('nav.pipelines')} {online} meta="{pipelines.length} {t('ops.count')}">
   <Button onclick={reload} disabled={loading}>{t('ops.reload')}</Button>
-</header>
+</PageHeader>
 
 <main>
   {#if error}
@@ -105,22 +103,6 @@
 </main>
 
 <style>
-  header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 22px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
-  }
-  .count {
-    flex: 1;
-    color: var(--text-dim);
-  }
   main {
     padding: 18px 22px;
   }

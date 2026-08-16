@@ -4,6 +4,7 @@
   import Preferences from './Preferences.svelte';
   import Setup from './Setup.svelte';
   import { t } from './lib/i18n.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
 
   // Sub-routing inside Settings: #/settings (셋업), #/settings/prefs, #/settings/info.
   let hash = $state(location.hash);
@@ -20,6 +21,8 @@
     { key: 'info', hash: '#/settings/info', label: 'settings.tab.info' },
   ];
 </script>
+
+<PageHeader title={t('nav.settings')} />
 
 <div class="shell">
   <aside class="subnav">

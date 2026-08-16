@@ -8,6 +8,7 @@
    */
   import { setMode, type Mode } from './lib/mode.svelte';
   import { t } from './lib/i18n.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
 
   interface Props {
     /** The mode in use, so the current one reads as current. */
@@ -36,10 +37,7 @@
   }
 </script>
 
-<header>
-  <h1>Corral</h1>
-  <span class="count">{t('mode.pick')}</span>
-</header>
+<PageHeader title={t('mode.title')} meta={t('mode.pick')} />
 
 <main>
   <div class="cards">
@@ -62,21 +60,6 @@
 </main>
 
 <style>
-  header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 22px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
-  }
-  .count {
-    color: var(--text-dim);
-  }
   main {
     padding: 28px 22px;
     max-width: 900px;

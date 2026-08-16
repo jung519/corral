@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from './lib/i18n.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
   import type { CorralEvent } from './lib/types';
 
@@ -25,8 +26,9 @@
   }
 </script>
 
+<PageHeader title={t('logs.title')} />
+
 <div class="view">
-  <h1>{t('logs.title')}</h1>
   {#if events.length === 0}
     <p class="dim">{t('logs.empty')}</p>
   {:else}
@@ -46,10 +48,6 @@
 <style>
   .view {
     padding: 24px 28px;
-  }
-  h1 {
-    font-size: 18px;
-    margin: 0 0 16px;
   }
   .dim {
     color: var(--text-dim);
