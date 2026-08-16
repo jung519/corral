@@ -2,17 +2,21 @@
   /**
    * Building a pipeline without writing YAML.
    *
-   * Three steps, matching the three questions a pipeline answers: where does work arrive,
-   * what should the model do with it, and where does the answer go.
+   * One step per part of a pipeline: where work arrives, where the details come from,
+   * what the model does, where the answer goes. That is the same four-way split the
+   * schema has (`trigger` / `input` / `agent` / `output`), so a field path from the core
+   * names its own step and nothing has to be mapped.
    *
-   * **Fetching the input is folded into step one, not given its own.** It is part of
-   * "where does work arrive" — a queue that carries an identifier and a call that turns it
-   * into a record are the same thought. A fourth step would make the shape of a pipeline
-   * look more complicated than it is (D22).
+   * **Fetching the details used to be folded into step one and it was a mistake.** The
+   * original design said four steps would make a pipeline look more complicated than it
+   * is (D22) — but a pipeline genuinely has four parts, and collapsing one of them did
+   * not simplify anything, it hid the fetch-back that is the whole point of D6. The
+   * person who designed it could not find it. A required decision behind a disclosure
+   * triangle is more friction than an honest extra step.
    *
    * Nothing here validates the definition itself. The core does that on save and answers
-   * with dotted field paths, which this maps back to the step that owns them — one
-   * definition of what is valid, in the place that has to load it.
+   * with dotted field paths — one definition of what is valid, in the place that has to
+   * load it.
    */
   import Button from './lib/Button.svelte';
   import * as api from './lib/api';
@@ -59,13 +63,15 @@
   let outputBody = $state('');
   let outputTopic = $state('');
 
-  const STEPS = [t('editor.step1'), t('editor.step2'), t('editor.step3')];
+  const STEPS = [t('editor.step1'), t('editor.step2'), t('editor.step3'), t('editor.step4')];
+  const LAST = STEPS.length - 1;
 
-  /** Which step owns a field path, so a save failure lands where the field is. */
+  /** Which step owns a field path. One step per schema section, so this is a lookup. */
   function stepOf(path: string): number {
-    if (path.startsWith('agent')) return 1;
-    if (path.startsWith('output') || path.startsWith('on_low_confidence')) return 2;
-    return 0; // key, description, trigger, input
+    if (path.startsWith('input')) return 1;
+    if (path.startsWith('agent')) return 2;
+    if (path.startsWith('output') || path.startsWith('on_low_confidence')) return 3;
+    return 0; // key, description, trigger
   }
   const issuesFor = (index: number) => issues.filter((i) => stepOf(i.path) === index);
 
@@ -150,7 +156,7 @@
       }
       issues = result.issues ?? [];
       // Land on the first step that has something wrong, so the fix is on screen.
-      const first = [0, 1, 2].find((i) => issuesFor(i).length > 0);
+      const first = STEPS.map((_, i) => i).find((i) => issuesFor(i).length > 0);
       if (first !== undefined) step = first;
     } finally {
       saving = false;
@@ -197,30 +203,32 @@
           <label class="field"><span>subscription</span><input bind:value={subscription} spellcheck="false" placeholder="projects/p/subscriptions/s" /></label>
         {/if}
 
-        <!-- Folded in rather than given its own step: fetching the record is part of
-             "where does work arrive", not a separate stage of the pipeline. -->
-        <details open={inputKind === 'http'}>
-          <summary>{t('editor.input')}</summary>
-          <label class="field">
-            <span>{t('editor.input.kind')}</span>
-            <select bind:value={inputKind}>
-              <option value="none">{t('editor.input.none')}</option>
-              <option value="http">{t('editor.input.http')}</option>
-            </select>
-          </label>
-          {#if inputKind === 'http'}
-            <div class="two">
-              <label class="field"><span>method</span><select bind:value={inputMethod}><option>GET</option><option>POST</option></select></label>
-              <label class="field wide"><span>URL</span><input bind:value={inputUrl} spellcheck="false" placeholder="https://api.example.com/records/&#123;&#123;id&#125;&#125;" /></label>
-            </div>
-          {/if}
-          <label class="field">
-            <span>{t('editor.select')}</span>
-            <textarea bind:value={selectText} rows="3" spellcheck="false" placeholder={'title: data.title\ndetail: data.description'}></textarea>
-          </label>
-          <label class="field"><span>{t('editor.require')}</span><input bind:value={requireText} spellcheck="false" placeholder="title" /></label>
-        </details>
       {:else if step === 1}
+        <!-- Its own step now. An event usually carries an identifier and nothing else, so
+             "where do the details come from" is a question every pipeline has to answer —
+             not an optional detail behind a triangle. -->
+        <label class="field">
+          <span>{t('editor.input.kind')}</span>
+          <select bind:value={inputKind}>
+            <option value="none">{t('editor.input.none')}</option>
+            <option value="http">{t('editor.input.http')}</option>
+          </select>
+        </label>
+        {#if inputKind === 'http'}
+          <p class="hint">{t('editor.input.httpHint')}</p>
+          <div class="two">
+            <label class="field"><span>method</span><select bind:value={inputMethod}><option>GET</option><option>POST</option></select></label>
+            <label class="field wide"><span>URL</span><input bind:value={inputUrl} spellcheck="false" placeholder="https://api.example.com/records/&#123;&#123;id&#125;&#125;" /></label>
+          </div>
+        {:else}
+          <p class="hint">{t('editor.input.noneHint')}</p>
+        {/if}
+        <label class="field">
+          <span>{t('editor.select')}</span>
+          <textarea bind:value={selectText} rows="3" spellcheck="false" placeholder={'title: data.title\ndetail: data.description'}></textarea>
+        </label>
+        <label class="field"><span>{t('editor.require')}</span><input bind:value={requireText} spellcheck="false" placeholder="title" /></label>
+      {:else if step === 2}
         <div class="two">
           <label class="field">
             <span>{t('editor.provider')}</span>
@@ -293,7 +301,7 @@
       <span class="spacer"></span>
       <button class="ghost" onclick={onclose}>{t('editor.cancel')}</button>
       {#if step > 0}<button class="ghost" onclick={() => (step -= 1)}>{t('editor.back')}</button>{/if}
-      {#if step < 2}
+      {#if step < LAST}
         <Button onclick={() => (step += 1)}>{t('editor.next')}</Button>
       {:else}
         <Button class="primary" onclick={save} disabled={saving}>{t('editor.save')}</Button>
