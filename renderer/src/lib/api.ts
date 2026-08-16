@@ -114,6 +114,18 @@ export const reloadPipelines = (): Promise<{ loaded: number; error?: string }> =
 export const runPipeline = (key: string, input?: unknown): Promise<{ ok: boolean; error?: string; run?: { outcome: string; reason?: string } }> =>
   call('opsRun', { key, input: input ?? {} });
 
+export interface SaveIssue {
+  /** Dotted field path, e.g. `agent.prompt.system` — the editor puts the message there. */
+  path: string;
+  message: string;
+}
+
+/** Validate and write a definition. Refused unless `overwrite` when the key exists. */
+export const savePipeline = (
+  definition: unknown,
+  overwrite = false,
+): Promise<{ ok: boolean; file?: string; issues?: SaveIssue[] }> => call('opsSave', { definition, overwrite });
+
 /** Turn a pipeline's trigger on or off for this process. */
 export const setPipelineEnabled = (key: string, enabled: boolean): Promise<{ ok: boolean; enabled?: boolean; error?: string }> =>
   call('opsSetEnabled', { key, enabled });
