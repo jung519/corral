@@ -117,7 +117,7 @@ describe('the same shape for GraphQL', () => {
     expect(requests[0].method).toBe('POST');
     expect(JSON.parse(requests[0].body)).toEqual({
       query: 'query($id: ID!) { record(id: $id) { title } }',
-      variables: { id: '42' },
+      variables: { id: 42 },   // a number stays a number — the API declared the type, not us
     });
     expect(resolved.fields).toEqual({ title: 'from graphql' });
   });

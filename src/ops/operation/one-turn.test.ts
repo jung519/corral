@@ -50,6 +50,17 @@ describe('asking for a shape and getting one', () => {
     expect(result.answer).toEqual({ items: ['a', 'b'], confidence: 0.9 });
   });
 
+  it('puts a list of records in front of the model, not [object Object]', async () => {
+    const seen: NeutralMessage[][] = [];
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD, seen)] });
+    const s = step({ prompt: { system: 'You summarise.', user_template: 'Yesterday:\n{{records}}' } });
+
+    await runner.run(s, { records: [{ id: 1, title: 'first' }, { id: 2, title: 'second' }] });
+
+    // The whole point of a pipeline that reads a list: the model can see the list.
+    expect(seen[0]?.[1]?.content).toBe('Yesterday:\n[{"id":1,"title":"first"},{"id":2,"title":"second"}]');
+  });
+
   it('reports what the turn cost and who answered', async () => {
     const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD)], modelFor: () => 'sonnet' });
 

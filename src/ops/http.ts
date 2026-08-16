@@ -12,7 +12,7 @@
 import { fetchJson } from '../core/fetch-retry.js';
 import type { CredentialRef, CredentialStore } from '../credentials/types.js';
 import type { Fields } from './pipeline/ports.js';
-import { fillTemplate } from './pipeline/run.js';
+import { fillTemplate, fillValue } from './pipeline/run.js';
 import type { HttpRequestDef } from './pipeline/schema.js';
 
 /**
@@ -25,14 +25,25 @@ import type { HttpRequestDef } from './pipeline/schema.js';
  */
 const MAX_RETRIES = 1;
 
-/** Fill `{{field}}` placeholders throughout a value, however deeply nested. */
+/**
+ * Fill `{{field}}` placeholders throughout a value, however deeply nested.
+ *
+ * Types survive: `{ labels: "{{items}}" }` puts the list itself in the body, not a
+ * comma-joined rendering of it. For a JSON body that is the whole point — the receiver
+ * declared `labels` an array, and text is not one.
+ */
 export function fillDeep(value: unknown, fields: Fields): unknown {
-  if (typeof value === 'string') return fillTemplate(value, fields);
+  if (typeof value === 'string') return fillValue(value, fields);
   if (Array.isArray(value)) return value.map((v) => fillDeep(v, fields));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, fillDeep(v, fields)]));
   }
   return value;
+}
+
+/** The same, for somewhere only text belongs — headers. */
+function fillStrings(map: Record<string, string>, fields: Fields): Record<string, string> {
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, fillTemplate(v, fields)]));
 }
 
 /** Perform the request a definition describes, with `fields` filled in. */
@@ -41,7 +52,9 @@ export async function runHttpRequest<T = unknown>(
   fields: Fields,
   credentials?: CredentialStore,
 ): Promise<T> {
-  const headers: Record<string, string> = { ...(fillDeep(request.headers, fields) as Record<string, string>) };
+  // Not `fillDeep`: a header is text by definition, and a list rendered into one would be
+  // sent as `[object Object]` by the fetch layer rather than refused here.
+  const headers: Record<string, string> = fillStrings(request.headers, fields);
 
   if (request.credential && credentials) {
     const secret = await credentials.get(request.credential as CredentialRef);

@@ -88,12 +88,46 @@ export interface RunDeps {
   now?: () => number;
 }
 
-/** `{{field}}` → value. Unknown names become empty rather than leaking the placeholder. */
+/** A template that is nothing but one placeholder, e.g. `"{{items}}"`. */
+const SOLE_PLACEHOLDER = /^\{\{\s*([\w.]+)\s*\}\}$/;
+const PLACEHOLDER = /\{\{\s*([\w.]+)\s*\}\}/g;
+
+/**
+ * `{{field}}` → text. Unknown names become empty rather than leaking the placeholder.
+ *
+ * A list or a record is written as JSON. `String(value)` would hand the model
+ * `[object Object],[object Object]` — the field is in the prompt, the data is not, and
+ * nothing says so.
+ */
 export function fillTemplate(template: string, fields: Fields): string {
-  return template.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_m, name: string) => {
+  return template.replace(PLACEHOLDER, (_m, name: string) => {
     const value = fields[name];
-    return value === undefined || value === null ? '' : String(value);
+    if (value === undefined || value === null) return '';
+    return typeof value === 'object' ? JSON.stringify(value) : String(value);
   });
+}
+
+/**
+ * The same substitution where the result does not have to be text — an output body, a
+ * message to publish.
+ *
+ * A template that is *only* a placeholder yields the value itself. `{ labels: "{{items}}" }`
+ * has to reach the user's API as a list; text is the one thing it must not become, and
+ * their API is the wrong place to find that out.
+ *
+ * Anything with text around the placeholder is still text, because that is what it was
+ * asked to be.
+ *
+ * A field that isn't there sends `null`, not `""` — an empty string is a value, and a
+ * receiver has no way to tell it from one the model actually produced.
+ */
+export function fillValue(template: string, fields: Fields): unknown {
+  const sole = SOLE_PLACEHOLDER.exec(template);
+  if (sole) {
+    const value = fields[sole[1] as string];
+    return value === undefined ? null : value;
+  }
+  return fillTemplate(template, fields);
 }
 
 /** Read a dotted path out of a parsed document. */
