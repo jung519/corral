@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bus, type CorralEvent } from '../../core/events.js';
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink, ValidationVerdict } from './ports.js';
-import { PipelineRunner, conditionHolds, fillTemplate, readPath, type RunDeps } from './run.js';
+import { PipelineRunner, conditionHolds, fillTemplate, fillValue, readPath, type RunDeps } from './run.js';
 import { PipelineSchema, type Pipeline } from './schema.js';
 
 function pipeline(overrides: Record<string, unknown> = {}): Pipeline {
@@ -322,5 +322,29 @@ describe('the small pieces', () => {
     expect(fillTemplate('a/{{id}}/b', { id: 7 })).toBe('a/7/b');
     expect(fillTemplate('a/{{ id }}/b', { id: 7 })).toBe('a/7/b');
     expect(fillTemplate('a/{{nope}}/b', {})).toBe('a//b');
+  });
+
+  it('writes a list into text as JSON, not as [object Object]', () => {
+    // This text is a prompt. `String(value)` would put the field name in front of the
+    // model and none of the data behind it.
+    expect(fillTemplate('items:\n{{items}}', { items: [{ id: 1 }, { id: 2 }] })).toBe('items:\n[{"id":1},{"id":2}]');
+  });
+
+  it('keeps the value itself when the template is nothing but the placeholder', () => {
+    // A body template is the receiver's JSON. `["a","b"]` must not arrive as `"a,b"`.
+    expect(fillValue('{{items}}', { items: ['a', 'b'] })).toEqual(['a', 'b']);
+    expect(fillValue('{{n}}', { n: 0.91 })).toBe(0.91);
+    expect(fillValue('{{ok}}', { ok: false })).toBe(false);
+    expect(fillValue('{{rec}}', { rec: { a: 1 } })).toEqual({ a: 1 });
+  });
+
+  it('is text again as soon as anything surrounds the placeholder', () => {
+    expect(fillValue('id-{{n}}', { n: 7 })).toBe('id-7');
+    expect(fillValue('{{a}}/{{b}}', { a: 1, b: 2 })).toBe('1/2');
+  });
+
+  it('sends null for a field that is not there, rather than an empty string', () => {
+    // "" is a value. A receiver cannot tell it from one the model produced.
+    expect(fillValue('{{nope}}', {})).toBeNull();
   });
 });

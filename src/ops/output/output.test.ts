@@ -80,7 +80,8 @@ describe('calling the user API', () => {
       { id: 7, title: 'a record', items: [] },
     );
 
-    expect(JSON.parse(requests[0].body)).toEqual({ id: '7', title: 'a record' });
+    // 7 stays a number: the body template is the receiver's JSON, not a rendering of it.
+    expect(JSON.parse(requests[0].body)).toEqual({ id: 7, title: 'a record' });
   });
 
   it('attaches the credential the definition names', async () => {
@@ -128,7 +129,7 @@ describe('publishing a message', () => {
 
     const sent = JSON.parse(requests[0].body) as { messages: Array<{ data: string }> };
     expect(JSON.parse(Buffer.from(sent.messages[0].data, 'base64').toString())).toEqual({
-      recordId: '42',
+      recordId: 42,
       labels: 'news',
     });
   });
@@ -202,7 +203,7 @@ on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review"
     const { run } = await host.runManually('classify', {});
 
     expect(run?.outcome).toBe('completed');
-    expect(JSON.parse(requests[0].body)).toEqual({ labels: 'news' }); // the dropped value never left
+    expect(JSON.parse(requests[0].body)).toEqual({ labels: ['news'] }); // the dropped value never left
   });
 
   it('records a failed delivery as its own thing, with the tokens it already spent', async () => {
@@ -223,6 +224,8 @@ on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review"
     const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'], confidence: 0.9 }) });
 
     expect((await host.runManually('classify', {})).run?.outcome).toBe('completed');
-    expect(JSON.parse(requests[0].body)).toEqual({ labels: 'news' });
+    // A list answer arrives as a list. Joining it into "news" would be a different value
+    // than the one the model gave and the validator approved.
+    expect(JSON.parse(requests[0].body)).toEqual({ labels: ['news'] });
   });
 });
