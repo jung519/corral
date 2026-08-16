@@ -74,6 +74,20 @@ export interface RunBudget {
   record(usage: TokenUsage): void;
 }
 
+/**
+ * Where a pipeline's code-written steps come from.
+ *
+ * Consulted per run, before the built-in adapter. Everything around the step — the budget
+ * check, `skip_if`, `require`, the outcome, the history record — is unchanged, which is
+ * the point: a plugin replaces one step, not the rules.
+ */
+export interface PluginSteps {
+  input(pipeline: Pipeline): Promise<InputResolver | undefined>;
+  operation(pipeline: Pipeline): Promise<OperationRunner | undefined>;
+  validator(pipeline: Pipeline): Promise<AnswerValidator | undefined>;
+  sink(pipeline: Pipeline): Promise<OutputSink | undefined>;
+}
+
 export interface RunDeps {
   /** By `input.kind`. */
   resolvers: Map<string, InputResolver>;
@@ -84,6 +98,8 @@ export interface RunDeps {
   /** Daily token ceiling, shared with the development AI. Narrowed to what a run needs,
    *  so the host can hand over a read-through view without casting. */
   budget?: RunBudget;
+  /** Code-written steps. Absent = declarative only. */
+  plugins?: PluginSteps;
   /** Injectable so tests are deterministic. */
   now?: () => number;
 }
@@ -177,12 +193,14 @@ export class PipelineRunner {
       this.emit(head, 'run', 'run started');
 
       // ── input ────────────────────────────────────────────────────────────────
-      const resolver = this.deps.resolvers.get(pipeline.input.kind);
-      if (!resolver) {
-        return done('input_failed', { stage: 'input', reason: `no resolver for input kind "${pipeline.input.kind}"` });
-      }
       let resolved;
       try {
+        // A plugin wins where one is named; a failure to load it is an input failure like
+        // any other, reported with its reason rather than swallowed.
+        const resolver = (await this.deps.plugins?.input(pipeline)) ?? this.deps.resolvers.get(pipeline.input.kind);
+        if (!resolver) {
+          return done('input_failed', { stage: 'input', reason: `no resolver for input kind "${pipeline.input.kind}"` });
+        }
         resolved = await resolver.resolve(pipeline.input, event);
       } catch (err) {
         // "Gone" is not "broken". A deleted record answers the same way forever, so this
@@ -221,7 +239,10 @@ export class PipelineRunner {
       this.emit(head, 'agent', 'calling the model');
       let operation;
       try {
-        operation = await this.deps.operation.run(pipeline.agent, resolved.fields);
+        // A step written in code that cannot be built is a failure of that step, reported
+        // like any other — never a crash that loses the run record.
+        const runner = (await this.deps.plugins?.operation(pipeline)) ?? this.deps.operation;
+        operation = await runner.run(pipeline.agent, resolved.fields);
       } catch (err) {
         return done('agent_failed', { stage: 'agent', reason: message(err) });
       }
@@ -230,7 +251,16 @@ export class PipelineRunner {
       this.deps.budget?.record({ inputTokens: operation.inputTokens ?? 0, outputTokens: operation.outputTokens ?? 0 });
 
       // ── checking the answer ──────────────────────────────────────────────────
-      const verdict = await this.deps.validator.check(pipeline.agent, operation.answer);
+      let verdict;
+      try {
+        const checker = (await this.deps.plugins?.validator(pipeline)) ?? this.deps.validator;
+        verdict = await checker.check(pipeline.agent, operation.answer);
+      } catch (err) {
+        // Refused, not passed. Same reasoning as a vocabulary that cannot be fetched: with
+        // no way to tell a good answer from a bad one, letting it through would defeat the
+        // check at exactly the moment it matters.
+        return done('rejected', { stage: 'validate', reason: message(err) });
+      }
       // Everything the turn cost, carried to whichever ending this run reaches.
       const spend = {
         tokens: operation.tokens,
@@ -271,11 +301,11 @@ export class PipelineRunner {
       }
 
       // ── output ───────────────────────────────────────────────────────────────
-      const sink = this.deps.sinks.get(pipeline.output.kind);
-      if (!sink) {
-        return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, ...spend, lowConfidence });
-      }
       try {
+        const sink = (await this.deps.plugins?.sink(pipeline)) ?? this.deps.sinks.get(pipeline.output.kind);
+        if (!sink) {
+          return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, ...spend, lowConfidence });
+        }
         await sink.send(pipeline.output, { ...resolved.fields, ...answer });
       } catch (err) {
         // The turn is already spent, so this is the expensive failure — it has to be

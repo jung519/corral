@@ -21,6 +21,8 @@ import { savePipeline, type SaveResult } from './pipeline/writer.js';
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
+import { PluginHost, pluginsDir } from './plugin/host.js';
+import { PluginStepProvider } from './plugin/steps.js';
 import { triggerRegistry } from './trigger/index.js';
 import type { StopFn } from './trigger/types.js';
 import { RuleAnswerValidator } from './validate/rules.js';
@@ -66,6 +68,8 @@ export class OpsHost {
   private operation: OperationRunner;
   private budget?: TokenBudget;
   private readonly dir: string;
+  /** Code-written steps, built once and reused. */
+  private readonly pluginHost: PluginHost;
   /** Live subscriptions, by pipeline key. Present only while a pipeline is enabled. */
   private readonly subscriptions = new Map<string, StopFn>();
   /** Why the last load failed, so the UI can show it instead of an empty list. */
@@ -73,6 +77,7 @@ export class OpsHost {
 
   constructor(private readonly options: OpsHostOptions) {
     this.dir = pipelinesDir(options.stateDir);
+    this.pluginHost = new PluginHost(pluginsDir(options.stateDir));
     this.history = options.history ?? new JsonlOpsHistoryStore(options.stateDir, { now: options.now });
     this.operation = options.operation ?? new UnwiredOperationRunner();
     this.budget = options.budget;
@@ -95,6 +100,7 @@ export class OpsHost {
       // Read through, like `operation` — the config that carries the limits arrives after
       // the operational AI has started.
       budget: { check: () => this.budget?.check() ?? { ok: true }, record: (u) => this.budget?.record(u) },
+      plugins: new PluginStepProvider(this.pluginHost),
       now: options.now,
     });
   }
@@ -122,6 +128,9 @@ export class OpsHost {
   async load(): Promise<{ loaded: number; error?: string }> {
     try {
       const pipelines = await loadPipelines(this.dir);
+      // Reloading definitions also forgets built plugins: an operator who edited a
+      // definition may well have edited the code beside it.
+      this.pluginHost.clear();
       this.registry.replaceAll(pipelines);
       this.loadError = undefined;
       this.syncSubscriptions();

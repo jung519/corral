@@ -25,6 +25,19 @@ export const FieldSelectorSchema = z.union([
   z.object({ path: z.string().min(1), truncate: z.number().int().positive().optional() }),
 ]);
 
+/**
+ * A step someone wrote in code, named by file.
+ *
+ * The declarative schema covers what can be executed generically; this covers the rest
+ * (D9). Kept as a plain reference — the module is a file in the plugins folder, and the
+ * options are whatever that file asks for, so a plugin can serve several pipelines.
+ */
+export const PluginRefSchema = z.object({
+  /** File name inside the plugins folder, e.g. `vocabulary-check.js`. */
+  module: z.string().min(1),
+  options: z.record(z.string(), z.unknown()).default({}),
+});
+
 /** A structured condition. Free-text conditions can't be executed, so there aren't any. */
 export const ConditionSchema = z.object({
   field: z.string().min(1),
@@ -98,7 +111,17 @@ export const HttpInputSchema = z.object({
   skip_if: ConditionSchema.optional(),
 });
 
-export const InputSchema = z.discriminatedUnion('kind', [NoneInputSchema, HttpInputSchema]);
+/** The details come from code. `select`/`require`/`skip_if` still apply — they are the
+ *  lifecycle's rules, not the resolver's, so a plugin does not get to skip them. */
+export const PluginInputSchema = z.object({
+  kind: z.literal('plugin'),
+  plugin: PluginRefSchema,
+  select: z.record(z.string(), FieldSelectorSchema).default({}),
+  require: z.array(z.string()).default([]),
+  skip_if: ConditionSchema.optional(),
+});
+
+export const InputSchema = z.discriminatedUnion('kind', [NoneInputSchema, HttpInputSchema, PluginInputSchema]);
 
 // ─────────────────────────────────────────────────────────────── ③ agent
 //
@@ -138,6 +161,9 @@ export const ValidationSchema = z.object({
     .optional(),
   max_items: z.object({ field: z.string().min(1), limit: z.number().int().positive() }).optional(),
   min_confidence: z.object({ field: z.string().min(1), threshold: z.number().min(0).max(1) }).optional(),
+  /** Check the answer in code instead. Replaces the rules above — a pipeline gets one
+   *  answer to "is this acceptable", not two that could disagree. */
+  plugin: PluginRefSchema.optional(),
 });
 
 export const AgentStepSchema = z.object({
@@ -154,6 +180,9 @@ export const AgentStepSchema = z.object({
   /** The structured answer's shape. Requested from the model and checked on return. */
   schema: OutputShapeSchema,
   validate: ValidationSchema.default({}),
+  /** Produce the answer in code instead of asking a model. The token ceiling and the
+   *  history still apply — whatever it reports spent is counted like any other turn. */
+  plugin: PluginRefSchema.optional(),
 });
 
 // ─────────────────────────────────────────────────────────────── ④ output
@@ -176,7 +205,14 @@ export const PubSubOutputSchema = z.object({
   message: z.record(z.string(), z.unknown()).default({}),
 });
 
-export const OutputSchema = z.discriminatedUnion('kind', [NoneOutputSchema, HttpOutputSchema, PubSubOutputSchema]);
+export const PluginOutputSchema = z.object({ kind: z.literal('plugin'), plugin: PluginRefSchema });
+
+export const OutputSchema = z.discriminatedUnion('kind', [
+  NoneOutputSchema,
+  HttpOutputSchema,
+  PubSubOutputSchema,
+  PluginOutputSchema,
+]);
 
 // ─────────────────────────────────────────────────────────────── the pipeline
 
@@ -217,3 +253,4 @@ export type HttpRequestDef = z.infer<typeof HttpRequestSchema>;
 export type FieldSelector = z.infer<typeof FieldSelectorSchema>;
 export type PipelineValidation = z.infer<typeof ValidationSchema>;
 export type Condition = z.infer<typeof ConditionSchema>;
+export type PluginRef = z.infer<typeof PluginRefSchema>;
