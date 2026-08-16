@@ -97,20 +97,23 @@
   {#if !hasBridge}
     <p class="hint warn">{t('link.browserNote')}</p>
   {:else}
+    <!-- Two cards side by side, not a list: this is a choice between two, and it stays a
+         choice between two. The same shape the mode picker and the wizard's workspace
+         backend already use. -->
     <div class="modes">
       <label class:on={mode === 'local'}>
-        <input type="radio" checked={mode === 'local'} disabled={busy} onchange={useLocal} />
-        <span>
+        <span class="head">
+          <input type="radio" checked={mode === 'local'} disabled={busy} onchange={useLocal} />
           <strong>{t('link.local')}</strong>
-          <span class="sub">{t('link.localHint')}</span>
         </span>
+        <span class="sub">{t('link.localHint')}</span>
       </label>
       <label class:on={mode === 'remote'}>
-        <input type="radio" checked={mode === 'remote'} disabled={busy} onchange={() => (mode = 'remote')} />
-        <span>
+        <span class="head">
+          <input type="radio" checked={mode === 'remote'} disabled={busy} onchange={() => (mode = 'remote')} />
           <strong>{t('link.remote')}</strong>
-          <span class="sub">{t('link.remoteHint')}</span>
         </span>
+        <span class="sub">{t('link.remoteHint')}</span>
       </label>
     </div>
 
@@ -179,27 +182,43 @@
     color: var(--red, #f85149);
     margin: 8px 0 0;
   }
+  /* Two columns, unconditionally — the same rule the mode picker and the wizard's
+     two-way choices use. This is a choice between two and it stays a choice between two,
+     so there is nothing for a breakpoint to decide. */
   .modes {
     display: grid;
-    gap: 8px;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    align-items: stretch;
   }
   .modes label {
     display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 10px 12px;
+    flex-direction: column;
+    gap: 6px;
+    padding: 14px;
     border: 1px solid var(--border);
     border-radius: var(--radius);
     cursor: pointer;
   }
+  .modes label:hover {
+    border-color: var(--accent);
+  }
   .modes label.on {
     border-color: var(--accent);
   }
-  .modes label span {
+  .head {
     display: flex;
-    flex-direction: column;
-    gap: 2px;
+    align-items: center;
+    gap: 8px;
     font-size: 13px;
+  }
+  .head input {
+    flex-shrink: 0;
+    margin: 0;
+  }
+  .head strong {
+    color: var(--text);
+    font-weight: 500;
   }
   .sub {
     color: var(--text-dim);
