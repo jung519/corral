@@ -138,8 +138,10 @@ export async function dispatch(
     // ── Operational AI: pipelines, manual runs, run history ────────────────────────
     case 'opsPipelines':
       if (!deps.ops) return NO_OPS;
+      // Pipelines, today's per-pipeline counts and the shared budget in one answer — the
+      // dashboard polls, and three round trips would describe three different moments.
       // The load error rides along so an empty list can say why it is empty.
-      return { pipelines: deps.ops.list(), error: deps.ops.error };
+      return await deps.ops.overview();
     case 'opsReload':
       if (!deps.ops) return NO_OPS;
       return await deps.ops.load();

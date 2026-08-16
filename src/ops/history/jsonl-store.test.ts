@@ -242,6 +242,34 @@ describe('when the files are damaged', () => {
   });
 });
 
+describe('per-pipeline counts', () => {
+  it('groups today by pipeline, with what a dashboard row shows', async () => {
+    const s = store();
+    await s.append(run({ pipeline: 'classify', outcome: 'completed', tokens: 100 }));
+    await s.append(run({ pipeline: 'classify', outcome: 'reported', tokens: 50, lowConfidence: true }));
+    await s.append(run({ pipeline: 'classify', outcome: 'agent_failed', tokens: undefined }));
+    await s.append(run({ pipeline: 'summarize', outcome: 'completed', tokens: 10 }));
+
+    expect(await s.countsByPipeline(1)).toEqual({
+      classify: { runs: 3, failed: 1, lowConfidence: 1, tokens: 150 },
+      summarize: { runs: 1, failed: 0, lowConfidence: 0, tokens: 10 },
+    });
+  });
+
+  it('leaves out a pipeline that did nothing today', async () => {
+    const s = store();
+    await s.append(run({ pipeline: 'classify', startedAt: clock - DAY }));
+
+    // An absent key is how the dashboard shows a zero without the store inventing rows
+    // for pipelines it has never heard of.
+    expect(await s.countsByPipeline(1)).toEqual({});
+  });
+
+  it('is empty rather than failing when nothing has run at all', async () => {
+    await expect(store().countsByPipeline(1)).resolves.toEqual({});
+  });
+});
+
 describe('summing', () => {
   it('does not let float addition show up as a price', () => {
     const cents = Array.from({ length: 3 }, () => ({ outcome: 'completed', costUsd: 0.1 }) as never);
