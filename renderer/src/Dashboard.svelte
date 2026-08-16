@@ -4,6 +4,7 @@
   import PhaseBar from './PhaseBar.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
   import Button from './lib/Button.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import { phaseActivity, phaseColor, phaseLabelKey, waitingLabelKey } from './lib/phase';
@@ -123,12 +124,9 @@
   }
 </script>
 
-<header>
-  <span class="dot" class:on={online}></span>
-  <h1>Corral</h1>
-  <span class="count">{view.issues.length} {t('dash.count')}</span>
+<PageHeader title={t('nav.dashboard')} {online} meta="{view.issues.length} {t('dash.count')}">
   <Button class="primary" onclick={openCandidates}>{t('dash.import')}</Button>
-</header>
+</PageHeader>
 
 <main>
   {#if configured === false}
@@ -229,33 +227,6 @@
 {/if}
 
 <style>
-  header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 22px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
-  }
-  .count {
-    color: var(--text-dim);
-  }
-  header :global(button.primary) {
-    margin-left: auto;
-  }
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--red);
-  }
-  .dot.on {
-    background: var(--green);
-  }
   main {
     padding: 20px 28px;
   }

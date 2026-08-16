@@ -35,6 +35,9 @@ export interface CorralEvent {
   kind: string;
   label: string;
   phase?: string;
+  /** Extra context the emitter attached. An operational run puts its pipeline key,
+   *  outcome and failing stage here — the identifier is the run, not the pipeline. */
+  data?: Record<string, unknown>;
 }
 
 export interface StateResponse {
