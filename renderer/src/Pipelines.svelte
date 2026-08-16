@@ -127,10 +127,10 @@
         {@const c = overview.counts[p.key]}
         <div class="row">
           <span class="dot" class:on={p.enabled}></span>
-          <div class="who">
+          <a class="who" href="#/pipeline/{encodeURIComponent(p.key)}">
             <span class="key">{p.key}</span>
             <span class="desc">{p.description ?? ''}</span>
-          </div>
+          </a>
           <span class="route">{p.trigger} → {p.provider ?? t('ops.defaultProvider')}</span>
 
           <span class="counts">
@@ -233,6 +233,10 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    text-decoration: none;
+  }
+  .who:hover .key {
+    color: var(--accent);
   }
   .key {
     font-weight: 500;

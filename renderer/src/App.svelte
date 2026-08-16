@@ -4,6 +4,7 @@
   import History from './History.svelte';
   import Logs from './Logs.svelte';
   import ModePicker from './ModePicker.svelte';
+  import PipelineDetail from './PipelineDetail.svelte';
   import Pipelines from './Pipelines.svelte';
   import Settings from './Settings.svelte';
   import Toast from './Toast.svelte';
@@ -48,6 +49,8 @@
   // The picker is a screen inside the app, not a gate in front of it: shown when nothing
   // has been chosen yet, and reachable from the sidebar afterwards.
   const picking = $derived(!mode || route.startsWith('#/mode'));
+  /** `#/pipeline/<key>` — the detail screen for one pipeline. */
+  const detailKey = $derived(route.startsWith('#/pipeline/') ? decodeURIComponent(route.slice('#/pipeline/'.length)) : '');
 
   // Settings is in both lists on purpose: the provider, the models and the token ceiling
   // are one setup shared by both pillars (D24). Two settings screens would imply two.
@@ -96,6 +99,10 @@
     <div class="content">
       {#if picking}
         <ModePicker current={mode} />
+      {:else if detailKey}
+        {#key detailKey}
+          <PipelineDetail pipelineKey={detailKey} />
+        {/key}
       {:else if route.startsWith('#/history')}
         <History />
       {:else if route.startsWith('#/logs')}
