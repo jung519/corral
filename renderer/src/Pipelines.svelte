@@ -12,6 +12,7 @@
    * deserves to see that immediately rather than deduce it.
    */
   import { onMount } from 'svelte';
+  import PipelineEditor from './PipelineEditor.svelte';
   import Button from './lib/Button.svelte';
   import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
@@ -23,6 +24,7 @@
   let online = $state(false);
   let loading = $state(true);
   let live = $state<CorralEvent[]>([]);
+  let adding = $state(false);
 
   const budget = $derived(overview.budget);
   const hasLimit = $derived(Boolean(budget?.limits.dailyInputTokens || budget?.limits.dailyOutputTokens));
@@ -83,8 +85,20 @@
     ? `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0} · ${usedPercent}%`
     : `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0}`}
 >
-  <Button onclick={reload}>{t('ops.reload')}</Button>
+  <button class="ghost" onclick={reload}>{t('ops.reload')}</button>
+  <Button class="primary" onclick={() => (adding = true)}>{t('ops.add')}</Button>
 </PageHeader>
+
+{#if adding}
+  <PipelineEditor
+    onclose={() => (adding = false)}
+    onsaved={(key) => {
+      adding = false;
+      toast(`${key}: ${t('ops.added')}`);
+      void refresh();
+    }}
+  />
+{/if}
 
 <main>
   {#if hasLimit}
@@ -106,6 +120,7 @@
         <p>{t('ops.none')}</p>
         <p class="dim">{t('ops.noneHint')}</p>
         <p class="dim">{t('ops.noneHint2')}</p>
+        <p class="add"><Button class="primary" onclick={() => (adding = true)}>{t('ops.add')}</Button></p>
       </div>
     {:else}
       {#each overview.pipelines as p (p.key)}
@@ -284,6 +299,9 @@
   .empty p {
     margin: 0 0 4px;
     font-size: 13px;
+  }
+  .add {
+    margin-top: 12px;
   }
   .dim {
     color: var(--text-dim);
