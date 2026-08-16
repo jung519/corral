@@ -107,7 +107,6 @@ export interface WizardState {
   backend: 'local' | 'docker';
   /** Docker: mount the host ~/.claude login so the CLI auths without an API key. */
   dockerMountLogin: boolean;
-  port: number;
   maxActive: number;
   /** Agent output language: `'auto'` (follow the UI language until explicitly pinned),
    *  or a concrete code like `'en'`/`'ko'`. `buildConfigYaml` resolves `'auto'` to the
@@ -159,7 +158,6 @@ export function initialState(): WizardState {
     detailedStates: false,
     backend: 'local',
     dockerMountLogin: true,
-    port: 4400,
     maxActive: 3,
     language: 'auto',
     stack: 'generic',
@@ -333,7 +331,6 @@ export function validateStep(step: number, s: WizardState, isSaved: SecretSavedF
     case 3:
       return '';
     case 4:
-      if (!Number.isInteger(s.port) || s.port <= 0) return vt('validate.port');
       return '';
     default:
       return '';
@@ -487,7 +484,6 @@ export function buildConfigYaml(s: WizardState, uiLang: string): string {
     '',
     'channel:',
     '  kind: web',
-    `  port: ${s.port}`,
     '',
     `max_active_issues: ${s.maxActive}`,
     '',

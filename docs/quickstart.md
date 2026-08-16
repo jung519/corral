@@ -58,7 +58,7 @@ sections — first run shows a setup wizard and stores secrets in the OS keychai
 
 ## Troubleshooting
 
-- **Port in use** — change `channel.port` in `corral.yaml`.
+- **Port in use** — change `control_plane.port` in `corral.yaml`.
 - **Empty diff / no changes** — the agent didn't commit to the workspace; check the
   repo config and that the work branch is correct.
 - **Auth errors** — verify the `CORRAL_*` token, or that your provider CLI is logged in.

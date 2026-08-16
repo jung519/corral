@@ -40,7 +40,6 @@ const en: Dict = {
   'validate.jiraProject': 'A Jira project key is required.',
   'validate.jiraEmail': 'A Jira account email is required.',
   'validate.jiraToken': 'A Jira API token is required.',
-  'validate.port': 'Port must be a positive integer.',
   'step.ai': 'AI provider',
   'step.repo': 'Repository',
   'step.tracker': 'Tracker',
@@ -172,7 +171,6 @@ const en: Dict = {
   'workspace.mountLoginOff':
     'Off → authenticate with a subscription token (claude setup-token) or an API key from step 1. Use this on macOS.',
   'badge.soon': 'Coming soon',
-  'field.port': 'Control-plane port',
   'field.maxActive': 'Max active issues',
   'field.language': 'Agent output language',
   'field.language.auto': 'Same as UI (auto)',
@@ -481,7 +479,6 @@ const ko: Dict = {
   'validate.jiraProject': 'Jira 프로젝트 키가 필요합니다.',
   'validate.jiraEmail': 'Jira 계정 이메일이 필요합니다.',
   'validate.jiraToken': 'Jira API 토큰이 필요합니다.',
-  'validate.port': '포트는 양의 정수여야 합니다.',
   'step.ai': 'AI 프로바이더',
   'step.repo': '저장소',
   'step.tracker': '트래커',
@@ -613,7 +610,6 @@ const ko: Dict = {
   'workspace.mountLoginOff':
     '끄면 → 1단계의 구독 토큰(claude setup-token) 또는 API 키로 인증합니다. macOS는 이쪽을 쓰세요.',
   'badge.soon': '준비 중',
-  'field.port': '컨트롤 플레인 포트',
   'field.maxActive': '동시 이슈 한도',
   'field.language': '에이전트 출력 언어',
   'field.language.auto': 'UI와 동일 (자동)',

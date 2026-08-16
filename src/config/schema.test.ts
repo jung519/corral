@@ -37,9 +37,15 @@ describe('ConfigSchema', () => {
     expect(cfg.profile.stack).toBe('generic');
     expect(cfg.workspace.backend).toBe('local');
     expect(cfg.channel.kind).toBe('web');
-    expect(cfg.channel.port).toBe(4400);
     expect(cfg.repositories[0]?.branch_strategy.production).toBe('main');
     expect(cfg.tracker.credential.account).toBe('default');
+  });
+
+  // `channel.port` was written by older setups and never read by anything. Dropping it from
+  // the schema must not turn an existing corral.yaml into a startup error.
+  it('still loads a config carrying the retired channel.port', () => {
+    const cfg = ConfigSchema.parse({ ...baseConfig, channel: { kind: 'web', port: 4400 } });
+    expect(cfg.channel).toEqual({ kind: 'web' });
   });
 
   it('rejects api transport without a credential', () => {

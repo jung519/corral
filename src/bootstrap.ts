@@ -110,7 +110,7 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
       })
     : baseAgent;
 
-  const channel = deps.channel ?? channels.create({ kind: config.channel.kind, port: config.channel.port }, undefined);
+  const channel = deps.channel ?? channels.create({ kind: config.channel.kind }, undefined);
 
   const profile = resolveProfile(config.profile);
   const repositoryRouter = new RepositoryRouter(repositoryList);

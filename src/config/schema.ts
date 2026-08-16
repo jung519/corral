@@ -265,12 +265,16 @@ export const WorkspaceSchema = z
 
 // ───────────────────────────────────────────────────────────── axis 5: channel
 
+/**
+ * How a human is asked for a decision. `web` means the dashboard itself — the app IS the
+ * channel, so there is no port and no server: an approval becomes a pending action the UI
+ * renders and the user's click is the answer.
+ */
 export const ChannelSchema = z
   .object({
     kind: z.enum(['web', 'slack']).default('web'),
-    port: z.number().int().positive().default(4400),
   })
-  .default({ kind: 'web', port: 4400 });
+  .default({ kind: 'web' });
 
 // ──────────────────────────────────────────────────────────────────── limits
 
@@ -295,8 +299,8 @@ export const LimitsSchema = z
  * over a process IPC channel, so a local install has no reason to open a port. Turn it
  * on to operate a core that runs elsewhere (a VM).
  *
- * ⚠️ There is no authentication yet (a separate milestone). Until then the loopback
- * default is the only barrier — do not set `host` to a public interface.
+ * ⚠️ Authenticated (a pairing code exchanged for a token) but NOT encrypted. Put it behind
+ * a tunnel or a VPN rather than binding a public interface.
  */
 export const ControlPlaneSchema = z
   .object({

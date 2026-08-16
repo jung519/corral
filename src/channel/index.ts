@@ -5,7 +5,6 @@ import { WebChannel } from './web.js';
 
 interface ChannelRegistryConfig {
   kind: string;
-  port: number;
 }
 
 export const channels = new Registry<ChannelRegistryConfig, ChannelAdapter>('channel');
