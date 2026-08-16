@@ -8,9 +8,8 @@
  * user's system, and never to this schema. If a field name would only make sense for one
  * kind of business, it does not belong here.
  *
- * This is also the contract for everything downstream (registry, runtime, history, UI),
- * and — per D10 — deliberately a *subset* of what a code plugin will be able to do. A
- * declarative pipeline must never be able to express something a code operation cannot.
+ * This is also the contract for everything downstream — the registry, the runtime, the
+ * history and the UI all read the shapes defined here.
  */
 import { z } from 'zod';
 import { CredentialRefSchema } from '../../config/schema.js';
