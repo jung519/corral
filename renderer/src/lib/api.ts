@@ -108,7 +108,6 @@ export interface OpsOverview {
 export const getOverview = (): Promise<OpsOverview> => call('opsPipelines');
 
 /** Re-read the definition files without restarting the core. */
-export const reloadPipelines = (): Promise<{ loaded: number; error?: string }> => call('opsReload');
 
 /** Run one pipeline now, with a body the caller supplies. */
 export const runPipeline = (key: string, input?: unknown): Promise<{ ok: boolean; error?: string; run?: { outcome: string; reason?: string } }> =>

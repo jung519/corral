@@ -142,9 +142,6 @@ export async function dispatch(
       // dashboard polls, and three round trips would describe three different moments.
       // The load error rides along so an empty list can say why it is empty.
       return await deps.ops.overview();
-    case 'opsReload':
-      if (!deps.ops) return NO_OPS;
-      return await deps.ops.load();
     case 'opsSetEnabled': {
       if (!deps.ops) return NO_OPS;
       const key = String(a.key ?? '');
