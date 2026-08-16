@@ -6,7 +6,7 @@
  * and the shared control plane, and `ops/` is not allowed to reach across (the boundary
  * test enforces exactly that). The shared layer is where the two are allowed to meet.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -126,10 +126,73 @@ describe('over the control plane', () => {
     expect((await dispatch('opsReload', {}, d)) as any).toEqual({ loaded: 1 });
   });
 
+  it('saves a definition and picks it up without a restart', async () => {
+    const d = deps(await startOpsHost({ stateDir: dir, operation: stubModel }));
+
+    const saved = (await dispatch(
+      'opsSave',
+      {
+        definition: {
+          key: 'from-the-app',
+          trigger: { kind: 'manual' },
+          input: { kind: 'none' },
+          agent: {
+            prompt: { system: 's', user_template: 'u' },
+            schema: { type: 'object', properties: { answer: { type: 'string' } } },
+          },
+          output: { kind: 'none' },
+        },
+      },
+      d,
+    )) as any;
+
+    // Someone who just pressed save expects the pipeline to be there.
+    expect(saved).toMatchObject({ ok: true, file: 'from-the-app.yaml' });
+    expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines[0].key).toBe('from-the-app');
+    expect(((await dispatch('opsRun', { key: 'from-the-app', input: {} }, d)) as any).ok).toBe(true);
+  });
+
+  it('hands back field paths instead of saving something broken', async () => {
+    const d = deps(await startOpsHost({ stateDir: dir }));
+
+    const saved = (await dispatch('opsSave', { definition: { key: 'BAD KEY' } }, d)) as any;
+
+    expect(saved.ok).toBe(false);
+    expect(saved.issues.map((i: { path: string }) => i.path)).toContain('key');
+    expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines).toEqual([]);
+  });
+
+  it('keeps the file editable by hand afterwards', async () => {
+    const d = deps(await startOpsHost({ stateDir: dir }));
+    await dispatch(
+      'opsSave',
+      {
+        definition: {
+          key: 'both-ways',
+          trigger: { kind: 'manual' },
+          input: { kind: 'none' },
+          agent: {
+            prompt: { system: 's', user_template: 'u' },
+            schema: { type: 'object', properties: { answer: { type: 'string' } } },
+          },
+          output: { kind: 'none' },
+        },
+      },
+      d,
+    );
+
+    // The app is a convenient way to write the file, not a database that owns it.
+    const file = join(dir, 'pipelines', 'both-ways.yaml');
+    writeFileSync(file, readFileSync(file, 'utf8').replace('key: both-ways', 'key: both-ways\ndescription: edited by hand'));
+    await dispatch('opsReload', {}, d);
+
+    expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines[0].description).toBe('edited by hand');
+  });
+
   it('declines cleanly on a core with no operational AI', async () => {
     const d = deps(undefined);
 
-    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsReload']) {
+    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsReload', 'opsSave']) {
       expect(await dispatch(method, {}, d)).toMatchObject({ ok: false });
     }
   });

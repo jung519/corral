@@ -154,6 +154,11 @@ export async function dispatch(
       deps.ops.syncSubscriptions();
       return { ok: true, enabled };
     }
+    case 'opsSave':
+      if (!deps.ops) return NO_OPS;
+      // Issues come back with the same dotted field paths the loader uses, so an editor
+      // can put each message next to the field that caused it.
+      return await deps.ops.save(a.definition, { overwrite: a.overwrite === true });
     case 'opsRun':
       if (!deps.ops) return NO_OPS;
       // The one entry point that works before any trigger exists — how a pipeline gets
