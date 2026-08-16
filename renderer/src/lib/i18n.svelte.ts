@@ -425,7 +425,7 @@ const en: Dict = {
   'direction.notApplied': 'Until you allow the check, the Direction is not applied to any run.',
   'logs.title': 'Logs',
   'logs.empty': 'No events yet.',
-  'about.tagline': 'Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent.',
+  'about.tagline': 'Open-source AI orchestrator you run yourself — coding agents for the work you approve, pipelines for the work that repeats.',
   'link.title': 'Core connection',
   'link.hint': 'Corral’s engine can run here, or on another machine you connect to.',
   'link.local': 'This computer',
@@ -446,7 +446,7 @@ const en: Dict = {
   'about.version': 'Version',
   'about.license': 'License',
   'about.repo': 'Repository',
-  'about.byok': 'BYOK · provider-neutral · self-hostable. No embedded keys, no bundled proprietary binaries.',
+  'about.byok': 'BYOK · provider-neutral · self-hostable. No keys are embedded, and provider CLIs are detected on your machine rather than shipped with the app.',
 };
 
 const ko: Dict = {
@@ -866,7 +866,7 @@ const ko: Dict = {
   'direction.notApplied': '검사를 허용하기 전까지 방향성은 어떤 작업에도 적용되지 않습니다.',
   'logs.title': '로그',
   'logs.empty': '아직 이벤트가 없습니다.',
-  'about.tagline': '오픈소스 에이전트 개발 오케스트레이터 — 트래커 → 저장소 → 사람 승인 → AI 코딩 에이전트.',
+  'about.tagline': '직접 돌리는 오픈소스 AI 오케스트레이터 — 승인하며 맡기는 일은 코딩 에이전트가, 반복되는 일은 파이프라인이 합니다.',
   'link.title': '코어 연결',
   'link.hint': 'Corral 엔진을 이 컴퓨터에서 돌릴지, 다른 컴퓨터에 연결할지 고릅니다.',
   'link.local': '이 컴퓨터',
@@ -887,7 +887,7 @@ const ko: Dict = {
   'about.version': '버전',
   'about.license': '라이선스',
   'about.repo': '저장소',
-  'about.byok': 'BYOK · 프로바이더 중립 · 셀프호스팅. 임베드 키 없음, 독점 바이너리 비번들.',
+  'about.byok': 'BYOK · 프로바이더 중립 · 직접 호스팅. 키를 심어두지 않고, 프로바이더 CLI는 이 컴퓨터에서 찾아 쓸 뿐 앱에 같이 넣어 배포하지 않습니다.',
 };
 
 const catalog: Record<Lang, Dict> = { en, ko };

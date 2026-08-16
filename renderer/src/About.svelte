@@ -15,6 +15,14 @@
 <div class="view">
   <h1>Corral</h1>
   <p class="tagline">{t('about.tagline')}</p>
+
+  <!-- The same words the mode picker uses. Two places describing the two pillars in two
+       wordings is two places to drift. -->
+  <ul class="pillars">
+    <li><strong>{t('mode.dev')}</strong> — {t('mode.dev.body')}</li>
+    <li><strong>{t('mode.ops')}</strong> — {t('mode.ops.body')}</li>
+  </ul>
+
   <p class="byok">{t('about.byok')}</p>
 
   <dl>
@@ -40,6 +48,21 @@
   .tagline {
     color: var(--text);
     margin: 0 0 6px;
+  }
+  .pillars {
+    list-style: none;
+    margin: 12px 0 16px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--text-dim);
+    max-width: 640px;
+  }
+  .pillars strong {
+    color: var(--text);
+    font-weight: 500;
   }
   .byok {
     color: var(--text-dim);

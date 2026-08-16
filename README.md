@@ -1,11 +1,26 @@
 # Corral
 
-> Open-source agent development orchestrator — **tracker → repository → human approval → AI coding agent**, runnable on your own machine with your own keys.
+> Open-source AI orchestrator you run yourself — **coding agents for the work you approve,
+> pipelines for the work that repeats.**
 
-Corral takes an issue from your tracker, has an AI agent plan it, asks you to
-approve the plan, implements it, self-reviews, and opens a pull request — with a
-human in the loop at every gate. It is **provider-neutral** (Claude / Gemini /
-GPT), **BYOK** (bring your own keys; nothing is embedded), and **self-hostable**.
+Corral does two jobs on one setup. They share your provider, your keys and a single daily
+token ceiling; the app shows one at a time so the other's screens stay out of the way.
+
+**Development — an issue becomes a pull request.**
+`tracker → plan → your approval → code → self-review → pull request`
+Corral takes an issue from your tracker, has an agent plan it, asks you to approve the plan
+before a line is written, implements it, reviews its own work, and opens a pull request.
+A human is at every gate.
+
+**Operations — a queue becomes an answer.**
+`trigger → fetch → one model turn → checks → your API`
+A pipeline is one YAML file: what wakes it (a queue, a schedule, or you), what to read from
+your own API, one turn with a declared answer shape, rules that re-check the answer **in
+code**, and where the result goes. Nobody approves each item — the checks are the gate, and
+a doubtful answer is held back with a link rather than written.
+
+Both are **provider-neutral** (Claude / Gemini / GPT), **BYOK** (bring your own keys;
+nothing is embedded), and **self-hostable**.
 
 Corral is the open-source successor to an internal tool called *Symphony*.
 
@@ -29,9 +44,14 @@ config files to edit.
 
 ## Status
 
-**Works end-to-end** (issue → plan → your approval → code → self-review → pull request) and
-is used daily on a real multi-repo project. Early and rough; installers are **unsigned**
-until code-signing lands. Auto-update is built in.
+**Development works end-to-end** (issue → plan → your approval → code → self-review → pull
+request) and is used daily on a real multi-repo project.
+
+**Operations is newer.** Pipelines run end-to-end — trigger, fetch, structured answer,
+validation, delivery — and are being put into real use now. Expect the rough edges of
+something young.
+
+Early overall; installers are **unsigned** until code-signing lands. Auto-update is built in.
 
 ## Try it (run on your own machine)
 
@@ -74,21 +94,27 @@ To reopen the app later, just run `pnpm app` again from the `corral` folder.
 > anywhere? See [Run it on a server](docs/vm-deploy.md). Packaging and other advanced usage
 > are in [Development](#development) below.
 
-## Architecture (5 pluggable axes)
+## Architecture (6 pluggable axes)
 
 Every external integration sits behind an adapter interface, selected by a
 `kind` field in config and resolved through a registry:
 
-| Axis | Interface | Reference impl |
-|------|-----------|----------------|
-| Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira |
-| Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket |
-| Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) |
-| Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local |
-| Channel | `ChannelAdapter` | Web (Slack optional) |
+| Axis | Interface | Reference impl | Used by |
+|------|-----------|----------------|---------|
+| Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira | Development |
+| Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket | Development |
+| Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local | Development |
+| Channel | `ChannelAdapter` | Web (Slack optional) | Development |
+| Trigger | `TriggerAdapter` | Manual, Schedule (cron), Google Pub/Sub | Operations |
+| Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) | Both |
 
 Adding an integration = one adapter implementation + one config schema variant
 + one registry registration.
+
+A pipeline's own steps — what it reads, how the answer is checked, where the result goes —
+are **not** an axis. They are fields in the pipeline file, because a declaration someone can
+read and edit is the point; see [the operations design note](docs/operational-ai-design.md)
+for what that declaration can and cannot express.
 
 ## Principles
 
