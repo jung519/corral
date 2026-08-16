@@ -11,7 +11,7 @@
   import Wizard from './Wizard.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
-  import { modeState } from './lib/mode.svelte';
+  import { modeState, setMode } from './lib/mode.svelte';
   import { prefs } from './lib/prefs.svelte';
 
   let route = $state(location.hash);
@@ -42,6 +42,18 @@
       unsubNotify();
     };
   });
+
+  /**
+   * Two pillars, so "switch" is unambiguous and one click is what the word promises.
+   * The picker stays for the first visit, where the choice still needs explaining.
+   */
+  function switchMode(): void {
+    setMode(modeState.current === 'ops' ? 'dev' : 'ops');
+    // The route you were on belongs to the pillar you just left, and its screen may not
+    // even be in the new sidebar. Land on the new mode's home instead of a page that has
+    // no way back.
+    location.hash = '#/';
+  }
 
   const isSetup = $derived(route.startsWith('#/setup'));
   /** null until the user has chosen once. */
@@ -87,7 +99,7 @@
         <div class="mode">
           <span class="label">{t('mode.current')}</span>
           <strong>{t(mode === 'ops' ? 'mode.ops' : 'mode.dev')}</strong>
-          <a class="switch" href="#/mode">{t('mode.switch')}</a>
+          <button class="switch" onclick={switchMode}>{t('mode.switch')}</button>
         </div>
       {/if}
       <ul>
@@ -159,6 +171,7 @@
     border: 1px solid var(--border);
     border-radius: 6px;
     color: var(--text-dim);
+    white-space: nowrap;
   }
   .mode .switch:hover {
     background: var(--surface-2);
