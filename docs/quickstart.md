@@ -4,6 +4,10 @@ Corral turns a tracker issue into a reviewed pull request, with you approving at
 each gate. This walks through the headless setup; the desktop app wraps the same
 flow with a setup wizard.
 
+> This covers the **development** pillar only. For the operational one — pipelines
+> that take work off a queue or a schedule — see
+> [the operations design note](operational-ai-design.md).
+
 ## 1. Prerequisites
 
 - Node.js >= 24, pnpm
