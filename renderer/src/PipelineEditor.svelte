@@ -461,7 +461,9 @@
           <p class="hint">{t('editor.input.noneHint')}</p>
         {/if}
         <label class="field">
-          <span>{t('editor.select')}</span>
+          <!-- Same field, two sources: with `http` it reads the response, without it the
+               event body. One name for both would be wrong half the time. -->
+          <span>{t(inputKind === 'http' ? 'editor.selectHttp' : 'editor.selectNone')}</span>
           <textarea bind:value={selectText} rows="3" spellcheck="false" placeholder={'title: data.title\ndetail: data.description'}></textarea>
         </label>
         <label class="field"><span>{t('editor.require')}</span><input bind:value={requireText} spellcheck="false" placeholder="title" /></label>
