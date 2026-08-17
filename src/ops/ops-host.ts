@@ -8,13 +8,15 @@
  */
 import { rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { z } from 'zod';
 import { logger } from '../core/logger.js';
 import type { CredentialStore } from '../credentials/types.js';
 import type { TokenBudget } from '../core/token-budget.js';
 import { JsonlOpsHistoryStore } from './history/jsonl-store.js';
 import type { OpsHistoryStore, OpsPipelineCounts } from './history/store.js';
+import { runHttpRequest } from './http.js';
 import { HttpInputResolver } from './input/http.js';
-import { NoneInputResolver } from './input/none.js';
+import { applySelect, NoneInputResolver } from './input/none.js';
 import { HttpOutputSink } from './output/http.js';
 import { NoneOutputSink } from './output/none.js';
 import { PubSubOutputSink } from './output/pubsub.js';
@@ -23,9 +25,13 @@ import { findPipelineFile, savePipeline, type SaveResult } from './pipeline/writ
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
+import { FieldSelectorSchema, HttpRequestSchema } from './pipeline/schema.js';
 import { triggerRegistry } from './trigger/index.js';
 import type { StopFn } from './trigger/types.js';
 import { RuleAnswerValidator } from './validate/rules.js';
+
+/** The `select` map on its own — a trial fetch has no pipeline to take it from. */
+const SelectSchema = z.record(z.string(), FieldSelectorSchema);
 
 /**
  * Stands in for the real one-turn runner until it lands. It fails loudly rather than
@@ -240,6 +246,38 @@ export class OpsHost {
     const result = await savePipeline(this.dir, definition, options);
     if (result.ok) await this.load();
     return result;
+  }
+
+  /**
+   * Make the fetch a pipeline would make, and hand back what came off the wire.
+   *
+   * `select` is written blind today — `data.title` is a guess until a run proves it, and a
+   * run costs a model turn. This is the cheap half: the request, the response, and what
+   * the paths pull out of it, before anything is saved.
+   *
+   * It goes through `runHttpRequest`, the same function the input resolver uses, so the
+   * credential resolves the same way and what is tried is what will run. A failure comes
+   * back as a value rather than an exception — "the server said 401" is the answer someone
+   * pressed this to get.
+   */
+  async testFetch(
+    request: unknown,
+    event: unknown,
+    select: unknown,
+  ): Promise<{ ok: boolean; error?: string; body?: unknown; fields?: Record<string, unknown> }> {
+    const parsed = HttpRequestSchema.safeParse(request);
+    if (!parsed.success) {
+      return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
+    }
+    const fields = (event && typeof event === 'object' ? event : {}) as Record<string, unknown>;
+    let body: unknown;
+    try {
+      body = await runHttpRequest(parsed.data, fields, this.options.credentials);
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+    const map = SelectSchema.safeParse(select ?? {});
+    return { ok: true, body, fields: map.success ? applySelect(body, map.data) : {} };
   }
 
   /**

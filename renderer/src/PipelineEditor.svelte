@@ -119,6 +119,37 @@
     inputHeaders = inputHeaders.filter((_, j) => j !== i);
   }
 
+  // ── trying the fetch before saving ────────────────────────────────────────────────
+  let sampleEvent = $state('{ "id": "1" }');
+  let testing = $state(false);
+  let testResult = $state<{ ok: boolean; error?: string; body?: unknown; fields?: Record<string, unknown> } | null>(null);
+
+  async function testFetch(): Promise<void> {
+    testing = true;
+    testResult = null;
+    try {
+      let event: unknown = {};
+      try {
+        event = JSON.parse(sampleEvent || '{}');
+      } catch {
+        testResult = { ok: false, error: t('editor.testBadEvent') };
+        return;
+      }
+      const headers: Record<string, string> = {};
+      for (const h of inputHeaders) if (h.name.trim()) headers[h.name.trim()] = h.value;
+      const request: Record<string, unknown> = { method: inputMethod, url: inputUrl, headers };
+      if (credService.trim()) {
+        request.credential = { service: credService.trim(), account: credAccount.trim() || 'default' };
+        request.auth = { header: authHeader.trim() || 'authorization', prefix: authPrefix };
+      }
+      testResult = await api.testFetch(request, event, parsePairs(selectText));
+    } catch (err) {
+      testResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
+    } finally {
+      testing = false;
+    }
+  }
+
   /** Whether this ref already holds a secret, so an operator knows not to retype it. */
   async function refreshCredSaved(): Promise<void> {
     if (!hasBridge || !credService.trim()) {
@@ -434,6 +465,32 @@
           <textarea bind:value={selectText} rows="3" spellcheck="false" placeholder={'title: data.title\ndetail: data.description'}></textarea>
         </label>
         <label class="field"><span>{t('editor.require')}</span><input bind:value={requireText} spellcheck="false" placeholder="title" /></label>
+
+        {#if inputKind === 'http'}
+          <!-- Paths are guesses until something proves them, and the only proof available
+               today costs a model turn. This is the half that doesn't. -->
+          <div class="block">
+            <p class="blockTitle">{t('editor.test')}</p>
+            <label class="field"
+              ><span>{t('editor.testEvent')}</span>
+              <input class="mono" bind:value={sampleEvent} spellcheck="false" /></label
+            >
+            <button class="plus" onclick={testFetch} disabled={testing || !inputUrl.trim()}>
+              {testing ? t('editor.testing') : t('editor.testRun')}
+            </button>
+
+            {#if testResult && !testResult.ok}
+              <p class="testErr">{testResult.error}</p>
+            {:else if testResult}
+              {#if Object.keys(testResult.fields ?? {}).length}
+                <p class="blockTitle mt">{t('editor.testFields')}</p>
+                <pre class="out">{JSON.stringify(testResult.fields, null, 2)}</pre>
+              {/if}
+              <p class="blockTitle mt">{t('editor.testBody')}</p>
+              <pre class="out">{JSON.stringify(testResult.body, null, 2)}</pre>
+            {/if}
+          </div>
+        {/if}
       {:else if step === 2}
         <div class="two">
           <label class="field">
@@ -669,6 +726,27 @@
     padding: 5px 10px;
     font-size: 12px;
     flex-shrink: 0;
+  }
+  .mt {
+    margin-top: 12px;
+  }
+  .out {
+    margin: 0;
+    max-height: 220px;
+    overflow: auto;
+    padding: 10px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: var(--mono, ui-monospace, Menlo, monospace);
+    font-size: 11px;
+    color: var(--text);
+    white-space: pre;
+  }
+  .testErr {
+    margin: 10px 0 0;
+    font-size: 12px;
+    color: var(--red, #f85149);
   }
   .saved {
     margin-left: 6px;

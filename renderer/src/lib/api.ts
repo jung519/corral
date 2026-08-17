@@ -120,6 +120,19 @@ export interface SaveIssue {
 }
 
 /** Validate and write a definition. Refused unless `overwrite` when the key exists. */
+/**
+ * Make the fetch a pipeline would make, without saving anything.
+ *
+ * Runs on the core so the credential resolves and no browser is in the way. Failures come
+ * back in `error` rather than as a rejection — "the server said 401" is the answer.
+ */
+export const testFetch = (
+  request: unknown,
+  event: unknown,
+  select: unknown,
+): Promise<{ ok: boolean; error?: string; body?: unknown; fields?: Record<string, unknown> }> =>
+  call('opsTestFetch', { request, event, select });
+
 /** Delete a pipeline — its file and its trigger. Run history is kept. */
 export const deletePipeline = (key: string): Promise<{ ok: boolean; file?: string; error?: string }> =>
   call('opsDelete', { key });
