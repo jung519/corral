@@ -200,7 +200,14 @@ export class OpsHost {
     for (const pipeline of this.registry.active()) {
       if (this.subscriptions.has(pipeline.key)) continue;
       try {
-        const adapter = triggerRegistry.create(pipeline.trigger, { now: this.options.now, credentials: this.options.credentials });
+        const adapter = triggerRegistry.create(pipeline.trigger, {
+          now: this.options.now,
+          credentials: this.options.credentials,
+          // Read through rather than captured, for the same reason `operation` and the
+          // runner's own budget are: the ceiling arrives with a config, and a trigger may
+          // well have started before there was one.
+          budget: { check: () => this.budget?.check() ?? { ok: true } },
+        });
         this.subscriptions.set(pipeline.key, adapter.start(pipeline, (event) => this.fire(pipeline.key, event)));
       } catch (err) {
         // An unknown kind must not stop the others from running.
