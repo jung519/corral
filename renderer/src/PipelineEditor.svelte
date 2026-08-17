@@ -21,6 +21,7 @@
   import Button from './lib/Button.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
+  import { MODELS, type Provider } from './lib/wizard';
 
   interface Props {
     onclose: () => void;
@@ -35,6 +36,8 @@
   // ── the definition being built ──────────────────────────────────────────────────
   let key = $state('');
   let description = $state('');
+  /** Concurrent runs of THIS pipeline. Start at one and raise once you have measured. */
+  let maxConcurrent = $state(1);
 
   let triggerKind = $state<'manual' | 'schedule' | 'pubsub'>('manual');
   let topic = $state('');
@@ -135,14 +138,7 @@
         testResult = { ok: false, error: t('editor.testBadEvent') };
         return;
       }
-      const headers: Record<string, string> = {};
-      for (const h of inputHeaders) if (h.name.trim()) headers[h.name.trim()] = h.value;
-      const request: Record<string, unknown> = { method: inputMethod, url: inputUrl, headers };
-      if (credService.trim()) {
-        request.credential = { service: credService.trim(), account: credAccount.trim() || 'default' };
-        request.auth = { header: authHeader.trim() || 'authorization', prefix: authPrefix };
-      }
-      testResult = await api.testFetch(request, event, parsePairs(selectText));
+      testResult = await api.testFetch(inputRequest(), event, parsePairs(selectText));
     } catch (err) {
       testResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
     } finally {
@@ -150,26 +146,54 @@
     }
   }
 
-  /** Whether this ref already holds a secret, so an operator knows not to retype it. */
-  async function refreshCredSaved(): Promise<void> {
-    if (!hasBridge || !credService.trim()) {
-      credSaved = false;
-      return;
-    }
+  /** Whether a ref already holds a secret, so an operator knows not to retype it. */
+  async function secretExists(service: string, account: string): Promise<boolean> {
+    if (!hasBridge || !service.trim()) return false;
     try {
-      credSaved = await window.corral!.secret.has(credService.trim(), credAccount.trim() || 'default');
+      return await window.corral!.secret.has(service.trim(), account.trim() || 'default');
     } catch {
-      credSaved = false;
+      return false;
     }
+  }
+
+  async function refreshCredSaved(): Promise<void> {
+    credSaved = await secretExists(credService, credAccount);
+  }
+  async function refreshOutCredSaved(): Promise<void> {
+    outCredSaved = await secretExists(outCredService, outCredAccount);
+  }
+  async function refreshPubCredSaved(): Promise<void> {
+    pubCredSaved = await secretExists(pubCredService, pubCredAccount);
   }
   let selectText = $state('');
   let requireText = $state('');
+  let inputTimeout = $state(15000);
+  // The redelivery guard (D6). A queue redelivers, and a redelivery must not cost a second
+  // model turn or overwrite an answer that was already good.
+  let skipField = $state('');
+  let skipIs = $state<'non_empty' | 'empty'>('non_empty');
 
   let provider = $state('');
+  // Blank = whatever the app is configured to use. A pipeline that runs thousands of times
+  // is exactly where naming a cheaper model pays, so it has to be nameable here.
+  let model = $state('');
   let maxTokens = $state(4096);
   let systemPrompt = $state('');
   let userTemplate = $state('');
-  let schemaText = $state('{\n  "type": "object",\n  "properties": {\n    "items": { "type": "array" }\n  },\n  "required": ["items"]\n}');
+  // `confidence` is here because the checks below offer a confidence rule, and a rule
+  // naming a field the schema does not declare is refused at load — the defaults have to
+  // agree with each other or the first save fails on the editor's own suggestions.
+  let schemaText = $state(
+    '{\n  "type": "object",\n  "properties": {\n    "items": { "type": "array" },\n    "confidence": { "type": "number" }\n  },\n  "required": ["items", "confidence"]\n}',
+  );
+  // The headline rule: values outside the list are dropped and recorded, never sent on.
+  // The list is either written here or fetched, because a vocabulary that changes daily
+  // should not mean editing the pipeline.
+  let allowedField = $state('');
+  let allowedFrom = $state<'inline' | 'source'>('inline');
+  let allowedValues = $state('');
+  let allowedUrl = $state('');
+  let allowedSelect = $state('');
   let maxItemsField = $state('');
   let maxItemsLimit = $state(4);
   let confidenceField = $state('');
@@ -179,7 +203,35 @@
   let outputUrl = $state('');
   let outputMethod = $state<'POST' | 'PATCH' | 'PUT'>('PATCH');
   let outputBody = $state('');
+  let outputTimeout = $state(15000);
+  let outputHeaders = $state<Array<{ name: string; value: string }>>([]);
+  let outCredService = $state('');
+  let outCredAccount = $state('default');
+  let outCredValue = $state('');
+  let outCredSaved = $state(false);
+  let outAuthHeader = $state('authorization');
+  let outAuthPrefix = $state('Bearer ');
   let outputTopic = $state('');
+  let outputMessage = $state('');
+  let pubCredService = $state('');
+  let pubCredAccount = $state('default');
+  let pubCredValue = $state('');
+  let pubCredSaved = $state(false);
+
+  /**
+   * What happens to a doubtful answer (D14). `report` is the default because an answer the
+   * checks distrusted, written into someone's system, is worse than no answer — but a hold
+   * only helps if it says where a person can look, and until now nothing here set that.
+   */
+  let lowAction = $state<'report' | 'skip' | 'send'>('report');
+  let reviewUrl = $state('');
+
+  function addOutputHeader(): void {
+    outputHeaders = [...outputHeaders, { name: '', value: '' }];
+  }
+  function removeOutputHeader(i: number): void {
+    outputHeaders = outputHeaders.filter((_, j) => j !== i);
+  }
 
   const STEPS = [t('editor.step1'), t('editor.step2'), t('editor.step3'), t('editor.step4')];
   const LAST = STEPS.length - 1;
@@ -206,6 +258,34 @@
     return out;
   }
 
+  function headerMap(rows: Array<{ name: string; value: string }>): Record<string, string> {
+    const out: Record<string, string> = {};
+    for (const h of rows) if (h.name.trim()) out[h.name.trim()] = h.value;
+    return out;
+  }
+
+  /**
+   * The fetch, built once.
+   *
+   * Both the trial and the saved definition come from here. Two places assembling the same
+   * request is two places to drift, and the whole worth of the trial is that what was tried
+   * is what will run.
+   */
+  function inputRequest(): Record<string, unknown> {
+    const request: Record<string, unknown> = {
+      method: inputMethod,
+      url: inputUrl,
+      headers: headerMap(inputHeaders),
+      timeout_ms: inputTimeout,
+    };
+    if (credService.trim()) {
+      // A pointer, never the value.
+      request.credential = { service: credService.trim(), account: credAccount.trim() || 'default' };
+      request.auth = { header: authHeader.trim() || 'authorization', prefix: authPrefix };
+    }
+    return request;
+  }
+
   function buildDefinition(): Record<string, unknown> {
     const trigger =
       triggerKind === 'schedule'
@@ -219,18 +299,26 @@
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
-    const headers: Record<string, string> = {};
-    for (const h of inputHeaders) if (h.name.trim()) headers[h.name.trim()] = h.value;
-    const request: Record<string, unknown> = { method: inputMethod, url: inputUrl, headers };
-    if (credService.trim()) {
-      // A pointer, never the value.
-      request.credential = { service: credService.trim(), account: credAccount.trim() || 'default' };
-      request.auth = { header: authHeader.trim() || 'authorization', prefix: authPrefix };
-    }
+    const request = inputRequest();
+    const skip_if = skipField.trim() ? { field: skipField.trim(), is: skipIs } : undefined;
     const input =
-      inputKind === 'http' ? { kind: 'http', request, select, require } : { kind: 'none', select, require };
+      inputKind === 'http'
+        ? { kind: 'http', request, select, require, skip_if }
+        : { kind: 'none', select, require, skip_if };
 
     const validate: Record<string, unknown> = {};
+    if (allowedField.trim()) {
+      validate.allowed_values =
+        allowedFrom === 'inline'
+          ? {
+              field: allowedField.trim(),
+              values: allowedValues
+                .split(',')
+                .map((v) => v.trim())
+                .filter(Boolean),
+            }
+          : { field: allowedField.trim(), source: { url: allowedUrl }, select: allowedSelect || undefined };
+    }
     if (maxItemsField) validate.max_items = { field: maxItemsField, limit: maxItemsLimit };
     if (confidenceField) validate.min_confidence = { field: confidenceField, threshold: confidenceThreshold };
 
@@ -243,29 +331,47 @@
       schema = schemaText;
     }
 
+    const outRequest: Record<string, unknown> = {
+      method: outputMethod,
+      url: outputUrl,
+      headers: headerMap(outputHeaders),
+      body: parsePairs(outputBody),
+      timeout_ms: outputTimeout,
+    };
+    if (outCredService.trim()) {
+      outRequest.credential = { service: outCredService.trim(), account: outCredAccount.trim() || 'default' };
+      outRequest.auth = { header: outAuthHeader.trim() || 'authorization', prefix: outAuthPrefix };
+    }
     const output =
       outputKind === 'http'
-        ? {
-            kind: 'http',
-            request: { method: outputMethod, url: outputUrl, body: parsePairs(outputBody) },
-          }
+        ? { kind: 'http', request: outRequest }
         : outputKind === 'pubsub'
-          ? { kind: 'pubsub', topic: outputTopic }
+          ? {
+              kind: 'pubsub',
+              topic: outputTopic,
+              message: parsePairs(outputMessage),
+              credential: pubCredService.trim()
+                ? { service: pubCredService.trim(), account: pubCredAccount.trim() || 'default' }
+                : undefined,
+            }
           : { kind: 'none' };
 
     return {
       key,
       description: description || undefined,
+      max_concurrent: maxConcurrent,
       trigger,
       input,
       agent: {
         provider: provider || undefined,
+        model: model.trim() || undefined,
         max_tokens: maxTokens,
         prompt: { system: systemPrompt, user_template: userTemplate },
         schema,
         validate,
       },
       output,
+      on_low_confidence: { action: lowAction, review_url: reviewUrl.trim() || undefined },
     };
   }
 
@@ -275,10 +381,18 @@
     try {
       // Before the definition, and to a different place: the file gets the reference, the
       // store gets the secret. Typing it again is only needed to change it.
-      if (hasBridge && credService.trim() && credValue) {
-        await window.corral!.secret.set(credService.trim(), credAccount.trim() || 'default', credValue);
-        credValue = '';
-        await refreshCredSaved();
+      if (hasBridge) {
+        const pending: Array<[string, string, string]> = [
+          [credService, credAccount, credValue],
+          [outCredService, outCredAccount, outCredValue],
+          [pubCredService, pubCredAccount, pubCredValue],
+        ];
+        for (const [service, account, value] of pending) {
+          if (!service.trim() || !value) continue;
+          await window.corral!.secret.set(service.trim(), account.trim() || 'default', value);
+        }
+        credValue = outCredValue = pubCredValue = '';
+        await Promise.all([refreshCredSaved(), refreshOutCredSaved(), refreshPubCredSaved()]);
       }
       const result = await api.savePipeline(buildDefinition());
       if (result.ok) {
@@ -324,6 +438,11 @@
           <small>{t('editor.keyHint')}</small>
         </label>
         <label class="field"><span>{t('editor.description')}</span><input bind:value={description} /></label>
+        <label class="field narrow">
+          <span>{t('editor.maxConcurrent')}</span>
+          <input type="number" bind:value={maxConcurrent} min="1" />
+          <small>{t('editor.maxConcurrentHint')}</small>
+        </label>
 
         <label class="field">
           <span>{t('editor.trigger')}</span>
@@ -418,6 +537,7 @@
             <label class="field"><span>method</span><select bind:value={inputMethod}><option>GET</option><option>POST</option></select></label>
             <label class="field wide"><span>URL</span><input bind:value={inputUrl} spellcheck="false" placeholder="https://api.example.com/records/&#123;&#123;id&#125;&#125;" /></label>
           </div>
+          <label class="field narrow"><span>{t('editor.timeout')}</span><input type="number" bind:value={inputTimeout} min="1" /></label>
 
           <div class="block">
             <p class="blockTitle">{t('editor.headers')}</p>
@@ -468,6 +588,23 @@
         </label>
         <label class="field"><span>{t('editor.require')}</span><input bind:value={requireText} spellcheck="false" placeholder="title" /></label>
 
+        <!-- Not optional politeness: a queue redelivers, and without this the same record
+             is processed twice — a second turn paid for, and a good answer overwritten. -->
+        <div class="row">
+          <label class="field"
+            ><span>{t('editor.skipIf')}</span>
+            <input bind:value={skipField} spellcheck="false" placeholder="data.labels" /></label
+          >
+          <label class="field narrow"
+            ><span>{t('editor.skipIs')}</span>
+            <select bind:value={skipIs}>
+              <option value="non_empty">{t('editor.skipIs.nonEmpty')}</option>
+              <option value="empty">{t('editor.skipIs.empty')}</option>
+            </select></label
+          >
+        </div>
+        <p class="hint">{t('editor.skipIfHint')}</p>
+
         {#if inputKind === 'http'}
           <!-- Paths are guesses until something proves them, and the only proof available
                today costs a model turn. This is the half that doesn't. -->
@@ -506,6 +643,13 @@
           </label>
           <label class="field"><span>max_tokens</span><input type="number" bind:value={maxTokens} /></label>
         </div>
+        <label class="field">
+          <span>{t('editor.model')}</span>
+          <input bind:value={model} spellcheck="false" placeholder={t('editor.modelPlaceholder')} list="ops-models" />
+          <datalist id="ops-models">
+            {#each provider ? (MODELS[provider as Provider] ?? []) : Object.values(MODELS).flat() as m}<option value={m}></option>{/each}
+          </datalist>
+        </label>
 
         <label class="field"><span>{t('editor.system')}</span><textarea bind:value={systemPrompt} rows="3"></textarea></label>
         <label class="field">
@@ -520,6 +664,35 @@
         <details>
           <summary>{t('editor.validate')}</summary>
           <p class="hint">{t('editor.validateHint')}</p>
+          <div class="block">
+            <p class="blockTitle">{t('editor.allowed')}</p>
+            <div class="row">
+              <label class="field"
+                ><span>{t('editor.allowedField')}</span>
+                <input bind:value={allowedField} spellcheck="false" placeholder="items" /></label
+              >
+            </div>
+            {#if allowedField.trim()}
+              <div class="tabs">
+                <button class="tab" class:on={allowedFrom === 'inline'} onclick={() => (allowedFrom = 'inline')}>{t('editor.allowed.inline')}</button>
+                <button class="tab" class:on={allowedFrom === 'source'} onclick={() => (allowedFrom = 'source')}>{t('editor.allowed.source')}</button>
+              </div>
+              {#if allowedFrom === 'inline'}
+                <label class="field"
+                  ><span>{t('editor.allowedValues')}</span>
+                  <input bind:value={allowedValues} spellcheck="false" placeholder="news, sport, culture" /></label
+                >
+              {:else}
+                <label class="field"><span>URL</span><input bind:value={allowedUrl} spellcheck="false" placeholder="https://api.example.com/vocabulary" /></label>
+                <label class="field"
+                  ><span>{t('editor.allowedSelect')}</span>
+                  <input bind:value={allowedSelect} spellcheck="false" placeholder="data.values" /></label
+                >
+                <p class="hint">{t('editor.allowedSourceHint')}</p>
+              {/if}
+            {/if}
+          </div>
+
           <div class="two">
             <label class="field"><span>{t('editor.maxItems')}</span><input bind:value={maxItemsField} spellcheck="false" placeholder="items" /></label>
             <label class="field"><span>limit</span><input type="number" bind:value={maxItemsLimit} /></label>
@@ -547,11 +720,96 @@
             <span>{t('editor.body')}</span>
             <textarea bind:value={outputBody} rows="3" spellcheck="false" placeholder={'labels: {{items}}'}></textarea>
           </label>
+          <label class="field narrow"><span>{t('editor.timeout')}</span><input type="number" bind:value={outputTimeout} min="1" /></label>
+
+          <!-- The same two controls as the fetch. This one writes, so if either side needs
+               authentication it is this one. -->
+          <div class="block">
+            <p class="blockTitle">{t('editor.headers')}</p>
+            {#each outputHeaders as header, i}
+              <div class="row">
+                <input class="hname" bind:value={header.name} spellcheck="false" placeholder="x-tenant" />
+                <input bind:value={header.value} spellcheck="false" placeholder="acme" />
+                <button class="minus" onclick={() => removeOutputHeader(i)} aria-label={t('editor.headerRemove')}>−</button>
+              </div>
+            {/each}
+            <button class="plus" onclick={addOutputHeader}>{t('editor.headerAdd')}</button>
+          </div>
+
+          <div class="block">
+            <p class="blockTitle">{t('editor.credential')}</p>
+            <p class="hint">{t('editor.credentialHint')}</p>
+            <div class="row">
+              <label class="field"
+                ><span>{t('editor.credService')}</span>
+                <input bind:value={outCredService} spellcheck="false" placeholder="backend" onblur={refreshOutCredSaved} /></label
+              >
+              <label class="field narrow"
+                ><span>{t('editor.credAccount')}</span>
+                <input bind:value={outCredAccount} spellcheck="false" placeholder="default" onblur={refreshOutCredSaved} /></label
+              >
+            </div>
+            {#if outCredService.trim()}
+              <label class="field">
+                <span>{t('editor.credValue')}{#if outCredSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
+                <input type="password" bind:value={outCredValue} spellcheck="false" placeholder={outCredSaved ? '••••••••' : ''} />
+              </label>
+              <div class="row">
+                <label class="field"><span>{t('editor.authHeader')}</span><input bind:value={outAuthHeader} spellcheck="false" /></label>
+                <label class="field"><span>{t('editor.authPrefix')}</span><input bind:value={outAuthPrefix} spellcheck="false" /></label>
+              </div>
+            {/if}
+          </div>
         {:else if outputKind === 'pubsub'}
           <label class="field"><span>topic</span><input bind:value={outputTopic} spellcheck="false" placeholder="projects/p/topics/results" /></label>
+          <label class="field">
+            <span>{t('editor.message')}</span>
+            <textarea bind:value={outputMessage} rows="3" spellcheck="false" placeholder={'labels: {{items}}'}></textarea>
+          </label>
+          <p class="hint">{t('editor.messageHint')}</p>
+          <div class="block">
+            <p class="blockTitle">{t('editor.credential')}</p>
+            <div class="row">
+              <label class="field"
+                ><span>{t('editor.credService')}</span>
+                <input bind:value={pubCredService} spellcheck="false" placeholder="gcp" onblur={refreshPubCredSaved} /></label
+              >
+              <label class="field narrow"
+                ><span>{t('editor.credAccount')}</span>
+                <input bind:value={pubCredAccount} spellcheck="false" placeholder="default" onblur={refreshPubCredSaved} /></label
+              >
+            </div>
+            {#if pubCredService.trim()}
+              <label class="field">
+                <span>{t('editor.credValue')}{#if pubCredSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
+                <textarea bind:value={pubCredValue} rows="2" spellcheck="false" placeholder={pubCredSaved ? '••••••••' : t('editor.credPubPlaceholder')}></textarea>
+              </label>
+            {/if}
+          </div>
         {:else}
           <p class="hint">{t('editor.output.noneHint')}</p>
         {/if}
+
+        <!-- D14. The hold-back already worked; nothing here ever set the link, so a held
+             run had nowhere to send a person. -->
+        <div class="block">
+          <p class="blockTitle">{t('editor.lowConfidence')}</p>
+          <p class="hint">{t('editor.lowConfidenceHint')}</p>
+          <label class="field">
+            <span>{t('editor.lowAction')}</span>
+            <select bind:value={lowAction}>
+              <option value="report">{t('editor.lowAction.report')}</option>
+              <option value="skip">{t('editor.lowAction.skip')}</option>
+              <option value="send">{t('editor.lowAction.send')}</option>
+            </select>
+          </label>
+          {#if lowAction === 'report'}
+            <label class="field"
+              ><span>{t('editor.reviewUrl')}</span>
+              <input bind:value={reviewUrl} spellcheck="false" placeholder="https://admin.example.com/records/&#123;&#123;id&#125;&#125;" /></label
+            >
+          {/if}
+        </div>
       {/if}
 
       {#each issuesFor(step) as issue}
