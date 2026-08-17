@@ -309,7 +309,7 @@ describe('concurrency', () => {
 
   it('refuses rather than queueing — the trigger decides what to do about it', async () => {
     const held = new Promise<void>((resolve) => setTimeout(resolve, 30));
-    const slow: OperationRunner = { run: async () => (await held, { answer: {} }) };
+    const slow: OperationRunner = { run: async () => (await held, { ok: true, answer: {} }) };
     const runner = new PipelineRunner(deps({ operation: slow }));
     const p = pipeline({ max_concurrent: 1 });
 

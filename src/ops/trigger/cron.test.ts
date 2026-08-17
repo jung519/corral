@@ -96,6 +96,37 @@ describe('an expression it cannot execute', () => {
   it('accepts the extra whitespace people actually type', () => {
     expect(matches('  0   9  *  *  * ', at(2026, 8, 15, 9, 0))).toBe(true);
   });
+
+  /**
+   * A leading hyphen used to be read as a range opening at nothing, and `Number('')` is 0,
+   * so `-5` came out as 0-5 and passed every check. The reported symptom: a mistyped
+   * every-five-minutes step fired six times an hour, on the hour, silently (CRL-48).
+   */
+  it('refuses a range with nothing on the left of the hyphen', () => {
+    expect(() => parseCron('-5 * * * *')).toThrow(/minute "-5" \(expected 0-59\)/);
+    expect(() => parseCron('--5 * * * *')).toThrow(/minute "--5"/);
+    expect(() => parseCron('* -3 * * *')).toThrow(/hour "-3"/);
+    expect(() => parseCron('1,-5 * * * *')).toThrow(/minute "-5"/);
+  });
+
+  it('refuses the shapes Number() would otherwise wave through', () => {
+    // Every one of these is an integer to `Number`, and none of them belongs in an
+    // expression someone has to be able to read back a month later.
+    expect(() => parseCron('0x1f * * * *')).toThrow(/minute "0x1f"/);
+    expect(() => parseCron('1e1 * * * *')).toThrow(/minute "1e1"/);
+    expect(() => parseCron('5.0 * * * *')).toThrow(/minute "5.0"/);
+    expect(() => parseCron('1-2-3 * * * *')).toThrow(/minute "1-2-3"/);
+    expect(() => parseCron('*/1/2 * * * *')).toThrow(/invalid step/);
+  });
+
+  it('still takes every form that was already valid', () => {
+    // The point of the check above is to reject typos, not to narrow the language.
+    expect([...parseCron('*/5 * * * *').minute]).toEqual([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]);
+    expect([...parseCron('5/15 * * * *').minute]).toEqual([5, 20, 35, 50]);
+    expect([...parseCron('1-5 * * * *').minute]).toEqual([1, 2, 3, 4, 5]);
+    expect([...parseCron('1,3,5 * * * *').minute]).toEqual([1, 3, 5]);
+    expect([...parseCron('0 * * * *').minute]).toEqual([0]);
+  });
 });
 
 describe("which clock's 9am", () => {

@@ -25,7 +25,7 @@ const pipeline = (over: Record<string, unknown>): Pipeline =>
     ...over,
   });
 
-const stubModel: OperationRunner = { run: async () => ({ answer: { a: 'ok' }, tokens: 1 }) };
+const stubModel: OperationRunner = { run: async () => ({ ok: true, answer: { a: 'ok' }, tokens: 1 }) };
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'corral-trigger-'));
@@ -111,6 +111,48 @@ describe('a schedule', () => {
     );
 
     await advance(5, clock);
+
+    expect(fired).toHaveLength(1);
+    stop();
+  });
+
+  /**
+   * The once-a-minute guard keys on the calendar minute, and that key lost its year when
+   * the clock became the trigger's rather than the machine's. `0 0 1 1 *` therefore produced
+   * the same key in every year alike, and nothing else fires in between to overwrite it — so
+   * a core that stayed up past a new year skipped its own anniversary (CRL-54).
+   */
+  it('fires a yearly schedule again the next year', async () => {
+    const fired: string[] = [];
+    // Jumped rather than ticked: a year of one-minute ticks is 525,600 of them.
+    const clock = { at: Date.UTC(2026, 0, 1, 0, 0) };
+    const stop = new ScheduleTrigger({ now: () => clock.at }).start(
+      pipeline({ trigger: { kind: 'schedule', cron: '0 0 1 1 *', timezone: 'UTC' } }),
+      async (event) => (fired.push((event as { scheduledAt: string }).scheduledAt), undefined),
+    );
+
+    for (const year of [2026, 2027, 2028]) {
+      clock.at = Date.UTC(year, 0, 1, 0, 0);
+      await vi.advanceTimersByTimeAsync(60_000);
+    }
+
+    expect(fired).toEqual(['2026-01-01T00:00:00.000Z', '2027-01-01T00:00:00.000Z', '2028-01-01T00:00:00.000Z']);
+    stop();
+  });
+
+  it('still fires once when two ticks land in the same minute', async () => {
+    // The guard the year was added to, unchanged: a second tick inside the same calendar
+    // minute is the case it exists for.
+    const fired: unknown[] = [];
+    const clock = { at: Date.UTC(2026, 0, 1, 0, 0, 0) };
+    const stop = new ScheduleTrigger({ now: () => clock.at }).start(
+      pipeline({ trigger: { kind: 'schedule', cron: '0 0 1 1 *', timezone: 'UTC' } }),
+      async (event) => (fired.push(event), undefined),
+    );
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    clock.at = Date.UTC(2026, 0, 1, 0, 0, 30); // same minute, half a minute later
+    await vi.advanceTimersByTimeAsync(60_000);
 
     expect(fired).toHaveLength(1);
     stop();

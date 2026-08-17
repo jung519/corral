@@ -129,10 +129,31 @@ export class JsonlOpsHistoryStore implements OpsHistoryStore {
     return totals;
   }
 
-  /** Days to look at, newest first, today included. */
+  /**
+   * Days to look at, newest first, today included.
+   *
+   * Counted in days rather than milliseconds. `dayKey` builds a *local* date — the
+   * operator's day, deliberately — and a local day is 23 or 25 hours long twice a year
+   * wherever daylight saving is observed. Subtracting a flat 86,400,000 across that
+   * boundary measured wrong in both directions, from a clock only an hour either side of
+   * local midnight:
+   *
+   * - spring forward, the day after: `[03-09, 03-07, 03-06, …]` — 03-08 gone from the list
+   *   altogether, and `prune` deleted its file from inside the retention window
+   * - fall back, late that evening: `[11-01, 11-01, 10-31, …]` — one day counted twice, so
+   *   runs and tokens came back at exactly double, and the far end of the window was one
+   *   day short, so `prune` deleted that file instead
+   *
+   * `setDate` knows how long its own day is, and rolls months and years on its own (CRL-55).
+   */
   private recentDays(days: number): string[] {
-    const today = this.now();
-    return Array.from({ length: Math.max(1, days) }, (_, i) => dayKey(today - i * 86_400_000));
+    const day = new Date(this.now());
+    const out: string[] = [];
+    for (let i = Math.max(1, days); i > 0; i--) {
+      out.push(dayKey(day.getTime()));
+      day.setDate(day.getDate() - 1);
+    }
+    return out;
   }
 
   async list(query: OpsHistoryQuery = {}): Promise<OpsRunRecord[]> {
