@@ -139,8 +139,16 @@ export const testFetch = (
   request: unknown,
   event: unknown,
   select: unknown,
-): Promise<{ ok: boolean; error?: string; body?: unknown; fields?: Record<string, unknown> }> =>
-  call('opsTestFetch', { request, event, select });
+): Promise<{
+  ok: boolean;
+  error?: string;
+  body?: unknown;
+  fields?: Record<string, unknown>;
+  /** Names whose path matched nothing — the answer to "why is that field not here?". */
+  missing?: string[];
+  /** `select` itself could not be read. The fetch still happened. */
+  selectError?: string;
+}> => call('opsTestFetch', { request, event, select });
 
 /** Delete a pipeline — its file and its trigger. Run history is kept. */
 export const deletePipeline = (key: string): Promise<{ ok: boolean; file?: string; error?: string }> =>

@@ -3,6 +3,8 @@
  * tried out while it's being written, and how a failed one gets reprocessed. So it has to
  * work with nothing configured but a definition file, and it has to leave a trace.
  */
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -165,5 +167,66 @@ describe('loading definitions', () => {
       trigger: 'manual',
       activeRuns: 0,
     });
+  });
+});
+
+/**
+ * The trial fetch exists to take the guesswork out of `select` — a path is a guess until
+ * something proves it, and proving it with a real run costs a model turn.
+ *
+ * It was only half doing that. A path that matched nothing put `undefined` in the result,
+ * `undefined` does not survive JSON on the way to the window, and the editor only drew the
+ * fields block when there was something in it — so a typo produced no block at all, and the
+ * response had to be compared against the paths by eye (CRL-53).
+ */
+describe('trying a fetch before saving', () => {
+  let api: Server;
+  let url = '';
+
+  beforeEach(async () => {
+    api = createServer((_req, res) => {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ data: { title: 'a record', note: '', tags: [] } }));
+    });
+    await new Promise<void>((r) => api.listen(0, '127.0.0.1', r));
+    url = `http://127.0.0.1:${(api.address() as AddressInfo).port}/r`;
+  });
+  afterEach(async () => {
+    await new Promise<void>((r) => api.close(() => r()));
+  });
+
+  const tryFetch = async (select: unknown) => (await startOpsHost({ stateDir: dir })).testFetch({ url }, {}, select);
+
+  it('names the paths that found nothing', async () => {
+    const result = await tryFetch({ title: 'data.title', missed: 'data.titel' });
+
+    expect(result).toMatchObject({ ok: true, fields: { title: 'a record' }, missing: ['missed'] });
+  });
+
+  it('does not call a blank value missing', async () => {
+    // An empty string and an empty list are answers. "The field is blank" and "the path is
+    // wrong" send someone looking in different places.
+    const result = await tryFetch({ note: 'data.note', tags: 'data.tags' });
+
+    expect(result.missing).toEqual([]);
+    expect(result.fields).toEqual({ note: '', tags: [] });
+  });
+
+  it('says the field list was unreadable instead of returning nothing', async () => {
+    // Unreachable from the editor today — it writes `name: path` lines and any non-empty
+    // string is a valid selector. It stops being unreachable the day the object form is
+    // offered, and the response is still worth showing either way.
+    const result = await tryFetch({ title: { path: '' } });
+
+    expect(result.ok).toBe(true);
+    expect(result.selectError).toMatch(/title\.path/);
+    expect(result.body).toMatchObject({ data: { title: 'a record' } });
+  });
+
+  it('still reports a request that never got a response', async () => {
+    const result = await (await startOpsHost({ stateDir: dir })).testFetch({ url: 'http://127.0.0.1:1/nope' }, {}, {});
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeTruthy();
   });
 });
