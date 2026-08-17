@@ -17,6 +17,7 @@ import { containerName, WORKER_USER } from '../workspace/docker-io.js';
 import { type CliStreamParser, runCliTurn, shq } from './cli-runner.js';
 import {
   activityEvents,
+  answerText,
   applyUsage,
   looksLikeAuth,
   looksLikeRateLimit,
@@ -27,6 +28,7 @@ import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from 
 
 /** Maps Claude Code's stream-json output to normalized events. */
 const claudeParser: CliStreamParser<StreamEvent> = {
+  answerText,
   parse: parseStreamLine,
   activity: activityEvents,
   usage: applyUsage,
@@ -116,6 +118,10 @@ function buildFlags(spec: AgentTurnSpec): string[] {
   if (spec.maxTurns) flags.push('--max-turns', String(spec.maxTurns));
   if (spec.maxBudgetUsd) flags.push('--max-budget-usd', String(spec.maxBudgetUsd));
   if (spec.allowedTools && spec.allowedTools.length > 0) flags.push('--allowedTools', spec.allowedTools.join(','));
+  // No tools at all — the only setting measured to stop both commands and file writes
+  // (CRL-43). Narrowing to `--tools Write` still let the agent write outside its working
+  // directory, so an operational turn gets nothing and answers in text instead.
+  if (spec.noTools) flags.push('--tools', '');
   // Unattended operation. claude refuses this as root, so docker uses the non-root
   // worker user and local relies on the host being a non-root user.
   flags.push('--dangerously-skip-permissions');

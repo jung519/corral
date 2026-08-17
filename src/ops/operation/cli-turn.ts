@@ -1,36 +1,41 @@
 /**
  * One turn through a provider's CLI, for cores that have no API key.
  *
- * The API runner asks a question and reads the answer off the wire. A CLI agent has no
- * wire — it is a process with a working directory. So the answer comes back the way the
- * development AI already passes things: **the agent writes a file and we read it.**
+ * **The turn runs with no tools.** That is the whole shape of this file, and it is not a
+ * precaution — it is what measurement left standing.
  *
- * That is the whole difference. Everything around it is deliberately the same:
+ * An operational prompt carries a queue message and an external API response: text nobody
+ * here controls. Handed to a coding agent with a shell, that is prompt injection with
+ * command execution behind it, and the only thing in the way was a sentence asking it not
+ * to. Corral says elsewhere, in its own words, that a prompt is a request and not a
+ * guarantee; relying on one here was the same mistake in a worse place.
  *
- *   - the same `OperationRunner` port, so the lifecycle in `run.ts` is untouched
- *   - the same `checkAnswer`, so a pipeline built on CLI is held to the shape its schema
- *     declares exactly as an API one is. Two shape checks would mean the rules depended
- *     on which transport happened to be configured
- *   - the same token accounting, from the `usage` events the CLI runner already emits,
- *     so a CLI run counts against the shared daily ceiling like any other (D12)
+ * Narrowing tools was tried first and is not enough. With `--tools Write` the agent could
+ * no longer run commands but could still write **outside** its working directory, in every
+ * variant tried — including with the permission check left on and with deny rules. A write
+ * that reaches `~/.claude` buys command execution back on the next run. So the setting is
+ * none, and the answer comes back as text rather than a file, because a turn with no tools
+ * has no way to write one.
  *
- * **No workflow guide is written.** `AgentTurnSpec.workflow` stays empty: that file is the
- * development AI's rules for editing a repository, and an operational run has none. It
- * also means `io.writeFile` is never called, which keeps the run directory to what it is —
- * a place for the answer to land.
+ * What that leaves is genuinely the same as the API path: ask once, read the reply, check
+ * it. Same `OperationRunner` port, same `checkAnswer`, same `usage` events feeding the
+ * shared ceiling (D12). No temp directory, nothing to clean up, nothing to confine.
+ *
+ * "Same" is the accurate word for the accounting rather than "correct": the shared parser
+ * undercounts a CLI turn badly, and that is its own issue (CRL-58) — a CLI run is wrong by
+ * exactly as much as a development run is.
+ *
+ * A provider whose CLI cannot be run without tools does not appear here at all — see
+ * `opsCliTransports`.
  */
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import type { AgentEvent, AgentProviderId, AgentTransport } from '../../agent/types.js';
+import type { WorkspaceHandle, WorkspaceIO } from '../../core/types.js';
 import { logger } from '../../core/logger.js';
 import type { Fields, OperationResult, OperationRunner } from '../pipeline/ports.js';
 import type { PipelineAgentStep } from '../pipeline/schema.js';
 import { checkAnswer, schemaInstruction } from './one-turn.js';
 import { fillTemplate } from '../pipeline/run.js';
-import { makeRunDir } from './run-dir.js';
-
-/** Where the agent is told to leave its answer. Relative to the run directory. */
-export const ANSWER_FILE = 'answer.json';
 
 export interface CliTurnOptions {
   /** CLI transports in preference order, each already bound to its provider. */
@@ -47,16 +52,15 @@ const DEFAULT_TIMEOUT_MS = 5 * 60_000;
 /**
  * The instruction that turns a coding agent into a one-shot answerer.
  *
- * A CLI agent is built to work in a repository, so it has to be told plainly that there
- * is nothing to explore and exactly one thing to produce.
+ * It has no tools, so "do not explore" is a description rather than a rule it could break.
+ * Saying it anyway keeps the agent from spending the turn explaining that it cannot look.
  */
-export function fileInstruction(schema: PipelineAgentStep['schema']): string {
+export function textInstruction(schema: PipelineAgentStep['schema']): string {
   return [
     schemaInstruction(schema),
     '',
-    `Write that JSON object to a file named ${ANSWER_FILE} in your working directory.`,
-    'Do not create any other file, do not read anything else, and do not run any command.',
-    'The file is the answer; nothing you print is read.',
+    'You have no tools in this turn: no shell, no file access, nothing to read.',
+    'Answer from the text above alone. The reply itself is the answer.',
   ].join('\n');
 }
 
@@ -78,20 +82,15 @@ export class CliTurnOperationRunner implements OperationRunner {
     const attempts: string[] = [];
     for (const [index, transport] of transports.entries()) {
       const model = step.model ?? this.options.modelFor?.(transport.provider);
-      const dir = await makeRunDir(`ops-${transport.provider}`);
-      try {
-        const outcome = await this.oneTurn(transport, step, fields, model, dir.path);
-        if ('error' in outcome) {
-          // A different provider may well answer where this one crashed or timed out —
-          // the same reason the API runner moves on rather than giving up.
-          attempts.push(`${transport.provider}: ${outcome.error}`);
-          logger.warn(`ops: ${transport.provider} cli turn failed (${outcome.error})`);
-          continue;
-        }
-        return { ...outcome.result, provider: transport.provider, model, failedOver: index > 0 };
-      } finally {
-        await dir.dispose();
+      const outcome = await this.oneTurn(transport, step, fields, model);
+      if ('error' in outcome) {
+        // A different provider may well answer where this one crashed or timed out — the
+        // same reason the API runner moves on rather than giving up.
+        attempts.push(`${transport.provider}: ${outcome.error}`);
+        logger.warn(`ops: ${transport.provider} cli turn failed (${outcome.error})`);
+        continue;
       }
+      return { ...outcome.result, provider: transport.provider, model, failedOver: index > 0 };
     }
 
     // Every attempt, not just the last: an operator has to be able to tell "one provider
@@ -99,24 +98,23 @@ export class CliTurnOperationRunner implements OperationRunner {
     throw new Error(`no provider produced a usable answer — ${attempts.join('; ')}`);
   }
 
-  /** Run the agent once and read what it left behind. */
+  /** Ask once and read the reply. */
   private async oneTurn(
     transport: AgentTransport,
     step: PipelineAgentStep,
     fields: Fields,
     model: string | undefined,
-    path: string,
   ): Promise<{ result: OperationResult } | { error: string }> {
-    const dir = { handle: { id: 'ops', workdir: path, backend: 'local' as const } };
     let inputTokens = 0;
     let outputTokens = 0;
     let costUsd = 0;
     let failure: string | undefined;
+    let text = '';
 
     const onEvent = (event: AgentEvent): void => {
       if (event.type === 'usage') {
         // Counted whatever the answer turns out to be worth. A turn that produced an
-        // unusable file still cost tokens, and a ceiling that only counted useful calls
+        // unusable reply still cost tokens, and a ceiling that only counted useful calls
         // would not be a ceiling.
         inputTokens = event.inputTokens;
         outputTokens = event.outputTokens;
@@ -129,13 +127,23 @@ export class CliTurnOperationRunner implements OperationRunner {
     try {
       await transport.run(
         {
-          handle: dir.handle,
-          // Never called: `workflow` is empty, and that is the only thing that writes.
+          // A CLI still spawns a process, and a process still has a working directory.
+          // Nothing is written there — the turn has no tools — but the directory is not
+          // inert: a coding CLI reads the project it finds itself in. Measured from the
+          // corral checkout it cost 12,032 input tokens against 7,278 from a bare temp
+          // directory, and those 4,750 are somebody else's instructions charged to a
+          // pipeline, thousands of times a day, against a ceiling shared with the
+          // development AI (D12).
+          handle: WORKDIR,
           io: NO_IO,
-          prompt: `${step.prompt.system}\n\n${fillTemplate(step.prompt.user_template, fields)}\n\n${fileInstruction(step.schema)}`,
+          prompt: `${step.prompt.system}\n\n${fillTemplate(step.prompt.user_template, fields)}\n\n${textInstruction(step.schema)}`,
+          // The development AI's rules for editing a repository. An operational run has
+          // no repository, and with no tools it could not read the file anyway.
           workflow: '',
           model,
           continueSession: false,
+          noTools: true,
+          onAnswerText: (t) => (text = t),
           turnTimeoutMs: this.timeoutMs,
         },
         onEvent,
@@ -144,12 +152,10 @@ export class CliTurnOperationRunner implements OperationRunner {
       return { error: err instanceof Error ? err.message : String(err) };
     }
     if (failure) return { error: failure };
+    if (!text.trim()) return { error: 'the agent produced no answer text' };
 
-    const text = await readFile(join(path, ANSWER_FILE), 'utf8').catch(() => null);
-    if (text === null) {
-      // The agent ran and wrote nothing. Naming the file is the only useful thing to say.
-      return { error: `the agent did not write ${ANSWER_FILE}` };
-    }
+    // The same check an API answer gets. Two shape checks would mean the rules depended on
+    // which transport happened to be configured.
     const checked = checkAnswer(step.schema, text);
     if (!checked.ok) return { error: checked.reason };
 
@@ -166,18 +172,21 @@ export class CliTurnOperationRunner implements OperationRunner {
 }
 
 /**
+ * Where the process runs.
+ *
+ * Deliberately not the core's own directory: `tmpdir()` holds no project for the CLI to
+ * read itself into. Nothing is created or cleaned up, because with no tools nothing is
+ * written — which is also why concurrent runs can share it.
+ */
+const WORKDIR: WorkspaceHandle = { id: 'ops', workdir: tmpdir(), backend: 'local' };
+
+/**
  * A `WorkspaceIO` that is never used.
  *
- * `AgentTurnSpec` requires one, and the only caller is the workflow-guide write that an
- * empty `workflow` skips. Handing over something that throws is how that stays true: if a
- * transport ever does reach for it, it says so instead of silently writing into a temp
- * folder nobody reads.
+ * `AgentTurnSpec` requires one, and the only thing that touches it is the workflow-guide
+ * write that an empty `workflow` skips. Handing over something that throws is how that
+ * stays true: a transport that does reach for it says so instead of quietly succeeding.
  */
-const NO_IO = {
-  readFile: () => Promise.reject(new Error('an operational run gives the agent no workspace')),
-  writeFile: () => Promise.reject(new Error('an operational run gives the agent no workspace')),
-  exists: () => Promise.reject(new Error('an operational run gives the agent no workspace')),
-  list: () => Promise.reject(new Error('an operational run gives the agent no workspace')),
-  getDiff: () => Promise.reject(new Error('an operational run gives the agent no workspace')),
-  exec: () => Promise.reject(new Error('an operational run gives the agent no workspace')),
-} as unknown as import('../../core/types.js').WorkspaceIO;
+const NO_IO = new Proxy({} as WorkspaceIO, {
+  get: () => () => Promise.reject(new Error('an operational run gives the agent no workspace')),
+});

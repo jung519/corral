@@ -42,6 +42,21 @@ export function activityEvents(event: StreamEvent): AgentEvent[] {
   return out;
 }
 
+/**
+ * The assistant's text, uncapped.
+ *
+ * `activityEvents` caps the same text for the live timeline. An answer that has to parse
+ * as JSON cannot be capped, so this is the same walk without `oneLine`.
+ */
+export function answerText(event: StreamEvent): string | null {
+  if (event.type !== 'assistant' || !event.message?.content) return null;
+  let out = '';
+  for (const block of event.message.content) {
+    if (block.type === 'text' && block.text) out += block.text;
+  }
+  return out || null;
+}
+
 export interface UsageAcc {
   costUsd: number;
   inputTokens: number;
