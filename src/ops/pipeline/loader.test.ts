@@ -304,6 +304,24 @@ output: { kind: none }
     );
   });
 
+  it('refuses a pubsub output that says nothing about what to publish', async () => {
+    // While this was optional the sink published the whole bag it was handed — the event,
+    // the fetched record and the answer together (CRL-51).
+    const err = await load(`
+key: nightly
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: pubsub, topic: "projects/p/topics/results" }
+`);
+
+    expect(err.issues).toContainEqual(
+      expect.objectContaining({ path: 'output.message', message: expect.stringContaining('needs a message') }),
+    );
+  });
+
   it('refuses a schedule nobody can execute, naming the field', async () => {
     // `-5` read as the range 0-5 and fired six times an hour on the hour, saying nothing
     // (CRL-48). Now that a box exists for typing an expression by hand, the mistake has to

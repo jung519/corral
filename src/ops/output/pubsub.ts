@@ -8,6 +8,11 @@
  *
  * Same REST client the trigger pulls with (`google-pubsub.ts`), so the emulator switch
  * and the auth path are the same on both sides.
+ *
+ * **Only what the template names is published.** The bag arriving here is the event, the
+ * fetched record and the answer, merged — everything a template might want to reach. It is
+ * not a payload, and it was published as one for as long as `message` was optional
+ * (CRL-51); the schema now refuses a pubsub output without one.
  */
 import type { CredentialStore } from '../../credentials/types.js';
 import { pubsubClient } from '../google-pubsub.js';
@@ -26,9 +31,7 @@ export class PubSubOutputSink implements OutputSink {
   async send(output: PipelineOutput, fields: Fields): Promise<void> {
     if (output.kind !== 'pubsub') throw new Error('PubSubOutputSink given a non-pubsub output');
 
-    // With no `message` template the whole result is the message — the shortest useful
-    // thing to publish, and what a consumer of a classification pipeline usually wants.
-    const body = Object.keys(output.message).length ? fillDeep(output.message, fields) : fields;
+    const body = fillDeep(output.message, fields);
 
     const client = await pubsubClient(output.credential, this.credentials, this.now);
     await client.publish(output.topic, [{ data: Buffer.from(JSON.stringify(body)).toString('base64') }]);
