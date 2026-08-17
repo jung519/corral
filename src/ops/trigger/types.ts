@@ -11,6 +11,7 @@
  * that, and a trigger that made those decisions itself would have to be trusted to make
  * them the same way every other trigger does.
  */
+import type { BudgetVerdict } from '../../core/token-budget.js';
 import type { Pipeline } from '../pipeline/schema.js';
 import type { RunRecord } from '../pipeline/run.js';
 
@@ -35,4 +36,17 @@ export interface TriggerAdapter {
 export interface TriggerContext {
   /** Injectable clock/timer, so schedules can be tested without waiting for a minute. */
   now?: () => number;
+  /**
+   * Whether the day's shared ceiling has anything left.
+   *
+   * Read-only, and `check` only: a trigger never records usage — that is the lifecycle's,
+   * which is the one place that knows what a turn actually cost.
+   *
+   * This does not make a trigger a decision-maker. "Should this run" is still the
+   * lifecycle's answer and every trigger gets the same one. What a trigger decides is
+   * narrower and its own: **whether to take work out of wherever it is waiting.** A queue
+   * that keeps handing over messages nothing can run turns a spent budget into lost work
+   * (CRL-49), and no amount of correctness downstream can undo that.
+   */
+  budget?: { check(): BudgetVerdict };
 }

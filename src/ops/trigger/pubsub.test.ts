@@ -18,6 +18,10 @@ const SUBSCRIPTION = 'projects/p/subscriptions/s';
 class FakePubSub {
   readonly acked: string[] = [];
   readonly nacked: string[] = [];
+  /** How many times the trigger asked for work. `0` is a claim worth making. */
+  pulls = 0;
+  /** Hold a pull that has messages, so a stop can land in the middle of one. */
+  pullDelayMs = 0;
   private queue: Array<{ ackId: string; data?: string; attributes?: Record<string, string> }> = [];
   private server!: Server;
   host = '';
@@ -30,15 +34,22 @@ class FakePubSub {
         const parsed = body ? (JSON.parse(body) as { ackIds?: string[]; maxMessages?: number }) : {};
         res.writeHead(200, { 'content-type': 'application/json' });
         if (req.url?.endsWith(':pull')) {
+          this.pulls++;
           const take = this.queue.splice(0, parsed.maxMessages ?? 1);
-          res.end(
-            JSON.stringify({
-              receivedMessages: take.map((m) => ({
-                ackId: m.ackId,
-                message: { data: m.data, attributes: m.attributes, messageId: m.ackId },
-              })),
-            }),
-          );
+          const reply = (): void => {
+            res.end(
+              JSON.stringify({
+                receivedMessages: take.map((m) => ({
+                  ackId: m.ackId,
+                  message: { data: m.data, attributes: m.attributes, messageId: m.ackId },
+                })),
+              }),
+            );
+          };
+          // A real pull is a long poll. Delaying only a pull that found something keeps the
+          // idle case fast while leaving a window a stop can land inside.
+          if (take.length && this.pullDelayMs) setTimeout(reply, this.pullDelayMs);
+          else reply();
         } else if (req.url?.endsWith(':acknowledge')) {
           this.acked.push(...(parsed.ackIds ?? []));
           res.end('{}');
@@ -271,6 +282,89 @@ describe('shutting down', () => {
     await new Promise((r) => setTimeout(r, 300));
 
     expect(queue.acked).not.toContain('later');
+  });
+
+  /**
+   * A pull is a long poll, so a stop can land while one is out. The loop used to go straight
+   * on and start the run anyway — measured at 265ms after `stop()` had returned, on a core
+   * whose next statement is `process.exit` (CRL-50). `stop()` returned in a millisecond
+   * because it waited on the previous batch's already-resolved promise.
+   */
+  it('starts nothing new when a stop lands mid-pull, and hands the message back', async () => {
+    queue.pullDelayMs = 300;
+    const runs: number[] = [];
+    const stop = new PubSubTrigger().start(pipeline(), async () => (runs.push(Date.now()), record('completed')));
+
+    await until(() => queue.pulls > 0); // a pull is out
+    queue.publish('m1', { id: 1 });
+    await until(() => queue.pulls > 1); // and now one is out with m1 in it
+    const stoppedAt = Date.now();
+    await stop();
+    const returnedAt = Date.now();
+    await new Promise((r) => setTimeout(r, 500)); // watch for anything late
+
+    expect(runs).toHaveLength(0);
+    // Waited for the pull rather than sailing past it.
+    expect(returnedAt - stoppedAt).toBeGreaterThan(50);
+    // Held and unsettled, it would sit until its deadline lapsed.
+    expect(queue.nacked).toEqual(['m1']);
+    expect(queue.acked).toEqual([]);
+  });
+});
+
+/**
+ * The ceiling is shared with the development AI and resets at midnight. A queue that keeps
+ * handing over messages nothing can run turns a spent ceiling into lost work: the loop has
+ * to settle whatever it took, and both ways of settling are worse than not having taken it
+ * (CRL-49). Left in the subscription, the work simply waits.
+ */
+describe('when the day\'s tokens are spent', () => {
+  const spent = { check: () => ({ ok: false, reason: 'daily input token limit reached' }) };
+
+  it('leaves the work in the queue instead of taking it out', async () => {
+    queue.publish('m1', { id: 1 });
+    const runs: unknown[] = [];
+
+    const stop = new PubSubTrigger({ budget: spent }).start(pipeline(), async () => (runs.push(1), record('completed')));
+    await new Promise((r) => setTimeout(r, 300));
+    await stop();
+
+    // Not pulled, so not run, and not settled either way — still in the subscription.
+    expect(queue.pulls).toBe(0);
+    expect(runs).toHaveLength(0);
+    expect(queue.acked).toEqual([]);
+    expect(queue.nacked).toEqual([]);
+  });
+
+  it('picks the work up once there is budget again', async () => {
+    let ok = false;
+    queue.publish('m1', { id: 1 });
+    const runs: unknown[] = [];
+
+    const stop = new PubSubTrigger({ budget: { check: () => ({ ok }) } }).start(
+      pipeline(),
+      async () => (runs.push(1), record('completed')),
+    );
+    await new Promise((r) => setTimeout(r, 200));
+    expect(queue.pulls).toBe(0); // still nothing taken
+
+    ok = true; // midnight
+    await until(() => runs.length > 0);
+    await stop();
+
+    expect(queue.acked).toEqual(['m1']);
+  });
+
+  it('does not make a shutdown sit out the wait', async () => {
+    // The recheck interval is half a minute. A stop that had to wait for it would look
+    // wedged to whoever pressed Ctrl-C.
+    const stop = new PubSubTrigger({ budget: spent }).start(pipeline(), async () => record('completed'));
+    await new Promise((r) => setTimeout(r, 100)); // let it settle into the wait
+
+    const at = Date.now();
+    await stop();
+
+    expect(Date.now() - at).toBeLessThan(1_000);
   });
 });
 
