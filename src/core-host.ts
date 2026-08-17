@@ -20,7 +20,8 @@ import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { TokenBudget } from './core/token-budget.js';
 import { logger } from './core/logger.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
-import { opsChatClients, opsModelFor, opsUsableAgents } from './ops/operation/clients.js';
+import { opsChatClients, opsCliTransports, opsModelFor, opsUsableAgents } from './ops/operation/clients.js';
+import { CliTurnOperationRunner } from './ops/operation/cli-turn.js';
 import { OneTurnOperationRunner } from './ops/operation/one-turn.js';
 import { startOpsHost } from './ops/ops-host.js';
 import { FileCredentialStore } from './credentials/file-store.js';
@@ -127,10 +128,16 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
       // The operational AI asks the same providers the development one does (D24). Only
       // `api` entries qualify; with none, its model step stays unwired and says so.
       const clients = await opsChatClients(config.agent, credentials);
+      const cliTransports = await opsCliTransports(config.agent, credentials);
       // The editor asks for this so it can offer only what can answer.
       ops.useAgents(opsUsableAgents(config.agent));
-      if (clients.length) ops.useOperation(new OneTurnOperationRunner({ clients, modelFor: opsModelFor(config.agent) }));
-      else logger.warn('ops: no api-transport provider configured — pipelines cannot run their model step');
+      // API first when both are configured: one HTTP call against a process spawn, for a
+      // step that runs thousands of times a day. The CLI is what makes a core with only a
+      // subscription login able to run pipelines at all.
+      const modelFor = opsModelFor(config.agent);
+      if (clients.length) ops.useOperation(new OneTurnOperationRunner({ clients, modelFor }));
+      else if (cliTransports.length) ops.useOperation(new CliTurnOperationRunner({ transports: cliTransports, modelFor }));
+      else logger.warn('ops: no provider configured — pipelines cannot run their model step');
       if (!channelStarted) {
         await channel.start();
         channelStarted = true;
