@@ -101,28 +101,55 @@ export function dayKey(ts: number): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-/** Sum a day's records. The single definition of what a total means — the stored file and
- *  a rebuild from the log both go through here, so they cannot disagree. */
-export function summarize(date: string, records: OpsRunRecord[]): OpsDailyTotals {
-  const totals: OpsDailyTotals = {
-    date,
-    runs: records.length,
-    byOutcome: {},
-    tokens: 0,
-    costUsd: 0,
-    failedOver: 0,
-    lowConfidence: 0,
-    failed: 0,
-  };
-  for (const r of records) {
-    totals.byOutcome[r.outcome] = (totals.byOutcome[r.outcome] ?? 0) + 1;
-    totals.tokens += r.tokens ?? 0;
-    totals.costUsd += r.costUsd ?? 0;
-    if (r.failedOver) totals.failedOver++;
-    if (r.lowConfidence) totals.lowConfidence++;
-    if (FAILURE_OUTCOMES.includes(r.outcome)) totals.failed++;
-  }
-  // Float addition drifts; money shown to a person shouldn't read 0.30000000000000004.
-  totals.costUsd = Math.round(totals.costUsd * 1e6) / 1e6;
+/** A day with nothing in it yet. */
+export function emptyTotals(date: string): OpsDailyTotals {
+  return { date, runs: 0, byOutcome: {}, tokens: 0, costUsd: 0, failedOver: 0, lowConfidence: 0, failed: 0 };
+}
+
+/**
+ * Fold one run into a running total, in place.
+ *
+ * The single definition of what a total means. A day rebuilt from its log and a day added
+ * to one run at a time go through here, so the two cannot drift apart — which matters
+ * because the stored file is written the second way and checked against the first.
+ *
+ * Deliberately no rounding. Rounding each step would make the incremental sum a different
+ * arithmetic from the rebuild, and the freshness check compares `runs` — it would never
+ * notice the money disagreeing. Rounding happens once, on the way out (`rounded`).
+ */
+export function addTo(totals: OpsDailyTotals, r: OpsRunRecord): OpsDailyTotals {
+  totals.runs++;
+  totals.byOutcome[r.outcome] = (totals.byOutcome[r.outcome] ?? 0) + 1;
+  totals.tokens += r.tokens ?? 0;
+  totals.costUsd += r.costUsd ?? 0;
+  if (r.failedOver) totals.failedOver++;
+  if (r.lowConfidence) totals.lowConfidence++;
+  if (FAILURE_OUTCOMES.includes(r.outcome)) totals.failed++;
   return totals;
+}
+
+/**
+ * A day's total as a caller should see it.
+ *
+ * Rounds the price — float addition drifts, and money shown to a person shouldn't read
+ * 0.30000000000000004. Rebuilt field by field rather than spread, so that whatever the
+ * store keeps alongside a total for its own bookkeeping stays there: a caller receiving
+ * the same shape whichever path produced it is worth one explicit list.
+ */
+export function rounded(totals: OpsDailyTotals): OpsDailyTotals {
+  return {
+    date: totals.date,
+    runs: totals.runs,
+    byOutcome: totals.byOutcome,
+    tokens: totals.tokens,
+    costUsd: Math.round(totals.costUsd * 1e6) / 1e6,
+    failedOver: totals.failedOver,
+    lowConfidence: totals.lowConfidence,
+    failed: totals.failed,
+  };
+}
+
+/** Sum a day's records — the rebuild path, when the stored total cannot be trusted. */
+export function summarize(date: string, records: OpsRunRecord[]): OpsDailyTotals {
+  return records.reduce(addTo, emptyTotals(date));
 }
