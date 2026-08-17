@@ -100,18 +100,11 @@
   let inputUrl = $state('');
   let inputMethod = $state<'GET' | 'POST'>('GET');
 
-  // ── how the fetch authenticates ───────────────────────────────────────────────────
-  // Two separate things on purpose. Headers are ordinary text and go in the file. The
-  // secret never does: the definition names a credential, and the value is written to
-  // the credential store — the same one the wizard uses, which routes to the OS keychain
-  // locally and to the core's own store when the core is on another machine.
+  // How the fetch authenticates: a header, like every other tool that calls an API. The
+  // file format also accepts a `credential` reference into the store the wizard uses, but
+  // that is for hand-written pipelines — offering both here would be two ways to do one
+  // thing, and the header is the one people reach for.
   let inputHeaders = $state<Array<{ name: string; value: string }>>([]);
-  let credService = $state('');
-  let credAccount = $state('default');
-  let credValue = $state('');
-  let credSaved = $state(false);
-  let authHeader = $state('authorization');
-  let authPrefix = $state('Bearer ');
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
@@ -156,12 +149,6 @@
     }
   }
 
-  async function refreshCredSaved(): Promise<void> {
-    credSaved = await secretExists(credService, credAccount);
-  }
-  async function refreshOutCredSaved(): Promise<void> {
-    outCredSaved = await secretExists(outCredService, outCredAccount);
-  }
   async function refreshPubCredSaved(): Promise<void> {
     pubCredSaved = await secretExists(pubCredService, pubCredAccount);
   }
@@ -205,12 +192,6 @@
   let outputBody = $state('');
   let outputTimeout = $state(15000);
   let outputHeaders = $state<Array<{ name: string; value: string }>>([]);
-  let outCredService = $state('');
-  let outCredAccount = $state('default');
-  let outCredValue = $state('');
-  let outCredSaved = $state(false);
-  let outAuthHeader = $state('authorization');
-  let outAuthPrefix = $state('Bearer ');
   let outputTopic = $state('');
   let outputMessage = $state('');
   let pubCredService = $state('');
@@ -278,11 +259,6 @@
       headers: headerMap(inputHeaders),
       timeout_ms: inputTimeout,
     };
-    if (credService.trim()) {
-      // A pointer, never the value.
-      request.credential = { service: credService.trim(), account: credAccount.trim() || 'default' };
-      request.auth = { header: authHeader.trim() || 'authorization', prefix: authPrefix };
-    }
     return request;
   }
 
@@ -338,10 +314,6 @@
       body: parsePairs(outputBody),
       timeout_ms: outputTimeout,
     };
-    if (outCredService.trim()) {
-      outRequest.credential = { service: outCredService.trim(), account: outCredAccount.trim() || 'default' };
-      outRequest.auth = { header: outAuthHeader.trim() || 'authorization', prefix: outAuthPrefix };
-    }
     const output =
       outputKind === 'http'
         ? { kind: 'http', request: outRequest }
@@ -381,18 +353,12 @@
     try {
       // Before the definition, and to a different place: the file gets the reference, the
       // store gets the secret. Typing it again is only needed to change it.
-      if (hasBridge) {
-        const pending: Array<[string, string, string]> = [
-          [credService, credAccount, credValue],
-          [outCredService, outCredAccount, outCredValue],
-          [pubCredService, pubCredAccount, pubCredValue],
-        ];
-        for (const [service, account, value] of pending) {
-          if (!service.trim() || !value) continue;
-          await window.corral!.secret.set(service.trim(), account.trim() || 'default', value);
-        }
-        credValue = outCredValue = pubCredValue = '';
-        await Promise.all([refreshCredSaved(), refreshOutCredSaved(), refreshPubCredSaved()]);
+      // Pub/Sub is the one that cannot be a header: it wants a service-account JSON key
+      // that gets signed into a JWT, so the value goes to the store.
+      if (hasBridge && pubCredService.trim() && pubCredValue) {
+        await window.corral!.secret.set(pubCredService.trim(), pubCredAccount.trim() || 'default', pubCredValue);
+        pubCredValue = '';
+        await refreshPubCredSaved();
       }
       const result = await api.savePipeline(buildDefinition());
       if (result.ok) {
@@ -552,31 +518,6 @@
             <p class="hint">{t('editor.headersHint')}</p>
           </div>
 
-          <div class="block">
-            <p class="blockTitle">{t('editor.credential')}</p>
-            <p class="hint">{t('editor.credentialHint')}</p>
-            <div class="row">
-              <label class="field"
-                ><span>{t('editor.credService')}</span>
-                <input bind:value={credService} spellcheck="false" placeholder="backend" onblur={refreshCredSaved} /></label
-              >
-              <label class="field narrow"
-                ><span>{t('editor.credAccount')}</span>
-                <input bind:value={credAccount} spellcheck="false" placeholder="default" onblur={refreshCredSaved} /></label
-              >
-            </div>
-            {#if credService.trim()}
-              <label class="field">
-                <span>{t('editor.credValue')}{#if credSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
-                <input type="password" bind:value={credValue} spellcheck="false" placeholder={credSaved ? '••••••••' : ''} />
-              </label>
-              <div class="row">
-                <label class="field"><span>{t('editor.authHeader')}</span><input bind:value={authHeader} spellcheck="false" /></label>
-                <label class="field"><span>{t('editor.authPrefix')}</span><input bind:value={authPrefix} spellcheck="false" /></label>
-              </div>
-              <p class="built">{authHeader.trim() || 'authorization'}: <code>{authPrefix}••••</code></p>
-            {/if}
-          </div>
         {:else}
           <p class="hint">{t('editor.input.noneHint')}</p>
         {/if}
@@ -722,8 +663,8 @@
           </label>
           <label class="field narrow"><span>{t('editor.timeout')}</span><input type="number" bind:value={outputTimeout} min="1" /></label>
 
-          <!-- The same two controls as the fetch. This one writes, so if either side needs
-               authentication it is this one. -->
+          <!-- Same as the fetch. This one writes, so if either side needs a key it is
+               this one. -->
           <div class="block">
             <p class="blockTitle">{t('editor.headers')}</p>
             {#each outputHeaders as header, i}
@@ -734,31 +675,7 @@
               </div>
             {/each}
             <button class="plus" onclick={addOutputHeader}>{t('editor.headerAdd')}</button>
-          </div>
-
-          <div class="block">
-            <p class="blockTitle">{t('editor.credential')}</p>
-            <p class="hint">{t('editor.credentialHint')}</p>
-            <div class="row">
-              <label class="field"
-                ><span>{t('editor.credService')}</span>
-                <input bind:value={outCredService} spellcheck="false" placeholder="backend" onblur={refreshOutCredSaved} /></label
-              >
-              <label class="field narrow"
-                ><span>{t('editor.credAccount')}</span>
-                <input bind:value={outCredAccount} spellcheck="false" placeholder="default" onblur={refreshOutCredSaved} /></label
-              >
-            </div>
-            {#if outCredService.trim()}
-              <label class="field">
-                <span>{t('editor.credValue')}{#if outCredSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
-                <input type="password" bind:value={outCredValue} spellcheck="false" placeholder={outCredSaved ? '••••••••' : ''} />
-              </label>
-              <div class="row">
-                <label class="field"><span>{t('editor.authHeader')}</span><input bind:value={outAuthHeader} spellcheck="false" /></label>
-                <label class="field"><span>{t('editor.authPrefix')}</span><input bind:value={outAuthPrefix} spellcheck="false" /></label>
-              </div>
-            {/if}
+            <p class="hint">{t('editor.headersHint')}</p>
           </div>
         {:else if outputKind === 'pubsub'}
           <label class="field"><span>topic</span><input bind:value={outputTopic} spellcheck="false" placeholder="projects/p/topics/results" /></label>
@@ -769,6 +686,7 @@
           <p class="hint">{t('editor.messageHint')}</p>
           <div class="block">
             <p class="blockTitle">{t('editor.credential')}</p>
+            <p class="hint">{t('editor.credentialHint')}</p>
             <div class="row">
               <label class="field"
                 ><span>{t('editor.credService')}</span>
