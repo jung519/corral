@@ -168,6 +168,25 @@ pnpm start corral.yaml
 Running it on a server long-term (systemd, Docker, provider login without a browser):
 **[docs/vm-deploy.md](docs/vm-deploy.md)**.
 
+#### Where secrets come from
+
+Nothing in a config file or a pipeline file is ever a secret — those name a credential,
+and the value is looked up at call time. The core reads two places, in order:
+
+| | | |
+|---|---|---|
+| 1 | **Environment** | `CORRAL_<SERVICE>_<ACCOUNT>`. Read-only, and it wins — which is how one machine overrides another without editing anything |
+| 2 | **`<state dir>/credentials.json`** | mode `0600`, written by the setup wizard. This is where the app saves what you type |
+
+Corral does not read a `.env` file itself. Putting those variables in the environment is
+your process manager's job — Compose's `env_file`, systemd's `EnvironmentFile`, or a
+`source` in your shell. That keeps one loader in the tool that already owns the process.
+
+The desktop app in local mode is the same picture from the other side: it encrypts secrets
+with the OS keychain and passes them to the core it spawns as `CORRAL_*` variables. Pointed
+at a remote core, it sends them over the control plane and that core writes its own
+`credentials.json`.
+
 ### Run the desktop app (dev)
 
 ```bash

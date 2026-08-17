@@ -2,11 +2,15 @@
  * The providers the operational AI can ask, built from the same agent settings the
  * development AI uses (D24 — one place to configure a provider, not two).
  *
- * Only `api` entries make it through. The `cli` transport spawns a coding agent that
- * reads files and runs commands; there is no way to ask it one question and get one JSON
- * object back. So a core configured for CLI only can run pipelines' triggers and inputs
- * but not their model step — and it should say that plainly rather than appear to work.
+ * Two ways to ask, from one set of settings.
+ *
+ * `opsChatClients` builds the API side — one HTTP call, which is what a step running
+ * thousands of times a day wants. `opsCliTransports` builds the other, for a core whose
+ * only login is a CLI's: there the answer comes back as a file the agent writes
+ * (`cli-turn.ts`). Neither knows about pipelines; both are just "who can be asked".
  */
+import { agentTransports } from '../../agent/index.js';
+import type { AgentTransport } from '../../agent/types.js';
 import { AnthropicChatClient } from '../../agent/claude-api.js';
 import { GeminiChatClient } from '../../agent/google-api.js';
 import { OpenAiChatClient } from '../../agent/openai-api.js';
@@ -58,6 +62,63 @@ export async function opsChatClients(agent: AgentConfig, credentials: Credential
   }
 
   return clients;
+}
+
+/**
+ * The CLI transports, in the same preference order.
+ *
+ * A CLI entry needs no key in the config — the binary carries its own login — so unlike
+ * the API side nothing is dropped for want of a credential. What it does need is a
+ * transport instance, and those come from the same registry the development AI uses.
+ *
+ * `io` is required by the registry's context but never reached: the operational runner
+ * passes an empty `workflow`, and writing that guide is the only thing that touches it.
+ */
+export async function opsCliTransports(agent: AgentConfig, credentials: CredentialStore): Promise<AgentTransport[]> {
+  const transports: AgentTransport[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of [agent, ...agent.fallbacks]) {
+    if (entry.transport !== 'cli') continue;
+    if (seen.has(entry.provider)) continue; // one login per provider, unlike API keys
+    seen.add(entry.provider);
+    const apiKey = entry.credential ? await credentials.get(entry.credential as CredentialRef).catch(() => null) : null;
+    const oauthToken = entry.oauth_credential
+      ? await credentials.get(entry.oauth_credential as CredentialRef).catch(() => null)
+      : null;
+    try {
+      transports.push(
+        agentTransports.create({ kind: `${entry.provider}:cli` }, { apiKey, oauthToken, io: undefined as never }),
+      );
+    } catch (err) {
+      logger.warn(`ops: no cli transport for ${entry.provider} — ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return transports;
+}
+
+/**
+ * The providers a pipeline may name, with the models configured for each.
+ *
+ * Same filter as the runners: an api entry with a key, or any cli entry. The point is to
+ * offer only what can answer — without this the editor would list every provider the
+ * schema allows and let someone pick one this core cannot ask.
+ */
+export function opsUsableAgents(agent: AgentConfig): Array<{ provider: string; models: string[]; defaultModel?: string }> {
+  const byProvider = new Map<string, { provider: string; models: string[]; defaultModel?: string }>();
+  for (const entry of [agent, ...agent.fallbacks]) {
+    // A CLI entry qualifies on its own — the binary carries its login. An API entry needs
+    // a key, because without one there is nothing to authenticate with.
+    if (entry.transport === 'api' ? !entry.credential : entry.transport !== 'cli') continue;
+    const found = byProvider.get(entry.provider) ?? { provider: entry.provider, models: [] };
+    for (const m of [entry.models.planning, entry.models.implementation, entry.models.review]) {
+      if (m && !found.models.includes(m)) found.models.push(m);
+    }
+    found.defaultModel ??= entry.models.implementation ?? entry.models.planning;
+    byProvider.set(entry.provider, found);
+  }
+  return [...byProvider.values()];
 }
 
 /** Default model per provider, taken from the same config. Pipelines may still name one. */

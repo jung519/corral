@@ -3,7 +3,7 @@
  * behaving the way every operator's muscle memory expects.
  */
 import { describe, expect, it } from 'vitest';
-import { cronMatches, parseCron } from './cron.js';
+import { calendarFieldsIn, cronMatches, isTimeZone, parseCron } from './cron.js';
 
 const at = (y: number, m: number, d: number, h: number, min: number): Date => new Date(y, m - 1, d, h, min);
 const matches = (expr: string, date: Date): boolean => cronMatches(parseCron(expr), date);
@@ -95,5 +95,55 @@ describe('an expression it cannot execute', () => {
 
   it('accepts the extra whitespace people actually type', () => {
     expect(matches('  0   9  *  *  * ', at(2026, 8, 15, 9, 0))).toBe(true);
+  });
+});
+
+describe("which clock's 9am", () => {
+  /** 2026-08-16T00:30:00Z — 09:30 in Seoul, 00:30 in London, 20:30 the day before in New York. */
+  const instant = new Date('2026-08-16T00:30:00Z');
+
+  it('reads the calendar on the zone it was given', () => {
+    expect(calendarFieldsIn(instant, 'Asia/Seoul')).toMatchObject({ hour: 9, minute: 30, dayOfMonth: 16, dayOfWeek: 0 });
+    expect(calendarFieldsIn(instant, 'UTC')).toMatchObject({ hour: 0, minute: 30, dayOfMonth: 16, dayOfWeek: 0 });
+    // A different day, not just a different hour — which is why day-of-week has to be read
+    // on the same clock rather than taken from the machine.
+    expect(calendarFieldsIn(instant, 'America/New_York')).toMatchObject({ hour: 20, dayOfMonth: 15, dayOfWeek: 6 });
+  });
+
+  it('fires "every day at 09:00" on the operator\'s clock, not the machine\'s', () => {
+    const daily = parseCron('0 9 * * *');
+    // The same instant: 09:00 in Seoul is not 09:00 anywhere else.
+    const nine = new Date('2026-08-16T00:00:00Z');
+    expect(cronMatches(daily, nine, 'Asia/Seoul')).toBe(true);
+    expect(cronMatches(daily, nine, 'UTC')).toBe(false);
+    expect(cronMatches(daily, new Date('2026-08-16T09:00:00Z'), 'UTC')).toBe(true);
+  });
+
+  it('handles midnight as 0 rather than 24', () => {
+    // `hour12: false` is allowed to render midnight as "24"; a schedule at `0 0 * * *`
+    // would then never fire.
+    expect(calendarFieldsIn(new Date('2026-08-15T15:00:00Z'), 'Asia/Seoul').hour).toBe(0);
+    expect(cronMatches(parseCron('0 0 * * *'), new Date('2026-08-15T15:00:00Z'), 'Asia/Seoul')).toBe(true);
+  });
+
+  it('follows the zone across its own daylight saving change', () => {
+    const daily = parseCron('0 9 * * *');
+    // New York is UTC-4 in August and UTC-5 in January. 09:00 local is a different instant
+    // in each, and neither is the one the machine's clock would have picked.
+    expect(cronMatches(daily, new Date('2026-08-16T13:00:00Z'), 'America/New_York')).toBe(true);
+    expect(cronMatches(daily, new Date('2026-01-16T14:00:00Z'), 'America/New_York')).toBe(true);
+    expect(cronMatches(daily, new Date('2026-01-16T13:00:00Z'), 'America/New_York')).toBe(false);
+  });
+
+  it('falls back to the machine when no zone is given', () => {
+    const local = at(2026, 8, 15, 13, 37);
+    expect(calendarFieldsIn(local)).toMatchObject({ hour: 13, minute: 37, dayOfMonth: 15 });
+  });
+
+  it('knows a real zone from a made-up one', () => {
+    expect(isTimeZone('Asia/Seoul')).toBe(true);
+    expect(isTimeZone('UTC')).toBe(true);
+    expect(isTimeZone('Seoul')).toBe(false);
+    expect(isTimeZone('GMT+9')).toBe(false);
   });
 });

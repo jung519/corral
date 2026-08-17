@@ -286,6 +286,38 @@ output: { kind: none }
     expect(err.issues).toContainEqual(expect.objectContaining({ path: 'agent.validate.allowed_values.field' }));
   });
 
+  it('refuses a time zone this machine does not know', async () => {
+    // A schedule that loads cleanly and then fires at the wrong hour forever is worse than
+    // one that refuses to load.
+    const err = await load(`
+key: nightly
+trigger: { kind: schedule, cron: "0 9 * * *", timezone: "Seoul" }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: none }
+`);
+
+    expect(err.issues).toContainEqual(
+      expect.objectContaining({ path: 'trigger.timezone', message: expect.stringContaining('not a time zone') }),
+    );
+  });
+
+  it('takes an IANA zone', async () => {
+    write('ok.yaml', `
+key: nightly
+trigger: { kind: schedule, cron: "0 9 * * *", timezone: "Asia/Seoul" }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: none }
+`);
+
+    await expect(loadPipelines(dir)).resolves.toHaveLength(1);
+  });
+
   it('leaves an undeclared type to the validator, which sees the real value', async () => {
     // `{ type: array }` with no `items` is the common case and perfectly legitimate.
     write('ok.yaml', withRule('{ items: { type: array } }', '\n    allowed_values: { field: items, values: [a] }'));

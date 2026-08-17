@@ -10,7 +10,7 @@
  */
 import { logger } from '../../core/logger.js';
 import type { Pipeline } from '../pipeline/schema.js';
-import { cronMatches, parseCron, type CronFields } from './cron.js';
+import { calendarFieldsIn, cronMatches, parseCron, type CronFields } from './cron.js';
 import type { FireFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
 
 const TICK_MS = 60_000;
@@ -22,7 +22,7 @@ export class ScheduleTrigger implements TriggerAdapter {
 
   start(pipeline: Pipeline, fire: FireFn): StopFn {
     if (pipeline.trigger.kind !== 'schedule') throw new Error('ScheduleTrigger given a non-schedule trigger');
-    const { cron } = pipeline.trigger;
+    const { cron, timezone } = pipeline.trigger;
 
     let fields: CronFields;
     try {
@@ -40,9 +40,12 @@ export class ScheduleTrigger implements TriggerAdapter {
 
     const tick = (): void => {
       const at = new Date(now());
-      if (!cronMatches(fields, at)) return;
+      if (!cronMatches(fields, at, timezone)) return;
 
-      const minute = `${at.toDateString()} ${at.getHours()}:${at.getMinutes()}`;
+      // Keyed on the same clock the match was made on, so the guard cannot disagree with
+      // the decision it is guarding.
+      const on = calendarFieldsIn(at, timezone);
+      const minute = `${on.month}-${on.dayOfMonth} ${on.hour}:${on.minute}`;
       if (minute === lastFired) return; // already fired for this minute
       lastFired = minute;
 
@@ -63,7 +66,7 @@ export class ScheduleTrigger implements TriggerAdapter {
     // Never hold the process open for a timer; a core with nothing else to do should be
     // able to exit.
     timer.unref?.();
-    logger.info(`ops: pipeline "${pipeline.key}" scheduled (${cron})`);
+    logger.info(`ops: pipeline "${pipeline.key}" scheduled (${cron}${timezone ? ` ${timezone}` : ''})`);
 
     return () => clearInterval(timer);
   }

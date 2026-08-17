@@ -75,21 +75,94 @@ export function parseCron(expression: string): CronFields {
   };
 }
 
+// ─────────────────────────────────────────────────────────── which clock's 9am
+//
+// "Every day at 09:00" is not a question a `Date` can answer on its own — 09:00 where?
+// Without a zone the answer is "wherever the core happens to run", which is the machine's
+// choice and not the operator's. A schedule set on a laptop and then moved to a VM would
+// quietly shift by however far the VM's clock is from home, usually to UTC.
+
+const WEEKDAYS: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+/** Built once per zone: a tick asks every minute, for every scheduled pipeline. */
+const formatters = new Map<string, Intl.DateTimeFormat>();
+
+function formatterFor(timeZone: string): Intl.DateTimeFormat {
+  let formatter = formatters.get(timeZone);
+  if (!formatter) {
+    formatter = new Intl.DateTimeFormat('en-US', {
+      timeZone,
+      // `h23` rather than `hour12: false`, which is allowed to render midnight as 24.
+      hourCycle: 'h23',
+      weekday: 'short',
+      month: 'numeric',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: 'numeric',
+    });
+    formatters.set(timeZone, formatter);
+  }
+  return formatter;
+}
+
+/** Whether the runtime knows this zone. Used to refuse a bad one at load. */
+export function isTimeZone(name: string): boolean {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: name });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export interface CalendarFields {
+  minute: number;
+  hour: number;
+  /** 1-12, like cron writes it. */
+  month: number;
+  dayOfMonth: number;
+  /** 0-6, Sunday first. */
+  dayOfWeek: number;
+}
+
+/** The calendar fields cron compares against, read on a particular clock. */
+export function calendarFieldsIn(date: Date, timeZone?: string): CalendarFields {
+  if (!timeZone) {
+    return {
+      minute: date.getMinutes(),
+      hour: date.getHours(),
+      month: date.getMonth() + 1,
+      dayOfMonth: date.getDate(),
+      dayOfWeek: date.getDay(),
+    };
+  }
+  const parts = formatterFor(timeZone).formatToParts(date);
+  const value = (type: Intl.DateTimeFormatPartTypes): string => parts.find((p) => p.type === type)?.value ?? '';
+  return {
+    minute: Number(value('minute')),
+    hour: Number(value('hour')),
+    month: Number(value('month')),
+    dayOfMonth: Number(value('day')),
+    dayOfWeek: WEEKDAYS[value('weekday')] ?? 0,
+  };
+}
+
 /**
- * Whether `date` falls on a minute the expression names.
+ * Whether `date` falls on a minute the expression names, on the given clock.
  *
  * Day-of-month and day-of-week are OR'd when both are restricted — the traditional cron
  * rule, and the one every operator's muscle memory expects.
  */
-export function cronMatches(fields: CronFields, date: Date): boolean {
-  if (!fields.minute.has(date.getMinutes())) return false;
-  if (!fields.hour.has(date.getHours())) return false;
-  if (!fields.month.has(date.getMonth() + 1)) return false;
+export function cronMatches(fields: CronFields, date: Date, timeZone?: string): boolean {
+  const at = calendarFieldsIn(date, timeZone);
+  if (!fields.minute.has(at.minute)) return false;
+  if (!fields.hour.has(at.hour)) return false;
+  if (!fields.month.has(at.month)) return false;
 
   const domRestricted = fields.dayOfMonth.size < 31;
   const dowRestricted = fields.dayOfWeek.size < 7;
-  const dom = fields.dayOfMonth.has(date.getDate());
-  const dow = fields.dayOfWeek.has(date.getDay());
+  const dom = fields.dayOfMonth.has(at.dayOfMonth);
+  const dow = fields.dayOfWeek.has(at.dayOfWeek);
 
   if (domRestricted && dowRestricted) return dom || dow;
   if (domRestricted) return dom;

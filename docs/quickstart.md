@@ -39,6 +39,11 @@ export CORRAL_GITHUB_DEFAULT=ghp_xxx           # GitHub token
 export CORRAL_ANTHROPIC_DEFAULT=sk-ant-xxx     # API key (omit if using a logged-in CLI)
 ```
 
+> Environment first, then `<state dir>/credentials.json` (mode 0600, written by the setup
+> wizard). The environment wins, so a server can override a laptop's saved value without
+> touching it. Corral does not read `.env` itself — Compose, systemd or your shell puts
+> those variables in the environment.
+
 (The variable name is `CORRAL_<SERVICE>_<ACCOUNT>`, uppercased.)
 
 ## 4. Run

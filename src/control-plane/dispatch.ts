@@ -151,6 +151,18 @@ export async function dispatch(
       deps.ops.syncSubscriptions();
       return { ok: true, enabled };
     }
+    case 'opsAgents':
+      if (!deps.ops) return NO_OPS;
+      // Empty means the model step is unwired — every provider is on `cli` or has no key.
+      return { agents: deps.ops.usableAgents() };
+    case 'opsTestFetch': {
+      if (!deps.ops) return NO_OPS;
+      // The same call the pipeline will make, through the same code — a trial that ran
+      // differently from the real thing would be worth less than not testing at all.
+      // Credentials resolve here rather than in the window, and no browser is involved
+      // so nothing is blocked by CORS.
+      return await deps.ops.testFetch(a.request, a.event, a.select);
+    }
     case 'opsDelete':
       if (!deps.ops) return NO_OPS;
       // The trigger is stopped before the file goes, and any run already going is left to

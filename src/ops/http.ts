@@ -41,9 +41,16 @@ export function fillDeep(value: unknown, fields: Fields): unknown {
   return value;
 }
 
-/** The same, for somewhere only text belongs — headers. */
+/**
+ * The same, for somewhere only text belongs — headers.
+ *
+ * Names are lower-cased. HTTP treats them case-insensitively but a plain object does not,
+ * so `Authorization` from the definition and `authorization` from the credential would
+ * both survive into the request and go out comma-joined — an auth header holding two
+ * values, which no server reads as either of them.
+ */
 function fillStrings(map: Record<string, string>, fields: Fields): Record<string, string> {
-  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k, fillTemplate(v, fields)]));
+  return Object.fromEntries(Object.entries(map).map(([k, v]) => [k.toLowerCase(), fillTemplate(v, fields)]));
 }
 
 /** Perform the request a definition describes, with `fields` filled in. */
@@ -58,7 +65,9 @@ export async function runHttpRequest<T = unknown>(
 
   if (request.credential && credentials) {
     const secret = await credentials.get(request.credential as CredentialRef);
-    if (secret) headers.authorization ??= `Bearer ${secret}`;
+    // `??=`, so a header written into the definition wins over the credential — both are
+    // lower-cased above, which is what makes that comparison mean anything.
+    if (secret) headers[request.auth.header.toLowerCase()] ??= `${request.auth.prefix}${secret}`;
   }
 
   const body = request.body ? (fillDeep(request.body, fields) as Record<string, unknown>) : undefined;

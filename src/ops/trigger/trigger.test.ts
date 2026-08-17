@@ -84,6 +84,38 @@ describe('a schedule', () => {
     stop();
   });
 
+  it("fires on the operator's clock, not the machine's", async () => {
+    // 2026-08-15T23:58Z. In Seoul that is already 08:58 on the 16th, so "every day at
+    // 09:00" is two minutes away — while the machine's own clock is nowhere near it.
+    const clock = { at: Date.UTC(2026, 7, 15, 23, 58) };
+    const fired: unknown[] = [];
+    const stop = new ScheduleTrigger({ now: () => clock.at }).start(
+      pipeline({ trigger: { kind: 'schedule', cron: '0 9 * * *', timezone: 'Asia/Seoul' } }),
+      async (event) => (fired.push(event), undefined),
+    );
+
+    await advance(5, clock); // 23:59Z, 00:00Z, 00:01Z …
+
+    expect(fired).toHaveLength(1);
+    expect(new Date((fired[0] as { scheduledAt: string }).scheduledAt).toISOString()).toBe('2026-08-16T00:00:00.000Z');
+    stop();
+  });
+
+  it('leaves a pipeline without a zone on the machine it runs on', async () => {
+    // The existing behaviour, unchanged: no zone means whatever clock the core has.
+    const clock = { at: new Date(2026, 7, 15, 8, 58, 0).getTime() };
+    const fired: unknown[] = [];
+    const stop = new ScheduleTrigger({ now: () => clock.at }).start(
+      pipeline({ trigger: { kind: 'schedule', cron: '0 9 * * *' } }),
+      async (event) => (fired.push(event), undefined),
+    );
+
+    await advance(5, clock);
+
+    expect(fired).toHaveLength(1);
+    stop();
+  });
+
   it('stops firing once stopped', async () => {
     const clock = { at: new Date(2026, 7, 15, 0, 0, 0).getTime() };
     const fired: unknown[] = [];

@@ -6,6 +6,8 @@
  * and the shared control plane, and `ops/` is not allowed to reach across (the boundary
  * test enforces exactly that). The shared layer is where the two are allowed to meet.
  */
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,11 +15,17 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebChannel } from '../channel/web.js';
 import { DirectionCheckStore, DirectionStore } from '../core/direction.js';
 import { TokenBudget } from '../core/token-budget.js';
+import { FileCredentialStore } from '../credentials/file-store.js';
 import { OpsHost, startOpsHost } from '../ops/ops-host.js';
 import type { OperationRunner } from '../ops/pipeline/ports.js';
 import { dispatch, type ControlPlaneDeps } from './dispatch.js';
 
 let dir: string;
+/** A stand-in for the user's own API, for the trial-fetch tests. */
+let server: Server;
+let base: string;
+let requests: Array<{ url: string; headers: Record<string, string | string[] | undefined> }>;
+let status = 200;
 
 const PIPELINE = `
 key: echo
@@ -42,10 +50,22 @@ function writePipeline(name: string, body: string): void {
   writeFileSync(join(dir, 'pipelines', name), body);
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'corral-ops-methods-'));
+  requests = [];
+  status = 200;
+  server = createServer((req, res) => {
+    requests.push({ url: req.url ?? '', headers: req.headers });
+    res.writeHead(status, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ data: { title: 'hello' } }));
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(async () => {
+  await new Promise<void>((r) => server.close(() => r()));
+  rmSync(dir, { recursive: true, force: true });
+});
 
 describe('over the control plane', () => {
   function deps(ops?: OpsHost): ControlPlaneDeps {
@@ -184,6 +204,86 @@ describe('over the control plane', () => {
     expect(((await dispatch('opsPipelines', {}, restarted)) as any).pipelines[0].description).toBe('edited by hand');
   });
 
+  describe('which providers the editor may offer', () => {
+    it('offers only what can actually answer', async () => {
+      const ops = await startOpsHost({ stateDir: dir });
+      // What core-host hands over: the result of the same filter opsChatClients uses.
+      ops.useAgents([{ provider: 'claude', models: ['opus', 'sonnet'], defaultModel: 'sonnet' }]);
+
+      expect((await dispatch('opsAgents', {}, deps(ops))) as any).toEqual({
+        agents: [{ provider: 'claude', models: ['opus', 'sonnet'], defaultModel: 'sonnet' }],
+      });
+    });
+
+    it('is empty before a config arrives, so the editor can say the step is unwired', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      expect((await dispatch('opsAgents', {}, d)) as any).toEqual({ agents: [] });
+    });
+  });
+
+  describe('trying a fetch before saving', () => {
+    it('returns the response and what the paths pulled out of it', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      const r = (await dispatch(
+        'opsTestFetch',
+        {
+          request: { method: 'GET', url: `${base}/api/records/{{id}}` },
+          event: { id: '7' },
+          select: { title: 'data.title' },
+        },
+        d,
+      )) as any;
+
+      // The URL was built from the sample event, so `{{id}}` can be checked before saving.
+      expect(requests[0].url).toBe('/api/records/7');
+      expect(r).toMatchObject({ ok: true, body: { data: { title: 'hello' } }, fields: { title: 'hello' } });
+    });
+
+    it('resolves the credential the same way a run would', async () => {
+      const credentials = new FileCredentialStore(join(dir, 'c.json'));
+      await credentials.set({ service: 'backend', account: 'default' }, 'super-secret');
+      const d = deps(await startOpsHost({ stateDir: dir, credentials }));
+
+      await dispatch(
+        'opsTestFetch',
+        {
+          request: {
+            url: `${base}/r`,
+            credential: { service: 'backend', account: 'default' },
+            auth: { header: 'X-API-Key', prefix: '' },
+          },
+          event: {},
+          select: {},
+        },
+        d,
+      );
+
+      // Which is the point: what you tried is what will run.
+      expect(requests[0].headers['x-api-key']).toBe('super-secret');
+    });
+
+    it('answers with the failure rather than throwing it', async () => {
+      status = 401;
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      const r = (await dispatch('opsTestFetch', { request: { url: `${base}/r` }, event: {}, select: {} }, d)) as any;
+
+      // "the server said 401" is the answer someone pressed this to get.
+      expect(r.ok).toBe(false);
+      expect(r.error).toMatch(/401/);
+    });
+
+    it('says which field is wrong when the request itself is not one', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      const r = (await dispatch('opsTestFetch', { request: { method: 'GET' }, event: {}, select: {} }, d)) as any;
+
+      expect(r).toMatchObject({ ok: false, error: expect.stringContaining('url') });
+    });
+  });
+
   describe('deleting one', () => {
     it('removes the file and the pipeline with it', async () => {
       writePipeline('echo.yaml', PIPELINE);
@@ -264,7 +364,7 @@ describe('over the control plane', () => {
   it('declines cleanly on a core with no operational AI', async () => {
     const d = deps(undefined);
 
-    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete']) {
+    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete', 'opsTestFetch', 'opsAgents']) {
       expect(await dispatch(method, {}, d)).toMatchObject({ ok: false });
     }
   });

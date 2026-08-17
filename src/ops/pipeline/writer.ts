@@ -17,12 +17,20 @@
  *   Writing `<key>.yaml` regardless would leave the original in place and the loader
  *   would then refuse them both as duplicates.
  */
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { chmod, readdir, readFile, writeFile } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import YAML from 'yaml';
 import { parsePipeline, type PipelineLoadIssue } from './loader.js';
 import type { Pipeline } from './schema.js';
+
+/**
+ * Owner-only. A pipeline names the credentials it uses and can carry a token in a URL, and
+ * it sits in the same state directory as `credentials.json` — which is already 0600. There
+ * is no reason for the file that references a secret to be more readable than the file
+ * holding it, and on a shared VM the difference is every other account on the box.
+ */
+const PRIVATE = 0o600;
 
 export interface SaveResult {
   ok: boolean;
@@ -73,8 +81,14 @@ export async function savePipeline(
   }
 
   const file = existing ?? `${pipeline.key}.yaml`;
+  const path = join(dir, file);
   mkdirSync(dir, { recursive: true });
-  await writeFile(join(dir, file), toYaml(pipeline), 'utf8');
+  await writeFile(path, toYaml(pipeline), { encoding: 'utf8', mode: PRIVATE });
+  // `mode` on writeFile only applies when the file is created, so a pipeline written
+  // before this existed would keep its old permissions forever. Set them either way.
+  await chmod(path, PRIVATE).catch(() => {
+    // Windows has no POSIX modes; the write already succeeded and that is what matters.
+  });
   return { ok: true, file };
 }
 
