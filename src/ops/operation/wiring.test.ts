@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSchema } from '../../config/schema.js';
 import { FileCredentialStore } from '../../credentials/file-store.js';
 import { OpsHost } from '../ops-host.js';
-import { opsChatClients, opsModelFor, opsUsableAgents } from './clients.js';
+import { opsChatClients, opsCliTransports, opsModelFor, opsUsableAgents } from './clients.js';
 import { OneTurnOperationRunner } from './one-turn.js';
 
 let dir: string;
@@ -240,26 +240,61 @@ describe('what the editor may offer', () => {
     ]);
   });
 
-  it('leaves out a cli provider, because a pipeline could never ask it', () => {
-    // The cli transport spawns a coding agent that reads files and runs commands; there
-    // is no way to ask it one question and get one JSON object back. Offering it would
-    // let someone build a pipeline whose model step can never run.
-    //
-    // The other half of the filter — a missing credential — has no test because the
-    // config schema already refuses `api` without one, so it cannot be constructed here.
-    // The check stays as a guard against a config that arrives some other way.
+  it('includes a cli provider — it answers by writing a file', () => {
+    // A CLI entry needs no key in the config; the binary carries its own login. It was
+    // left out until the operational AI had somewhere to run one (CRL-42).
     const agents = opsUsableAgents(
       agentConfig({
         transport: 'cli',
+        credential: undefined,
         fallbacks: [
           { provider: 'gemini', transport: 'api', credential: { service: 'google', account: 'default' }, models: { implementation: 'flash' } },
         ],
       }),
     );
 
-    expect(agents.map((a) => a.provider)).toEqual(['gemini']);
+    expect(agents.map((a) => a.provider)).toEqual(['claude', 'gemini']);
   });
 
+});
+
+describe('cli transports for a core with no key', () => {
+  it('builds one per provider from the same registry the development AI uses', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+
+    const transports = await opsCliTransports(
+      agentConfig({
+        transport: 'cli',
+        credential: undefined,
+        fallbacks: [{ provider: 'gemini', transport: 'cli', models: {} }],
+      }),
+      credentials,
+    );
+
+    expect(transports.map((t) => `${t.provider}:${t.transport}`)).toEqual(['claude:cli', 'gemini:cli']);
+  });
+
+  it('leaves api entries alone — those are the other runner\'s', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+    await credentials.set({ service: 'anthropic', account: 'default' }, 'k1');
+
+    expect(await opsCliTransports(agentConfig({}), credentials)).toEqual([]);
+  });
+
+  it('keeps one per provider — a CLI login is not per-account the way a key is', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+
+    const transports = await opsCliTransports(
+      agentConfig({
+        transport: 'cli',
+        credential: undefined,
+        fallbacks: [{ provider: 'claude', transport: 'cli', models: {} }],
+      }),
+      credentials,
+    );
+
+    expect(transports).toHaveLength(1);
+  });
 });
 
 describe('a core with no api provider', () => {
