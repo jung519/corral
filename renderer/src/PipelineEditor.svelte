@@ -96,6 +96,41 @@
   let inputKind = $state<'none' | 'http'>('none');
   let inputUrl = $state('');
   let inputMethod = $state<'GET' | 'POST'>('GET');
+
+  // ── how the fetch authenticates ───────────────────────────────────────────────────
+  // Two separate things on purpose. Headers are ordinary text and go in the file. The
+  // secret never does: the definition names a credential, and the value is written to
+  // the credential store — the same one the wizard uses, which routes to the OS keychain
+  // locally and to the core's own store when the core is on another machine.
+  let inputHeaders = $state<Array<{ name: string; value: string }>>([]);
+  let credService = $state('');
+  let credAccount = $state('default');
+  let credValue = $state('');
+  let credSaved = $state(false);
+  let authHeader = $state('authorization');
+  let authPrefix = $state('Bearer ');
+
+  const hasBridge = typeof window !== 'undefined' && !!window.corral;
+
+  function addHeader(): void {
+    inputHeaders = [...inputHeaders, { name: '', value: '' }];
+  }
+  function removeHeader(i: number): void {
+    inputHeaders = inputHeaders.filter((_, j) => j !== i);
+  }
+
+  /** Whether this ref already holds a secret, so an operator knows not to retype it. */
+  async function refreshCredSaved(): Promise<void> {
+    if (!hasBridge || !credService.trim()) {
+      credSaved = false;
+      return;
+    }
+    try {
+      credSaved = await window.corral!.secret.has(credService.trim(), credAccount.trim() || 'default');
+    } catch {
+      credSaved = false;
+    }
+  }
   let selectText = $state('');
   let requireText = $state('');
 
@@ -153,10 +188,16 @@
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean);
+    const headers: Record<string, string> = {};
+    for (const h of inputHeaders) if (h.name.trim()) headers[h.name.trim()] = h.value;
+    const request: Record<string, unknown> = { method: inputMethod, url: inputUrl, headers };
+    if (credService.trim()) {
+      // A pointer, never the value.
+      request.credential = { service: credService.trim(), account: credAccount.trim() || 'default' };
+      request.auth = { header: authHeader.trim() || 'authorization', prefix: authPrefix };
+    }
     const input =
-      inputKind === 'http'
-        ? { kind: 'http', request: { method: inputMethod, url: inputUrl }, select, require }
-        : { kind: 'none', select, require };
+      inputKind === 'http' ? { kind: 'http', request, select, require } : { kind: 'none', select, require };
 
     const validate: Record<string, unknown> = {};
     if (maxItemsField) validate.max_items = { field: maxItemsField, limit: maxItemsLimit };
@@ -201,6 +242,13 @@
     saving = true;
     issues = [];
     try {
+      // Before the definition, and to a different place: the file gets the reference, the
+      // store gets the secret. Typing it again is only needed to change it.
+      if (hasBridge && credService.trim() && credValue) {
+        await window.corral!.secret.set(credService.trim(), credAccount.trim() || 'default', credValue);
+        credValue = '';
+        await refreshCredSaved();
+      }
       const result = await api.savePipeline(buildDefinition());
       if (result.ok) {
         onsaved(key);
@@ -338,6 +386,45 @@
           <div class="two">
             <label class="field"><span>method</span><select bind:value={inputMethod}><option>GET</option><option>POST</option></select></label>
             <label class="field wide"><span>URL</span><input bind:value={inputUrl} spellcheck="false" placeholder="https://api.example.com/records/&#123;&#123;id&#125;&#125;" /></label>
+          </div>
+
+          <div class="block">
+            <p class="blockTitle">{t('editor.headers')}</p>
+            {#each inputHeaders as header, i}
+              <div class="row">
+                <input class="hname" bind:value={header.name} spellcheck="false" placeholder="x-tenant" />
+                <input bind:value={header.value} spellcheck="false" placeholder="acme" />
+                <button class="minus" onclick={() => removeHeader(i)} aria-label={t('editor.headerRemove')}>−</button>
+              </div>
+            {/each}
+            <button class="plus" onclick={addHeader}>{t('editor.headerAdd')}</button>
+            <p class="hint">{t('editor.headersHint')}</p>
+          </div>
+
+          <div class="block">
+            <p class="blockTitle">{t('editor.credential')}</p>
+            <p class="hint">{t('editor.credentialHint')}</p>
+            <div class="row">
+              <label class="field"
+                ><span>{t('editor.credService')}</span>
+                <input bind:value={credService} spellcheck="false" placeholder="backend" onblur={refreshCredSaved} /></label
+              >
+              <label class="field narrow"
+                ><span>{t('editor.credAccount')}</span>
+                <input bind:value={credAccount} spellcheck="false" placeholder="default" onblur={refreshCredSaved} /></label
+              >
+            </div>
+            {#if credService.trim()}
+              <label class="field">
+                <span>{t('editor.credValue')}{#if credSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
+                <input type="password" bind:value={credValue} spellcheck="false" placeholder={credSaved ? '••••••••' : ''} />
+              </label>
+              <div class="row">
+                <label class="field"><span>{t('editor.authHeader')}</span><input bind:value={authHeader} spellcheck="false" /></label>
+                <label class="field"><span>{t('editor.authPrefix')}</span><input bind:value={authPrefix} spellcheck="false" /></label>
+              </div>
+              <p class="built">{authHeader.trim() || 'authorization'}: <code>{authPrefix}••••</code></p>
+            {/if}
           </div>
         {:else}
           <p class="hint">{t('editor.input.noneHint')}</p>
@@ -543,6 +630,50 @@
   .sched .row .narrow {
     flex: 0 0 84px;
     min-width: 0;
+  }
+  /* A named group inside a step — headers, then the credential. Without the box they
+     read as more loose fields in a list of loose fields. */
+  .block {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 12px;
+    margin-bottom: 10px;
+  }
+  .blockTitle {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .block .row {
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin-bottom: 8px;
+  }
+  .block .row input {
+    flex: 1;
+    min-width: 0;
+  }
+  .block .row .field {
+    flex: 1;
+    margin-bottom: 0;
+  }
+  .block .row .narrow {
+    flex: 0 0 130px;
+  }
+  .hname {
+    flex: 0 0 180px !important;
+  }
+  .plus,
+  .minus {
+    padding: 5px 10px;
+    font-size: 12px;
+    flex-shrink: 0;
+  }
+  .saved {
+    margin-left: 6px;
+    color: var(--accent);
+    font-size: 11px;
   }
   .built {
     margin: 4px 0 12px;
