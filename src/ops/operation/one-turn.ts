@@ -21,8 +21,9 @@ import { priceFor } from '../../agent/pricing.js';
 import type { ChatClient, NeutralMessage } from '../../agent/api-loop.js';
 import type { AgentProviderId } from '../../agent/types.js';
 import { logger } from '../../core/logger.js';
-import type { OperationResult, OperationRunner, Fields } from '../pipeline/ports.js';
+import type { OperationOutcome, OperationRunner, Fields } from '../pipeline/ports.js';
 import { extractJsonObject } from './json-recovery.js';
+import { SpendTally } from './spend.js';
 import { fillTemplate } from '../pipeline/run.js';
 import type { PipelineAgentStep } from '../pipeline/schema.js';
 
@@ -102,7 +103,7 @@ export class OneTurnOperationRunner implements OperationRunner {
     if (!options.clients.length) throw new Error('OneTurnOperationRunner needs at least one provider');
   }
 
-  async run(step: PipelineAgentStep, fields: Fields): Promise<OperationResult> {
+  async run(step: PipelineAgentStep, fields: Fields): Promise<OperationOutcome> {
     const messages: NeutralMessage[] = [
       { role: 'system', content: `${step.prompt.system}\n\n${schemaInstruction(step.schema)}` },
       { role: 'user', content: fillTemplate(step.prompt.user_template, fields) },
@@ -118,10 +119,20 @@ export class OneTurnOperationRunner implements OperationRunner {
     }
 
     const attempts: string[] = [];
+    // Everything this turn spends, across providers. See `SpendTally` for why a turn is not
+    // one billable call.
+    const spent = new SpendTally();
     for (const [index, client] of clients.entries()) {
       const model = step.model ?? this.options.modelFor?.(client.provider);
       try {
         const turn = await client.send(messages, [], model);
+        // The reply is in hand, so it has been billed. Counted here, before anything looks
+        // at whether it is usable — a shape check must not be able to skip the meter.
+        spent.add({
+          inputTokens: turn.inputTokens,
+          outputTokens: turn.outputTokens,
+          costUsd: priceFor(client.provider, model, turn.inputTokens, turn.outputTokens),
+        });
         const checked = checkAnswer(step.schema, turn.text);
         if (!checked.ok) {
           // A different model may well obey the shape this one ignored, so an unusable
@@ -131,22 +142,22 @@ export class OneTurnOperationRunner implements OperationRunner {
           continue;
         }
         return {
+          ok: true,
           answer: checked.answer,
-          tokens: turn.inputTokens + turn.outputTokens,
-          inputTokens: turn.inputTokens,
-          outputTokens: turn.outputTokens,
-          costUsd: priceFor(client.provider, model, turn.inputTokens, turn.outputTokens),
+          ...spent.total(),
           provider: client.provider,
           model,
           failedOver: index > 0,
         };
       } catch (err) {
+        // No reply came back, so there is nothing to add: a refused or dropped request is
+        // the one case where a provider costs nothing.
         attempts.push(`${client.provider}: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
     // Every attempt, not just the last. When a pipeline stops overnight the operator has
     // to be able to see whether one provider was down or all of them refused the shape.
-    throw new Error(`no provider produced a usable answer — ${attempts.join('; ')}`);
+    return { ok: false, reason: `no provider produced a usable answer — ${attempts.join('; ')}`, ...spent.total() };
   }
 }

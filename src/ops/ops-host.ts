@@ -22,7 +22,7 @@ import { NoneOutputSink } from './output/none.js';
 import { PubSubOutputSink } from './output/pubsub.js';
 import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
 import { findPipelineFile, savePipeline, type SaveResult } from './pipeline/writer.js';
-import type { AnswerValidator, InputResolver, OperationRunner, OutputSink } from './pipeline/ports.js';
+import type { AnswerValidator, InputResolver, OperationOutcome, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
 import { FieldSelectorSchema, HttpRequestSchema } from './pipeline/schema.js';
@@ -37,10 +37,20 @@ const SelectSchema = z.record(z.string(), FieldSelectorSchema);
  * Stands in for the real one-turn runner until it lands. It fails loudly rather than
  * pretending: a run that reaches this ends as `agent_failed` with a reason saying so,
  * which is exactly what an operator should see for a step nothing is wired to yet.
+ *
+ * Reported rather than thrown, because it is a known failure and not a bug — and it spent
+ * nothing, which it now has to say out loud (CRL-44).
  */
 export class UnwiredOperationRunner implements OperationRunner {
-  async run(): Promise<never> {
-    throw new Error('the AI step is not wired up yet — a pipeline cannot run past its prompt');
+  async run(): Promise<OperationOutcome> {
+    return {
+      ok: false,
+      reason: 'the AI step is not wired up yet — a pipeline cannot run past its prompt',
+      tokens: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      costUsd: 0,
+    };
   }
 }
 

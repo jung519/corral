@@ -28,7 +28,7 @@ output: { kind: none }
 
 /** A model step that spends a known amount. */
 const spends = (inputTokens: number, outputTokens: number): OperationRunner => ({
-  run: async () => ({ answer: { answer: 'ok' }, inputTokens, outputTokens, tokens: inputTokens + outputTokens }),
+  run: async () => ({ ok: true, answer: { answer: 'ok' }, inputTokens, outputTokens, tokens: inputTokens + outputTokens }),
 });
 
 beforeEach(() => {
@@ -89,7 +89,7 @@ describe('what gets counted', () => {
       stateDir: dir,
       budget,
       // A well-formed reply that the schema check will throw out.
-      operation: { run: async () => ({ answer: {}, inputTokens: 300, outputTokens: 10 }) },
+      operation: { run: async () => ({ ok: true, answer: {}, inputTokens: 300, outputTokens: 10 }) },
     });
 
     await host.runManually('classify', {});

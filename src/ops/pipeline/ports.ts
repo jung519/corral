@@ -29,9 +29,15 @@ export interface InputResolver {
   resolve(input: PipelineInput, event: unknown): Promise<ResolvedInput>;
 }
 
-export interface OperationResult {
-  /** The structured answer, already shaped by the step's schema. */
-  answer: Record<string, unknown>;
+/**
+ * What a turn cost, however it ended.
+ *
+ * Its own type because failure has to carry it too (CRL-44). A provider that answered has
+ * already billed for the answer, whether or not the answer was usable — so the numbers
+ * below are the whole turn's, summed across every provider tried, not just the one that
+ * happened to work.
+ */
+export interface OperationSpend {
   /** Tokens spent — THE unit for the shared ceiling (D11/D12). */
   tokens?: number;
   inputTokens?: number;
@@ -39,6 +45,11 @@ export interface OperationResult {
   /** What it cost, if the runner worked it out (`agent/pricing.ts`). Informational only:
    *  vendors change prices, which is exactly why the ceiling counts tokens instead. */
   costUsd?: number;
+}
+
+export interface OperationResult extends OperationSpend {
+  /** The structured answer, already shaped by the step's schema. */
+  answer: Record<string, unknown>;
   /** Which provider actually answered — not necessarily the one the pipeline named, and
    *  the whole point of recording it. */
   provider?: string;
@@ -47,9 +58,23 @@ export interface OperationResult {
   failedOver?: boolean;
 }
 
+/**
+ * How a turn ended, and what it cost either way.
+ *
+ * A union rather than "throw on failure", because the ceiling has to count a failed turn
+ * (CRL-44). An exception carrying usage would leave the catch unable to tell "this spent
+ * nothing" from "whoever threw forgot to attach it" — and the second one reads as zero,
+ * which is exactly the bug. Here a runner cannot report a failure without saying what it
+ * spent, because the type has nowhere else to put it.
+ *
+ * Runners still throw for their own bugs. That path records zero, and zero is honest
+ * there: nobody knows what a crashed runner spent.
+ */
+export type OperationOutcome = ({ ok: true } & OperationResult) | ({ ok: false; reason: string } & OperationSpend);
+
 /** One structured-output turn (CRL-13). */
 export interface OperationRunner {
-  run(step: PipelineAgentStep, fields: Fields): Promise<OperationResult>;
+  run(step: PipelineAgentStep, fields: Fields): Promise<OperationOutcome>;
 }
 
 export type ValidationVerdict =

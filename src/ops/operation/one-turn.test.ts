@@ -166,7 +166,10 @@ describe('failing over', () => {
 
     // When a pipeline stops overnight, "one provider was down" and "all of them refused
     // the shape" call for completely different fixes.
-    await expect(runner.run(step(), {})).rejects.toThrow(/claude: HTTP 429.*gemini: the reply was not JSON/s);
+    const outcome = await runner.run(step(), {});
+
+    expect(outcome.ok).toBe(false);
+    expect(outcome.ok === false && outcome.reason).toMatch(/claude: HTTP 429.*gemini: the reply was not JSON/s);
   });
 
   it('uses only the provider a pipeline named', async () => {
@@ -176,13 +179,55 @@ describe('failing over', () => {
 
     // Naming a provider is a choice about which model does this work; silently answering
     // with a different one would make that setting a lie.
-    await expect(runner.run(step({ provider: 'claude' }), {})).rejects.toThrow(/claude: down/);
+    const outcome = await runner.run(step({ provider: 'claude' }), {});
+
+    expect(outcome.ok === false && outcome.reason).toMatch(/claude: down/);
   });
 
   it('says so when the named provider is not configured at all', async () => {
     const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD)] });
 
     await expect(runner.run(step({ provider: 'gemini' }), {})).rejects.toThrow(/"gemini" is not configured/);
+  });
+});
+
+/**
+ * A provider that answered has billed for the answer, and nothing about what happens to it
+ * afterwards changes that. Before CRL-44 a turn only reported the attempt that worked, so a
+ * pipeline the model never matched billed all day against a ceiling reading zero.
+ */
+describe('what the turn admits to spending', () => {
+  it('counts a failed turn — every provider refused the shape, all of it was billed', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', 'not json'), client('gemini', 'also not json')],
+    });
+
+    const outcome = await runner.run(step(), {});
+
+    expect(outcome.ok).toBe(false);
+    // Two replies came back at 1000 + 200 each. A ceiling that read 0 here would not be one.
+    expect(outcome).toMatchObject({ tokens: 2400, inputTokens: 2000, outputTokens: 400 });
+    expect(outcome.costUsd).toBeGreaterThan(0);
+  });
+
+  it('counts every attempt on a run that succeeded, not just the one that worked', async () => {
+    const runner = new OneTurnOperationRunner({
+      clients: [client('claude', 'not json'), client('gemini', GOOD)],
+    });
+
+    const outcome = await runner.run(step(), {});
+
+    // The run completed, and it cost two turns. Reporting only gemini's would undercount
+    // every failover — on successful runs, which is most of them.
+    expect(outcome).toMatchObject({ ok: true, provider: 'gemini', failedOver: true, tokens: 2400 });
+  });
+
+  it('counts nothing for a request that never came back', async () => {
+    // A refused or dropped request is the one case where a provider costs nothing — there
+    // is no reply to have been billed for.
+    const runner = new OneTurnOperationRunner({ clients: [client('claude', new Error('ECONNREFUSED'))] });
+
+    expect(await runner.run(step(), {})).toMatchObject({ ok: false, tokens: 0, inputTokens: 0, outputTokens: 0 });
   });
 
   it('refuses to exist with no providers', () => {

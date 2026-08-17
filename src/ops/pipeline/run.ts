@@ -18,7 +18,7 @@
 import { bus } from '../../core/events.js';
 import { ConcurrencyLimiter } from '../../core/concurrency-limiter.js';
 import type { BudgetVerdict, TokenUsage } from '../../core/token-budget.js';
-import type { AnswerValidator, Fields, InputResolver, OperationRunner, OutputSink } from './ports.js';
+import type { AnswerValidator, Fields, InputResolver, OperationOutcome, OperationRunner, OutputSink } from './ports.js';
 import type { Condition, Pipeline } from './schema.js';
 
 /** Where a run stopped. Everything except `completed` and `skipped` is a failure. */
@@ -260,28 +260,41 @@ export class PipelineRunner {
       }
 
       this.emit(head, 'agent', 'calling the model');
-      let operation;
+      let operation: OperationOutcome;
       try {
         operation = await this.deps.operation.run(pipeline.agent, fields);
       } catch (err) {
+        // The runner broke its own contract — a bug, not a failed turn. Nobody knows what
+        // it spent, and zero is the honest answer to a question nobody can answer. Every
+        // failure the runner *does* know about comes back as `ok: false` below, with its
+        // bill attached.
         return done('agent_failed', { stage: 'agent', reason: message(err) });
       }
       // Spent whatever the answer turns out to be worth — a rejected answer still cost
       // tokens, and a ceiling that only counted useful calls would not be a ceiling.
+      //
+      // Recorded *above* the success/failure branch on purpose (CRL-44). It used to sit
+      // below a `return` for the failure path, so a pipeline whose model never matched the
+      // schema billed all day against a ceiling reading zero — the spend control bypassed
+      // by the shape of the code rather than by any decision.
       this.deps.budget?.record({ inputTokens: operation.inputTokens ?? 0, outputTokens: operation.outputTokens ?? 0 });
 
-      // ── checking the answer ──────────────────────────────────────────────────
-      const verdict = await this.deps.validator.check(pipeline.agent, operation.answer);
-      // Everything the turn cost, carried to whichever ending this run reaches.
-      const spend = {
+      // What the turn cost, carried to whichever ending this run reaches — including the
+      // endings where there is no answer to show for it.
+      const cost = {
         tokens: operation.tokens,
         inputTokens: operation.inputTokens,
         outputTokens: operation.outputTokens,
         costUsd: operation.costUsd,
-        provider: operation.provider,
-        model: operation.model,
-        failedOver: operation.failedOver,
       };
+      if (!operation.ok) {
+        return done('agent_failed', { stage: 'agent', reason: operation.reason, ...cost });
+      }
+      // Which provider answered only exists once one did.
+      const spend = { ...cost, provider: operation.provider, model: operation.model, failedOver: operation.failedOver };
+
+      // ── checking the answer ──────────────────────────────────────────────────
+      const verdict = await this.deps.validator.check(pipeline.agent, operation.answer);
 
       let answer: Record<string, unknown>;
       let dropped: string[] | undefined;

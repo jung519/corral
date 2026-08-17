@@ -42,7 +42,7 @@ output: { kind: none }
 `;
 
 const stubModel: OperationRunner = {
-  run: async (_step, fields) => ({ answer: { answer: `saw ${String(fields.title)}` }, tokens: 42, provider: 'claude' }),
+  run: async (_step, fields) => ({ ok: true, answer: { answer: `saw ${String(fields.title)}` }, tokens: 42, provider: 'claude' }),
 };
 
 function writePipeline(name: string, body: string): void {
@@ -337,7 +337,7 @@ describe('over the control plane', () => {
       const slow: OperationRunner = {
         run: async () => {
           await held;
-          return { answer: { answer: 'finished anyway' }, tokens: 1 };
+          return { ok: true, answer: { answer: 'finished anyway' }, tokens: 1 };
         },
       };
       const ops = await startOpsHost({ stateDir: dir, operation: slow });

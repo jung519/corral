@@ -148,31 +148,88 @@ describe('when the agent does not deliver', () => {
   it('says the reply was empty rather than "it failed"', async () => {
     const runner = new CliTurnOperationRunner({ transports: [replies('claude', null)] });
 
-    await expect(runner.run(step(), {})).rejects.toThrow(/no answer text/);
+    const outcome = await runner.run(step(), {});
+
+    expect(outcome.ok === false && outcome.reason).toMatch(/no answer text/);
   });
 
   it('holds a CLI answer to the same shape an API answer is held to', async () => {
     // Two shape checks would mean the rules depended on which transport was configured.
     const runner = new CliTurnOperationRunner({ transports: [replies('claude', '{"items":["news"]}')] });
 
-    await expect(runner.run(step(), {})).rejects.toThrow(/missing required field\(s\): confidence/);
+    const outcome = await runner.run(step(), {});
+
+    expect(outcome.ok === false && outcome.reason).toMatch(/missing required field\(s\): confidence/);
   });
 
   it('moves to the next provider when one crashes, and reports both', async () => {
     const runner = new CliTurnOperationRunner({ transports: [fails('claude', 'crashed'), replies('gemini', GOOD)] });
 
-    expect(await runner.run(step(), {})).toMatchObject({ provider: 'gemini', failedOver: true });
+    expect(await runner.run(step(), {})).toMatchObject({ ok: true, provider: 'gemini', failedOver: true });
   });
 
   it('lists every attempt when none of them worked', async () => {
     const runner = new CliTurnOperationRunner({ transports: [fails('claude', 'timeout'), fails('gemini', 'crashed')] });
 
-    await expect(runner.run(step(), {})).rejects.toThrow(/claude: timeout.*gemini: crashed/s);
+    const outcome = await runner.run(step(), {});
+
+    expect(outcome.ok === false && outcome.reason).toMatch(/claude: timeout.*gemini: crashed/s);
   });
 
   it('refuses a provider this core has no cli for, by name', async () => {
     const runner = new CliTurnOperationRunner({ transports: [replies('claude', GOOD)] });
 
     await expect(runner.run(step({ provider: 'gemini' }), {})).rejects.toThrow(/"gemini" is not configured for the cli/);
+  });
+});
+
+/**
+ * The `usage` event arrives before anyone knows whether the reply is usable, so every way
+ * out of a turn has something to report. Four of the five ways out are failures, and each
+ * of them used to drop it (CRL-45).
+ */
+describe('what the turn admits to spending', () => {
+  /** An agent that burns tokens and then dies — the shape a wedged or killed CLI has. */
+  function burnsThenFails(provider: 'claude' | 'gemini'): AgentTransport {
+    return {
+      provider,
+      transport: 'cli',
+      preflight: async () => ({ ok: true }),
+      run: async (_spec, onEvent) => {
+        onEvent({ type: 'usage', inputTokens: 800, outputTokens: 40, costUsd: 0.004 });
+        onEvent({ type: 'error', error: 'timeout', message: 'the process gave up' });
+      },
+    };
+  }
+
+  it('counts an off-schema reply — the model was paid for it', async () => {
+    const runner = new CliTurnOperationRunner({ transports: [replies('claude', '{"items":["news"]}')] });
+
+    expect(await runner.run(step(), {})).toMatchObject({ ok: false, tokens: 840, inputTokens: 800, outputTokens: 40 });
+  });
+
+  it('counts a reply that was empty', async () => {
+    const runner = new CliTurnOperationRunner({ transports: [replies('claude', null)] });
+
+    expect(await runner.run(step(), {})).toMatchObject({ ok: false, tokens: 840 });
+  });
+
+  it('counts what a turn burned before it died', async () => {
+    const runner = new CliTurnOperationRunner({ transports: [burnsThenFails('claude')] });
+
+    expect(await runner.run(step(), {})).toMatchObject({ ok: false, tokens: 840, costUsd: 0.004 });
+  });
+
+  it('sums every attempt when none of them worked', async () => {
+    const runner = new CliTurnOperationRunner({ transports: [burnsThenFails('claude'), burnsThenFails('gemini')] });
+
+    expect(await runner.run(step(), {})).toMatchObject({ ok: false, tokens: 1680, inputTokens: 1600, outputTokens: 80 });
+  });
+
+  it('sums every attempt on a run that succeeded', async () => {
+    const runner = new CliTurnOperationRunner({ transports: [burnsThenFails('claude'), replies('gemini', GOOD)] });
+
+    // The run completed on gemini, and it cost two turns.
+    expect(await runner.run(step(), {})).toMatchObject({ ok: true, provider: 'gemini', failedOver: true, tokens: 1680 });
   });
 });
