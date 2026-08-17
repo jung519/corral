@@ -304,6 +304,53 @@ output: { kind: none }
     );
   });
 
+  describe('a Pub/Sub pipeline that could never receive anything', () => {
+    const EMULATOR = process.env.PUBSUB_EMULATOR_HOST;
+    afterEach(() => {
+      if (EMULATOR === undefined) delete process.env.PUBSUB_EMULATOR_HOST;
+      else process.env.PUBSUB_EMULATOR_HOST = EMULATOR;
+    });
+
+    const queuePipeline = `
+key: nightly
+trigger: { kind: pubsub, topic: "records", subscription: "projects/p/subscriptions/s" }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: none }
+`;
+
+    it('is refused, and says what is missing', async () => {
+      // It used to load, appear in `running()`, and light the dashboard — while the loop
+      // had already stopped on `talking to Pub/Sub needs a credential` (CRL-46).
+      delete process.env.PUBSUB_EMULATOR_HOST;
+
+      const err = await load(queuePipeline);
+
+      expect(err.issues).toContainEqual(
+        expect.objectContaining({ path: 'trigger.credential', message: expect.stringContaining('needs a credential') }),
+      );
+    });
+
+    it('names the emulator as the other way out', async () => {
+      delete process.env.PUBSUB_EMULATOR_HOST;
+
+      const err = await load(queuePipeline);
+
+      // Two ways to proceed, and the message has to carry both — the second one is how
+      // anybody tries corral out for the first time.
+      expect(err.issues[0]?.message).toContain('PUBSUB_EMULATOR_HOST');
+    });
+
+    it('loads with no credential at all when the emulator is set', async () => {
+      process.env.PUBSUB_EMULATOR_HOST = '127.0.0.1:8085';
+      write('ok.yaml', queuePipeline);
+
+      await expect(loadPipelines(dir)).resolves.toHaveLength(1);
+    });
+  });
+
   it('refuses a pubsub output that says nothing about what to publish', async () => {
     // While this was optional the sink published the whole bag it was handed — the event,
     // the fetched record and the answer together (CRL-51).

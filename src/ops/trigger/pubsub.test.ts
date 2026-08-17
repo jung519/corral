@@ -370,10 +370,14 @@ describe('when the day\'s tokens are spent', () => {
 
 describe('without an emulator', () => {
   it('refuses to start with no credential rather than failing per message', async () => {
+    // Built while the emulator variable is still set — the schema refuses a definition like
+    // this now (CRL-46), and what is under test here is the runtime guard behind it: a
+    // credential that cannot be resolved when the loop actually starts.
+    const p = pipeline();
     delete process.env.PUBSUB_EMULATOR_HOST;
     let fired = 0;
 
-    const stop = new PubSubTrigger().start(pipeline(), async () => (fired++, record('completed')));
+    const stop = new PubSubTrigger().start(p, async () => (fired++, record('completed')));
     await new Promise((r) => setTimeout(r, 200));
     await stop();
 

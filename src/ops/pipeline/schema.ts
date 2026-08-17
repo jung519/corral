@@ -83,11 +83,34 @@ export const ScheduleTriggerSchema = z.object({
     .optional(),
 });
 
+/**
+ * What talking to Pub/Sub needs, and why it is a refinement rather than a required field.
+ *
+ * `pubsubClient` looks at `PUBSUB_EMULATOR_HOST` *before* it looks at the credential: with
+ * the emulator there is no auth at all. So a credential is required by the environment, not
+ * by the format — making the field itself mandatory would force someone trying corral out
+ * against the emulator to invent one, and that is the first thing anybody does.
+ *
+ * Left optional and unchecked, though, a pipeline saved cleanly, loaded cleanly, showed a
+ * lit dot on the dashboard and received nothing, forever — the loop logged one line and
+ * returned (CRL-46). The check sits on the field rather than the object because a
+ * discriminated union cannot hold a refined member, and the field is where the editor wants
+ * the message anyway.
+ */
+const PubSubCredentialSchema = CredentialRefSchema.optional().superRefine((credential, ctx) => {
+  if (credential || process.env.PUBSUB_EMULATOR_HOST) return;
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    message:
+      'talking to Pub/Sub needs a credential (a service-account JSON key) — or set PUBSUB_EMULATOR_HOST to use the emulator',
+  });
+});
+
 export const PubSubTriggerSchema = z.object({
   kind: z.literal('pubsub'),
   topic: z.string().min(1),
   subscription: z.string().min(1),
-  credential: CredentialRefSchema.optional(),
+  credential: PubSubCredentialSchema,
 });
 
 export const TriggerSchema = z.discriminatedUnion('kind', [
@@ -279,7 +302,7 @@ const MESSAGE_REQUIRED = 'a pubsub output needs a message — name the fields to
 export const PubSubOutputSchema = z.object({
   kind: z.literal('pubsub'),
   topic: z.string().min(1),
-  credential: CredentialRefSchema.optional(),
+  credential: PubSubCredentialSchema,
   /**
    * What to publish, `{{field}}` placeholders and all. Required, with no default.
    *

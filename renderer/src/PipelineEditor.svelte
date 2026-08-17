@@ -295,7 +295,17 @@
       triggerKind === 'schedule'
         ? { kind: 'schedule', cron: cronToSave, timezone }
         : triggerKind === 'pubsub'
-          ? { kind: 'pubsub', topic, subscription }
+          ? {
+              kind: 'pubsub',
+              topic,
+              subscription,
+              // The same reference the output writes. Leaving it off is how a pipeline came
+              // out subscribed to nothing: it saved, it loaded, the dashboard lit up, and
+              // the loop stopped on its first line (CRL-46).
+              credential: pubCredService.trim()
+                ? { service: pubCredService.trim(), account: pubCredAccount.trim() || 'default' }
+                : undefined,
+            }
           : { kind: 'manual' };
 
     const select = parsePairs(selectText);
@@ -402,6 +412,38 @@
     }
   }
 </script>
+
+<!--
+  The Google credential, in the one shape it takes.
+
+  Written once and used from both the trigger step and the output step, bound to the same
+  state either way. A pipeline that subscribes and publishes does both with one service
+  account, so asking twice would be asking the same question twice — and two copies of this
+  markup would be one place to fix a problem and one place to forget (CRL-46).
+-->
+{#snippet pubsubCredential()}
+  <div class="block">
+    <p class="blockTitle">{t('editor.credential')}</p>
+    <p class="hint">{t('editor.credentialHint')}</p>
+    <div class="row">
+      <label class="field"
+        ><span>{t('editor.credService')}</span>
+        <input bind:value={pubCredService} spellcheck="false" placeholder="gcp" onblur={refreshPubCredSaved} /></label
+      >
+      <label class="field narrow"
+        ><span>{t('editor.credAccount')}</span>
+        <input bind:value={pubCredAccount} spellcheck="false" placeholder="default" onblur={refreshPubCredSaved} /></label
+      >
+    </div>
+    {#if pubCredService.trim()}
+      <label class="field">
+        <span>{t('editor.credValue')}{#if pubCredSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
+        <textarea bind:value={pubCredValue} rows="2" spellcheck="false" placeholder={pubCredSaved ? '••••••••' : t('editor.credPubPlaceholder')}></textarea>
+      </label>
+    {/if}
+  </div>
+{/snippet}
+
 
 <div
   class="overlay"
@@ -512,6 +554,7 @@
         {:else if triggerKind === 'pubsub'}
           <label class="field"><span>topic</span><input bind:value={topic} spellcheck="false" /></label>
           <label class="field"><span>subscription</span><input bind:value={subscription} spellcheck="false" placeholder="projects/p/subscriptions/s" /></label>
+          {@render pubsubCredential()}
         {/if}
 
       {:else if step === 1}
@@ -730,26 +773,7 @@
             <textarea bind:value={outputMessage} rows="3" spellcheck="false" placeholder={'labels: {{items}}'}></textarea>
           </label>
           <p class="hint">{t('editor.messageHint')}</p>
-          <div class="block">
-            <p class="blockTitle">{t('editor.credential')}</p>
-            <p class="hint">{t('editor.credentialHint')}</p>
-            <div class="row">
-              <label class="field"
-                ><span>{t('editor.credService')}</span>
-                <input bind:value={pubCredService} spellcheck="false" placeholder="gcp" onblur={refreshPubCredSaved} /></label
-              >
-              <label class="field narrow"
-                ><span>{t('editor.credAccount')}</span>
-                <input bind:value={pubCredAccount} spellcheck="false" placeholder="default" onblur={refreshPubCredSaved} /></label
-              >
-            </div>
-            {#if pubCredService.trim()}
-              <label class="field">
-                <span>{t('editor.credValue')}{#if pubCredSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
-                <textarea bind:value={pubCredValue} rows="2" spellcheck="false" placeholder={pubCredSaved ? '••••••••' : t('editor.credPubPlaceholder')}></textarea>
-              </label>
-            {/if}
-          </div>
+          {@render pubsubCredential()}
         {:else}
           <p class="hint">{t('editor.output.noneHint')}</p>
         {/if}
