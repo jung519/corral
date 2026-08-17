@@ -13,7 +13,7 @@
  */
 import { z } from 'zod';
 import { CredentialRefSchema } from '../../config/schema.js';
-import { isTimeZone } from '../trigger/cron.js';
+import { isTimeZone, parseCron } from '../trigger/cron.js';
 
 /**
  * Where a value comes from in a JSON response: a dotted path, optionally cut down.
@@ -52,8 +52,22 @@ export const ManualTriggerSchema = z.object({ kind: z.literal('manual') });
 
 export const ScheduleTriggerSchema = z.object({
   kind: z.literal('schedule'),
-  /** Standard 5-field cron. Validated for shape here, for meaning by the adapter. */
-  cron: z.string().min(1),
+  /**
+   * Standard 5-field cron, parsed here rather than only by the adapter.
+   *
+   * It used to be checked for shape here and for meaning at start, which meant an
+   * unrunnable expression saved cleanly, loaded cleanly, and left one line in the log —
+   * for the same reason the zone below is refused here. CRL-41 opened a box for people to
+   * type an expression by hand, so the wrong one has to come back while they are still
+   * looking at it.
+   */
+  cron: z.string().min(1).superRefine((cron, ctx) => {
+    try {
+      parseCron(cron);
+    } catch (err) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: err instanceof Error ? err.message : String(err) });
+    }
+  }),
   /**
    * Which clock "09:00" is on, as an IANA name (`Asia/Seoul`, `UTC`).
    *

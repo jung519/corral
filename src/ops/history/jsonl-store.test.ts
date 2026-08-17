@@ -219,6 +219,75 @@ describe('retention', () => {
   });
 });
 
+/**
+ * A day is a local day here on purpose — the operator's day, not UTC's. Where daylight
+ * saving is observed a local day is 23 or 25 hours long twice a year, so the window used to
+ * be walked back with an interval no local day actually has (CRL-55).
+ *
+ * Both directions were measured to lose or double a day, from a clock only an hour either
+ * side of local midnight. These pin the boundary rather than the arithmetic, because the
+ * arithmetic is what was wrong.
+ */
+describe('a day is however long that day was', () => {
+  const TZ = process.env.TZ;
+  /** Whatever the run is, on the day it actually happened locally. */
+  const onDay = (iso: string, over: Partial<RunRecord> = {}): RunRecord =>
+    run({ startedAt: new Date(iso).getTime(), ...over });
+
+  beforeEach(() => {
+    process.env.TZ = 'America/New_York';
+  });
+  afterEach(() => {
+    if (TZ === undefined) delete process.env.TZ;
+    else process.env.TZ = TZ;
+  });
+
+  it('keeps a file from inside the window when the day before was 23 hours', async () => {
+    // 2026-03-08 lost an hour at 02:00. Standing just after midnight on the 9th, a flat
+    // 24-hour step skipped the 8th entirely — and prune deletes whatever it did not list.
+    clock = new Date('2026-03-09T04:30:00Z').getTime(); // 00:30 local, EDT
+    const s = store(10);
+    await s.append(onDay('2026-03-08T18:00:00Z')); // mid-afternoon on the 8th, local
+    await s.append(run());
+
+    await s.prune();
+
+    expect(existsSync(logFile('2026-03-08'))).toBe(true);
+  });
+
+  it('counts a 25-hour day once, not twice', async () => {
+    // 2026-11-01 gained an hour at 02:00. Standing late that evening, a flat 24-hour step
+    // landed back inside the same local day.
+    clock = new Date('2026-11-02T04:30:00Z').getTime(); // 23:30 local on the 1st, EST
+    const s = store();
+    for (let i = 0; i < 3; i++) await s.append(onDay('2026-11-01T20:00:00Z'));
+
+    const counts = await s.countsByPipeline(4);
+    const listed = await s.list({ days: 4 });
+
+    expect(counts.classify).toMatchObject({ runs: 3, tokens: 300 });
+    expect(listed).toHaveLength(3);
+  });
+
+  it('asks for as many distinct days as it was told to', async () => {
+    clock = new Date('2026-11-02T04:30:00Z').getTime();
+    const s = store();
+
+    // One append per local day, walking back the same way the store now does.
+    const days: string[] = [];
+    const d = new Date(clock);
+    for (let i = 0; i < 5; i++) {
+      days.push(dayKey(d.getTime()));
+      await s.append(run({ startedAt: d.getTime() }));
+      d.setDate(d.getDate() - 1);
+    }
+
+    // Five days asked for, five days found — no repeats swallowing one of them.
+    expect(new Set(days).size).toBe(5);
+    expect((await s.totals(5)).map((t) => t.date)).toEqual(days);
+  });
+});
+
 describe('when the files are damaged', () => {
   it('loses the bad line and keeps the day', async () => {
     const s = store();

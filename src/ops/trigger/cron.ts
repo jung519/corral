@@ -28,12 +28,31 @@ const RANGES = {
   dayOfWeek: [0, 7],
 } as const;
 
+/**
+ * Digits and nothing else, or `NaN`.
+ *
+ * `Number()` is far too generous for a field a person has to be able to read back. It takes
+ * `""` as **0**, which is how `-5` became the range 0-5 and passed every check below: a
+ * mistyped every-five-minutes step fired six times an hour, on the hour, and said nothing
+ * (CRL-48). It also takes `" 7"`, `"0x1f"` and `"1e2"`.
+ *
+ * Checking the shape first is what makes the promise at the top of this file — throws on
+ * anything it cannot execute — actually true.
+ */
+const DIGITS = /^\d+$/;
+
+function digits(text: string): number {
+  return DIGITS.test(text) ? Number(text) : NaN;
+}
+
 /** Expand one field. Throws with the offending text so a bad definition names itself. */
 function expand(text: string, [min, max]: readonly [number, number], field: string): Set<number> {
   const out = new Set<number>();
   for (const part of text.split(',')) {
-    const [spec = '', stepText] = part.split('/');
-    const step = stepText === undefined ? 1 : Number(stepText);
+    const slashed = part.split('/');
+    if (slashed.length > 2) throw new Error(`invalid step "${part}" in ${field}`);
+    const [spec = '', stepText] = slashed;
+    const step = stepText === undefined ? 1 : digits(stepText);
     if (!Number.isInteger(step) || step < 1) throw new Error(`invalid step "${part}" in ${field}`);
 
     let from: number;
@@ -41,10 +60,13 @@ function expand(text: string, [min, max]: readonly [number, number], field: stri
     if (spec === '*') {
       [from, to] = [min, max];
     } else if (spec.includes('-')) {
-      const [a, b] = spec.split('-').map(Number);
-      [from, to] = [a ?? NaN, b ?? NaN];
+      // Exactly two ends. `1-2-3` is nobody's intention, and reading the first two would
+      // silently drop the rest.
+      const ends = spec.split('-');
+      const [a = '', b = ''] = ends;
+      [from, to] = ends.length === 2 ? [digits(a), digits(b)] : [NaN, NaN];
     } else {
-      from = to = Number(spec);
+      from = to = digits(spec);
       if (stepText !== undefined) to = max; // `5/15` means "from 5, every 15"
     }
 
@@ -95,6 +117,10 @@ function formatterFor(timeZone: string): Intl.DateTimeFormat {
       // `h23` rather than `hour12: false`, which is allowed to render midnight as 24.
       hourCycle: 'h23',
       weekday: 'short',
+      // Cron has no year field, so matching never looks at this one. It is here for the
+      // once-a-year guard in `schedule.ts`, which has to read the year off the *same* clock
+      // the match was made on — a local year would disagree again whenever they differ.
+      year: 'numeric',
       month: 'numeric',
       day: 'numeric',
       hour: 'numeric',
@@ -123,6 +149,9 @@ export interface CalendarFields {
   dayOfMonth: number;
   /** 0-6, Sunday first. */
   dayOfWeek: number;
+  /** Not a cron field — nothing here matches on it. It exists so a caller that has to tell
+   *  one occurrence from the next can, which is what "every 1 January" needs (CRL-54). */
+  year: number;
 }
 
 /** The calendar fields cron compares against, read on a particular clock. */
@@ -134,6 +163,7 @@ export function calendarFieldsIn(date: Date, timeZone?: string): CalendarFields 
       month: date.getMonth() + 1,
       dayOfMonth: date.getDate(),
       dayOfWeek: date.getDay(),
+      year: date.getFullYear(),
     };
   }
   const parts = formatterFor(timeZone).formatToParts(date);
@@ -144,6 +174,7 @@ export function calendarFieldsIn(date: Date, timeZone?: string): CalendarFields 
     month: Number(value('month')),
     dayOfMonth: Number(value('day')),
     dayOfWeek: WEEKDAYS[value('weekday')] ?? 0,
+    year: Number(value('year')),
   };
 }
 

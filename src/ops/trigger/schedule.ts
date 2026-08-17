@@ -44,8 +44,12 @@ export class ScheduleTrigger implements TriggerAdapter {
 
       // Keyed on the same clock the match was made on, so the guard cannot disagree with
       // the decision it is guarding.
+      //
+      // The year is part of the key. Without it `0 0 1 1 *` produced `1-1 0:0` in every
+      // year alike, so a core that stayed up past a new year skipped its own anniversary —
+      // nothing else fires in between to overwrite the value (CRL-54).
       const on = calendarFieldsIn(at, timezone);
-      const minute = `${on.month}-${on.dayOfMonth} ${on.hour}:${on.minute}`;
+      const minute = `${on.year}-${on.month}-${on.dayOfMonth} ${on.hour}:${on.minute}`;
       if (minute === lastFired) return; // already fired for this minute
       lastFired = minute;
 

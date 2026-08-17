@@ -304,6 +304,25 @@ output: { kind: none }
     );
   });
 
+  it('refuses a schedule nobody can execute, naming the field', async () => {
+    // `-5` read as the range 0-5 and fired six times an hour on the hour, saying nothing
+    // (CRL-48). Now that a box exists for typing an expression by hand, the mistake has to
+    // come back while the person is still looking at it — same reasoning as the zone above.
+    const err = await load(`
+key: nightly
+trigger: { kind: schedule, cron: "-5 * * * *" }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: none }
+`);
+
+    expect(err.issues).toContainEqual(
+      expect.objectContaining({ path: 'trigger.cron', message: expect.stringContaining('minute "-5"') }),
+    );
+  });
+
   it('takes an IANA zone', async () => {
     write('ok.yaml', `
 key: nightly
