@@ -205,7 +205,9 @@ input:                            # ①-하위: 이벤트 → AI 입력 — none
   request:
     method: GET
     url: "https://<host>/api/records/{{id}}"
-    credential: { service: backend, account: default }
+    headers: { x-tenant: acme }            # 비밀 아닌 헤더는 여기
+    credential: { service: backend, account: default }   # 값은 자격증명 저장소에서
+    auth: { header: authorization, prefix: "Bearer " }   # 기본값. X-API-Key면 여기서 바꾼다
     timeout_ms: 15000
   select:                         # 응답 경로 → 납작한 입력 필드
     title:  "data.title"

@@ -137,6 +137,46 @@ describe('secrets', () => {
     // The definition holds a pointer; the value only exists at call time.
     expect(requests[0].headers.authorization).toBe('Bearer super-secret');
   });
+
+  it('goes on whatever header the API wants', async () => {
+    // An internal API behind a VPC is as likely to want `X-API-Key` as a bearer token,
+    // and that should not cost the pipeline its credential store.
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+    await credentials.set({ service: 'backend', account: 'default' }, 'super-secret');
+    const input = pipeline({
+      kind: 'http',
+      request: {
+        url: `${base}/r/1`,
+        credential: { service: 'backend', account: 'default' },
+        auth: { header: 'X-API-Key', prefix: '' },
+      },
+    }).input;
+
+    await new HttpInputResolver(credentials).resolve(input, {});
+
+    expect(requests[0].headers['x-api-key']).toBe('super-secret');
+    expect(requests[0].headers.authorization).toBeUndefined();
+  });
+
+  it('lets a header in the definition win, whatever case it was written in', async () => {
+    // HTTP header names are case-insensitive but a plain object is not: `Authorization`
+    // here and `authorization` from the credential would both survive and go out
+    // comma-joined — an auth header holding two values, which no server reads as either.
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+    await credentials.set({ service: 'backend', account: 'default' }, 'super-secret');
+    const input = pipeline({
+      kind: 'http',
+      request: {
+        url: `${base}/r/1`,
+        credential: { service: 'backend', account: 'default' },
+        headers: { Authorization: 'Bearer from-the-definition' },
+      },
+    }).input;
+
+    await new HttpInputResolver(credentials).resolve(input, {});
+
+    expect(requests[0].headers.authorization).toBe('Bearer from-the-definition');
+  });
 });
 
 describe('gone is not broken', () => {

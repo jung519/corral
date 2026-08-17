@@ -93,9 +93,23 @@ export const HttpRequestSchema = z.object({
   /** `{{field}}` placeholders are filled from the event/derived fields. */
   url: z.string().min(1),
   headers: z.record(z.string(), z.string()).default({}),
-  /** Secrets are never written here — this points at the credential store, and the
-   *  resolved value is sent as a bearer token. Same rule as the rest of the config. */
+  /** Points at the credential store; the resolved value is sent by `auth` below. Corral
+   *  does not put secrets in config files, here or anywhere else. */
   credential: CredentialRefSchema.optional(),
+  /**
+   * How the credential is put on the wire.
+   *
+   * `Authorization: Bearer <secret>` is the common case and stays the default, but an
+   * internal API behind a VPC is as likely to want `X-API-Key: <secret>` — and that is
+   * not something a pipeline should have to give up its credential store to express.
+   * A `prefix` of `''` sends the secret on its own.
+   */
+  auth: z
+    .object({
+      header: z.string().min(1).default('authorization'),
+      prefix: z.string().default('Bearer '),
+    })
+    .default({ header: 'authorization', prefix: 'Bearer ' }),
   body: z.record(z.string(), z.unknown()).optional(),
   timeout_ms: z.number().int().positive().default(15_000),
 });
