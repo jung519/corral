@@ -274,12 +274,31 @@ export const HttpOutputSchema = z.object({
   request: HttpRequestSchema,
 });
 
+const MESSAGE_REQUIRED = 'a pubsub output needs a message — name the fields to publish, e.g. { labels: "{{labels}}" }';
+
 export const PubSubOutputSchema = z.object({
   kind: z.literal('pubsub'),
   topic: z.string().min(1),
   credential: CredentialRefSchema.optional(),
-  /** `{{field}}` placeholders are filled from the answer. */
-  message: z.record(z.string(), z.unknown()).default({}),
+  /**
+   * What to publish, `{{field}}` placeholders and all. Required, with no default.
+   *
+   * It used to default to `{}`, which the sink read as "publish everything" — and
+   * everything is more than it sounds. The bag a sink receives is the event, the fetched
+   * record and the answer, merged. A pipeline classifying a record published its own
+   * source material: 589 bytes where the answer was 40, carrying a 420-character body,
+   * the organiser's email and phone, and a token that arrived on the queue message
+   * (CRL-51).
+   *
+   * An HTTP output never had this problem because a body has to be written out. Saying
+   * what goes on a topic is the same amount of thinking, and the default was the only
+   * thing excusing anyone from doing it.
+   */
+  // Absent and empty are the same mistake, so they get the same sentence — a reader who
+  // left the box blank should not have to work out which of two messages applies to them.
+  message: z
+    .record(z.string(), z.unknown(), { required_error: MESSAGE_REQUIRED, invalid_type_error: MESSAGE_REQUIRED })
+    .refine((m) => Object.keys(m).length > 0, { message: MESSAGE_REQUIRED }),
 });
 
 export const OutputSchema = z.discriminatedUnion('kind', [NoneOutputSchema, HttpOutputSchema, PubSubOutputSchema]);

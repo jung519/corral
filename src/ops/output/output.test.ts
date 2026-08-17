@@ -110,15 +110,33 @@ describe('publishing a message', () => {
     process.env.PUBSUB_EMULATOR_HOST = base.replace('http://', '');
   });
 
-  it('publishes the whole result when no template is given', async () => {
-    await new PubSubOutputSink().send(output({ kind: 'pubsub', topic: 'projects/p/topics/results' }), {
-      id: 42,
-      items: ['news'],
-    });
+  /**
+   * The bag a sink receives is the event, the fetched record and the answer, merged —
+   * everything a template might want to reach, which is not the same as everything worth
+   * publishing. While `message` was optional the sink published the lot: a pipeline
+   * classifying a record put its own source material on the topic, along with whatever
+   * arrived on the queue message (CRL-51).
+   */
+  it('publishes only what the template names, not everything it was handed', async () => {
+    await new PubSubOutputSink().send(
+      output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: { labels: '{{items}}' } }),
+      {
+        items: ['news'],
+        body: 'the full text of the record, hundreds of characters of it',
+        contact: { email: 'organizer@example.com' },
+        internalToken: 'arrived-on-the-queue-message',
+      },
+    );
 
     expect(requests[0].url).toBe('/v1/projects/p/topics/results:publish');
     const sent = JSON.parse(requests[0].body) as { messages: Array<{ data: string }> };
-    expect(JSON.parse(Buffer.from(sent.messages[0].data, 'base64').toString())).toEqual({ id: 42, items: ['news'] });
+    expect(JSON.parse(Buffer.from(sent.messages[0].data, 'base64').toString())).toEqual({ labels: ['news'] });
+  });
+
+  it('refuses a pubsub output with nothing to publish', () => {
+    // No default any more: the one thing a default could mean here was "everything".
+    expect(() => output({ kind: 'pubsub', topic: 'projects/p/topics/results' })).toThrow(/needs a message/);
+    expect(() => output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: {} })).toThrow(/needs a message/);
   });
 
   it('fills a message template when one is', async () => {
@@ -138,7 +156,7 @@ describe('publishing a message', () => {
     status = 403;
 
     await expect(
-      new PubSubOutputSink().send(output({ kind: 'pubsub', topic: 'projects/p/topics/results' }), {}),
+      new PubSubOutputSink().send(output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: { a: '{{a}}' } }), {}),
     ).rejects.toThrow(/403/);
   });
 });

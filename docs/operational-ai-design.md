@@ -260,6 +260,9 @@ output:                           # ③ 결과 전달 — none | http | pubsub
     method: PATCH
     url: "https://<host>/api/records/{{id}}"
     body: { labels: "{{items}}" }
+  # kind: pubsub 이면
+  #   topic: "projects/<p>/topics/results"
+  #   message: { labels: "{{items}}" }   # 필수. 여기 적은 것만 나간다
 
 on_low_confidence:                # 저신뢰 처리 (D14)
   action: report                  # report(보내지 않고 이력만) | skip | send
