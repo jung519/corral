@@ -4,7 +4,7 @@
  * The rules that matter: nothing invalid reaches disk, an edit lands in the file that
  * already holds that key, and what comes out is a file a person can open and change.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -68,6 +68,28 @@ describe('saving a new pipeline', () => {
     expect(text).toContain('enabled: true');
     expect(text).toContain('max_concurrent: 1');
     expect(text).toContain('max_tokens: 4096');
+  });
+});
+
+describe('who can read it', () => {
+  // Windows has no POSIX modes; there is nothing to assert there.
+  const posix = process.platform !== 'win32';
+
+  it.runIf(posix)('writes the file owner-only', async () => {
+    await savePipeline(dir, DEFINITION);
+
+    // It names the credentials it uses and sits beside credentials.json, which is 0600.
+    expect(statSync(join(dir, 'classify-record.yaml')).mode & 0o777).toBe(0o600);
+  });
+
+  it.runIf(posix)('tightens a file that was already there', async () => {
+    // `mode` on writeFile only applies to a file being created, so a pipeline written
+    // before this rule existed would keep its old permissions forever.
+    writeFileSync(join(dir, 'classify-record.yaml'), 'key: classify-record\n', { mode: 0o644 });
+
+    await savePipeline(dir, DEFINITION, { overwrite: true });
+
+    expect(statSync(join(dir, 'classify-record.yaml')).mode & 0o777).toBe(0o600);
   });
 });
 
