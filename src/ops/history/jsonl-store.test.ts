@@ -2,13 +2,13 @@
  * The history is what an operator reads the morning after. It has to hold one line per
  * run, add up to the same thing the runs did, and survive the ways files actually break.
  */
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RunRecord } from '../pipeline/run.js';
 import { JsonlOpsHistoryStore, OPS_HISTORY_DIR } from './jsonl-store.js';
-import { dayKey, summarize } from './store.js';
+import { dayKey, rounded, summarize } from './store.js';
 
 let dir: string;
 let clock: number;
@@ -343,7 +343,67 @@ describe('summing', () => {
   it('does not let float addition show up as a price', () => {
     const cents = Array.from({ length: 3 }, () => ({ outcome: 'completed', costUsd: 0.1 }) as never);
 
-    expect(summarize('2026-08-15', cents).costUsd).toBe(0.3);
+    // Rounded on the way out rather than inside the sum: a total built one run at a time
+    // has to be the same arithmetic as one rebuilt from the log, and rounding each step
+    // would quietly make them different (CRL-52).
+    expect(rounded(summarize('2026-08-15', cents)).costUsd).toBe(0.3);
+  });
+
+  it('gives the same price whether it was added up or rebuilt', async () => {
+    const s = store();
+    for (const costUsd of [0.1, 0.1, 0.1, 0.07, 0.003]) await s.append(run({ costUsd }));
+
+    const addedUp = (await s.totals(1))[0]; // the stored total, folded run by run
+    rmSync(join(dir, OPS_HISTORY_DIR, '2026-08-15.totals.json'));
+    const rebuilt = (await s.totals(1))[0]; // recomputed from the log
+
+    expect(addedUp).toEqual(rebuilt);
+    expect(addedUp.costUsd).toBe(0.373);
+  });
+});
+
+/**
+ * Recording the N-th run of a day used to cost N line-parses: `append` rebuilt the totals
+ * from the whole log every time. Measured at 5.4 seconds of synchronous blocking across a
+ * 5,000-run day and 81 seconds across a 20,000-run one — in front of the queue loop and
+ * the schedule tick (CRL-52).
+ *
+ * Timing is too shaky to assert, so these pin the thing that made it slow: whether the day
+ * is read at all.
+ */
+describe('what it costs to record a run', () => {
+  /** Watch the one private method that parses a whole day. */
+  const watchRead = (s: JsonlOpsHistoryStore) => vi.spyOn(s as unknown as { read: (d: string) => unknown[] }, 'read');
+
+  it('does not read the day back', async () => {
+    const s = store();
+    for (let i = 0; i < 5; i++) await s.append(run());
+
+    const read = watchRead(s);
+    await s.append(run());
+
+    expect(read).not.toHaveBeenCalled();
+  });
+
+  it('still counts everything, however many there are', async () => {
+    const s = store();
+    for (let i = 0; i < 50; i++) await s.append(run({ tokens: 10, costUsd: 0.01 }));
+
+    expect((await s.totals(1))[0]).toMatchObject({ runs: 50, tokens: 500, costUsd: 0.5 });
+  });
+
+  it('reads the day only when the stored total no longer describes it', async () => {
+    const s = store();
+    await s.append(run());
+    await s.totals(1); // warm
+
+    const read = watchRead(s);
+    await s.totals(1);
+    expect(read).not.toHaveBeenCalled(); // the log has not moved
+
+    appendFileSync(logFile('2026-08-15'), `${JSON.stringify({ v: 1, pipeline: 'classify', outcome: 'completed', startedAt: clock, durationMs: 1, tokens: 7 })}\n`);
+    expect((await s.totals(1))[0]).toMatchObject({ runs: 2, tokens: 107 });
+    expect(read).toHaveBeenCalled(); // it did, so the day was rebuilt
   });
 });
 

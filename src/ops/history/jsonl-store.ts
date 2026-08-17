@@ -9,10 +9,18 @@
  * and Windows from one repo and that has to keep working. Append-only text costs nothing
  * to write, and one corrupt line loses one run instead of the file.
  *
- * The totals file is a cache, never the truth. It's rewritten after each append so
+ * The totals file is a cache, never the truth. It's kept current as runs are appended so
  * reading a day is one small parse, but it is recomputed from the log whenever it is
  * missing or disagrees about the count — a totals file that quietly drifted from the runs
  * it summarizes would be worse than not having one.
+ *
+ * **Both of those sentences used to be false in the same way: by parsing the whole day.**
+ * Each append rebuilt the totals from the entire log, so recording the N-th run of a day
+ * cost N line-parses — 5.4 seconds of blocking across a 5,000-run day, 81 seconds across a
+ * 20,000-run one, all of it synchronous and all of it in front of the queue loop and the
+ * schedule tick. And the read side parsed the day anyway, just to count the lines it was
+ * comparing against. Now a run is folded into the stored total as it arrives, and the
+ * cache is checked against the log's size — one `stat` (CRL-52).
  */
 import {
   appendFileSync,
@@ -34,6 +42,9 @@ import {
   dayKey,
   FAILURE_OUTCOMES,
   OPS_HISTORY_SCHEMA_VERSION,
+  addTo,
+  emptyTotals,
+  rounded,
   summarize,
   type OpsDailyTotals,
   type OpsHistoryQuery,
@@ -50,6 +61,14 @@ export interface JsonlOpsHistoryOptions {
   retentionDays?: number;
   /** Injectable clock, so tests can write across day boundaries. */
   now?: () => number;
+}
+
+/**
+ * A day's total as it sits on disk: the total itself, plus the size of the log it was
+ * computed from. The size is bookkeeping for the cache and never leaves this file.
+ */
+interface StoredTotals extends OpsDailyTotals {
+  logBytes: number;
 }
 
 export class JsonlOpsHistoryStore implements OpsHistoryStore {
@@ -103,7 +122,12 @@ export class JsonlOpsHistoryStore implements OpsHistoryStore {
     // this run as well as the last one. One byte of checking keeps the damage to one.
     const separator = endsWithNewline(path) ? '' : '\n';
     appendFileSync(path, `${separator}${JSON.stringify(record)}\n`, 'utf8');
-    this.writeTotals(date);
+
+    // Folded into what is already there rather than recomputed from the log. Nothing here
+    // checks whether that stored total was still accurate: if it had drifted, this makes it
+    // no worse, and `totals()` rebuilds it the moment the log disagrees. Paying a whole-day
+    // parse on every append to find out sooner is what this issue was.
+    this.storeTotals(date, addTo(this.readTotals(date) ?? emptyTotals(date), record));
   }
 
   /** Records for one day, in the order they happened. Bad lines are skipped, not fatal. */
@@ -123,10 +147,32 @@ export class JsonlOpsHistoryStore implements OpsHistoryStore {
     return out;
   }
 
+  /** Rebuild a day's total from its log — the path taken whenever the cache is not trusted. */
   private writeTotals(date: string): OpsDailyTotals {
     const totals = summarize(date, this.read(date));
-    writeFileSync(this.totalsPath(date), JSON.stringify(totals, null, 2), 'utf8');
+    this.storeTotals(date, totals);
     return totals;
+  }
+
+  /**
+   * Write a day's total, stamped with the size of the log it describes.
+   *
+   * The stamp is what makes the cache cheap to trust. Counting runs meant reading the log;
+   * counting its bytes is one `stat`. It is also stricter in the right way — a hand-edited
+   * or truncated line changes the size, where a line count would not notice a line being
+   * rewritten, and a half-written line would leave the count permanently one out.
+   */
+  private storeTotals(date: string, totals: OpsDailyTotals): void {
+    const stamped: StoredTotals = { ...totals, logBytes: this.logSize(date) };
+    writeFileSync(this.totalsPath(date), JSON.stringify(stamped, null, 2), 'utf8');
+  }
+
+  private logSize(date: string): number {
+    try {
+      return statSync(this.logPath(date)).size;
+    } catch {
+      return 0;
+    }
   }
 
   /**
@@ -174,20 +220,23 @@ export class JsonlOpsHistoryStore implements OpsHistoryStore {
   async totals(days = 7): Promise<OpsDailyTotals[]> {
     const out: OpsDailyTotals[] = [];
     for (const date of this.recentDays(days)) {
-      const records = this.read(date);
-      if (!records.length && !existsSync(this.totalsPath(date))) continue;
+      // One `stat`, not a parse of the day. The question is only "does the cache still
+      // describe this log", and answering it by parsing every line made the cache pointless
+      // on the one path it exists for.
+      const bytes = this.logSize(date);
+      if (!bytes && !existsSync(this.totalsPath(date))) continue;
 
       const cached = this.readTotals(date);
       // Trust the cache only while it still describes the same log. Anything else — a
       // hand-edited file, a crash between the append and the rewrite — and we recount.
-      out.push(cached && cached.runs === records.length ? cached : this.writeTotals(date));
+      out.push(rounded(cached && cached.logBytes === bytes ? cached : this.writeTotals(date)));
     }
     return out;
   }
 
-  private readTotals(date: string): OpsDailyTotals | undefined {
+  private readTotals(date: string): StoredTotals | undefined {
     try {
-      return JSON.parse(readFileSync(this.totalsPath(date), 'utf8')) as OpsDailyTotals;
+      return JSON.parse(readFileSync(this.totalsPath(date), 'utf8')) as StoredTotals;
     } catch {
       return undefined;
     }
