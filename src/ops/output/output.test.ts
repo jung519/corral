@@ -166,7 +166,7 @@ on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review"
 `;
 
   const answers = (answer: Record<string, unknown>): OperationRunner => ({
-    run: async () => ({ answer, tokens: 10 }),
+    run: async () => ({ ok: true, answer, tokens: 10 }),
   });
 
   it('holds back a doubtful answer and records where to look', async () => {

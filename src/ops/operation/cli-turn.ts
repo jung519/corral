@@ -32,9 +32,10 @@ import { tmpdir } from 'node:os';
 import type { AgentEvent, AgentProviderId, AgentTransport } from '../../agent/types.js';
 import type { WorkspaceHandle, WorkspaceIO } from '../../core/types.js';
 import { logger } from '../../core/logger.js';
-import type { Fields, OperationResult, OperationRunner } from '../pipeline/ports.js';
+import type { Fields, OperationOutcome, OperationResult, OperationSpend, OperationRunner } from '../pipeline/ports.js';
 import type { PipelineAgentStep } from '../pipeline/schema.js';
 import { checkAnswer, schemaInstruction } from './one-turn.js';
+import { SpendTally } from './spend.js';
 import { fillTemplate } from '../pipeline/run.js';
 
 export interface CliTurnOptions {
@@ -72,7 +73,7 @@ export class CliTurnOperationRunner implements OperationRunner {
     this.timeoutMs = options.turnTimeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
-  async run(step: PipelineAgentStep, fields: Fields): Promise<OperationResult> {
+  async run(step: PipelineAgentStep, fields: Fields): Promise<OperationOutcome> {
     const wanted = step.provider;
     const transports = wanted ? this.options.transports.filter((t) => t.provider === wanted) : this.options.transports;
     if (!transports.length) {
@@ -80,9 +81,13 @@ export class CliTurnOperationRunner implements OperationRunner {
     }
 
     const attempts: string[] = [];
+    // Everything this turn spends, across providers — a failed attempt was still billed
+    // (CRL-45). Each attempt reports its own spend whether it worked or not.
+    const spent = new SpendTally();
     for (const [index, transport] of transports.entries()) {
       const model = step.model ?? this.options.modelFor?.(transport.provider);
       const outcome = await this.oneTurn(transport, step, fields, model);
+      spent.add(outcome.spend);
       if ('error' in outcome) {
         // A different provider may well answer where this one crashed or timed out — the
         // same reason the API runner moves on rather than giving up.
@@ -90,26 +95,34 @@ export class CliTurnOperationRunner implements OperationRunner {
         logger.warn(`ops: ${transport.provider} cli turn failed (${outcome.error})`);
         continue;
       }
-      return { ...outcome.result, provider: transport.provider, model, failedOver: index > 0 };
+      return { ok: true, ...outcome.result, ...spent.total(), provider: transport.provider, model, failedOver: index > 0 };
     }
 
     // Every attempt, not just the last: an operator has to be able to tell "one provider
     // was wedged" from "all of them refused the shape".
-    throw new Error(`no provider produced a usable answer — ${attempts.join('; ')}`);
+    return { ok: false, reason: `no provider produced a usable answer — ${attempts.join('; ')}`, ...spent.total() };
   }
 
-  /** Ask once and read the reply. */
+  /**
+   * Ask once and read the reply.
+   *
+   * Both endings carry `spend`, and that is the point: the `usage` event arrives before
+   * anyone knows whether the reply is usable, so every way out of here has something to
+   * report. Four of the five ways out are failures, and each of them used to drop it.
+   */
   private async oneTurn(
     transport: AgentTransport,
     step: PipelineAgentStep,
     fields: Fields,
     model: string | undefined,
-  ): Promise<{ result: OperationResult } | { error: string }> {
+  ): Promise<({ result: Pick<OperationResult, 'answer'> } | { error: string }) & { spend: OperationSpend }> {
     let inputTokens = 0;
     let outputTokens = 0;
     let costUsd = 0;
     let failure: string | undefined;
     let text = '';
+    // Read on every path out, so a failure reports its bill instead of dropping it.
+    const spend = (): OperationSpend => ({ tokens: inputTokens + outputTokens, inputTokens, outputTokens, costUsd });
 
     const onEvent = (event: AgentEvent): void => {
       if (event.type === 'usage') {
@@ -149,25 +162,18 @@ export class CliTurnOperationRunner implements OperationRunner {
         onEvent,
       );
     } catch (err) {
-      return { error: err instanceof Error ? err.message : String(err) };
+      // A process that died mid-turn still burned whatever it had streamed by then.
+      return { error: err instanceof Error ? err.message : String(err), spend: spend() };
     }
-    if (failure) return { error: failure };
-    if (!text.trim()) return { error: 'the agent produced no answer text' };
+    if (failure) return { error: failure, spend: spend() };
+    if (!text.trim()) return { error: 'the agent produced no answer text', spend: spend() };
 
     // The same check an API answer gets. Two shape checks would mean the rules depended on
     // which transport happened to be configured.
     const checked = checkAnswer(step.schema, text);
-    if (!checked.ok) return { error: checked.reason };
+    if (!checked.ok) return { error: checked.reason, spend: spend() };
 
-    return {
-      result: {
-        answer: checked.answer,
-        tokens: inputTokens + outputTokens,
-        inputTokens,
-        outputTokens,
-        costUsd,
-      },
-    };
+    return { result: { answer: checked.answer }, spend: spend() };
   }
 }
 

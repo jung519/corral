@@ -6,7 +6,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bus, type CorralEvent } from '../../core/events.js';
 import type { AnswerValidator, InputResolver, OperationRunner, OutputSink, ValidationVerdict } from './ports.js';
-import { PipelineRunner, conditionHolds, fillTemplate, fillValue, readPath, type RunDeps } from './run.js';
+import type { TokenUsage } from '../../core/token-budget.js';
+import { PipelineRunner, conditionHolds, fillTemplate, fillValue, readPath, type RunBudget, type RunDeps } from './run.js';
 import { PipelineSchema, type Pipeline } from './schema.js';
 
 function pipeline(overrides: Record<string, unknown> = {}): Pipeline {
@@ -43,7 +44,7 @@ const operation: OperationRunner = {
   run: async () => {
     calls.operation++;
     if (operationError) throw operationError;
-    return { answer: { items: ['a'] }, tokens: 120 };
+    return { ok: true, answer: { items: ['a'] }, tokens: 120 };
   },
 };
 const validator: AnswerValidator = { check: async () => verdict };
@@ -174,6 +175,65 @@ describe('each failure is a different failure', () => {
     // pipeline actually spent.
     expect(record).toMatchObject({ outcome: 'output_failed', stage: 'output', tokens: 120 });
   });
+});
+
+/**
+ * A turn the model failed is still a turn the model was paid for. Before CRL-44 the failure
+ * path returned above `budget.record`, so a pipeline whose answers never matched its schema
+ * billed all day against a ceiling that read zero — the spend control bypassed by the shape
+ * of the code rather than by any decision.
+ */
+describe('what a failed turn costs', () => {
+  /** A runner that reports a failure the way the port asks it to: with the bill attached. */
+  const failsExpensively: OperationRunner = {
+    run: async () => ({ ok: false, reason: 'no provider produced a usable answer', inputTokens: 4000, outputTokens: 120, tokens: 4120 }),
+  };
+
+  function counting(): { budget: RunBudget; spent: TokenUsage[] } {
+    const spent: TokenUsage[] = [];
+    return { budget: { check: () => ({ ok: true }), record: (u) => spent.push(u) }, spent };
+  }
+
+  it('charges the ceiling for a turn that ended in agent_failed', async () => {
+    const { budget, spent } = counting();
+
+    const record = await new PipelineRunner(deps({ operation: failsExpensively, budget })).run(pipeline(), {});
+
+    expect(record.outcome).toBe('agent_failed');
+    expect(spent).toEqual([{ inputTokens: 4000, outputTokens: 120 }]);
+  });
+
+  it('puts the cost in the history too, so an operator can see what was burned', async () => {
+    const record = await new PipelineRunner(deps({ operation: failsExpensively })).run(pipeline(), {});
+
+    expect(record).toMatchObject({ outcome: 'agent_failed', stage: 'agent', tokens: 4120, inputTokens: 4000 });
+  });
+
+  it('stops the next run once repeated failures reach the ceiling', async () => {
+    // The point of counting them: a pipeline that only ever fails must still be able to
+    // exhaust the day's budget, or it becomes an uncapped bill.
+    let total = 0;
+    const budget: RunBudget = {
+      check: () => (total >= 4000 ? { ok: false, reason: 'daily input tokens spent' } : { ok: true }),
+      record: (u) => void (total += u.inputTokens),
+    };
+    const runner = new PipelineRunner(deps({ operation: failsExpensively, budget }));
+
+    expect((await runner.run(pipeline(), {})).outcome).toBe('agent_failed');
+    expect((await runner.run(pipeline(), {})).outcome).toBe('over_budget');
+  });
+
+  it('records nothing when the runner itself broke', async () => {
+    // An exception is a bug in the runner, not a failed turn. Nobody knows what it spent,
+    // and zero is the honest answer to a question nobody can answer.
+    const { budget, spent } = counting();
+    operationError = new Error('rate limited');
+
+    const record = await new PipelineRunner(deps({ budget })).run(pipeline(), {});
+
+    expect(record.outcome).toBe('agent_failed');
+    expect(spent).toEqual([]);
+  });
 
   it('names the missing adapter rather than failing vaguely', async () => {
     const record = await new PipelineRunner(deps({ sinks: new Map() })).run(pipeline(), {});
@@ -224,7 +284,7 @@ describe('concurrency', () => {
         peak = Math.max(peak, inFlight);
         await new Promise((r) => setTimeout(r, 20));
         inFlight--;
-        return { answer: { items: ['a'] } };
+        return { ok: true, answer: { items: ['a'] } };
       },
     };
     const runner = new PipelineRunner(deps({ operation: slow }));

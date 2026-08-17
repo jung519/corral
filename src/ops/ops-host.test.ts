@@ -29,6 +29,7 @@ output: { kind: none }
 /** A model step that answers without a model. */
 const stubModel: OperationRunner = {
   run: async (_step, fields) => ({
+    ok: true,
     answer: { answer: `saw ${String(fields.title)}` },
     tokens: 42,
     provider: 'claude',
@@ -101,7 +102,7 @@ output: { kind: none }
     const seen: Array<Record<string, unknown>> = [];
     const host = await startOpsHost({
       stateDir: dir,
-      operation: { run: async (_s, fields) => (seen.push(fields), { answer: {} }) },
+      operation: { run: async (_s, fields) => (seen.push(fields), { ok: true, answer: {} }) },
     });
 
     await host.runManually('raw', { title: 'shortest path to a working pipeline' });
