@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { ChatClient, ChatTurn, NeutralMessage } from '../../agent/api-loop.js';
 import type { AgentProviderId } from '../../agent/types.js';
 import { PipelineSchema, type PipelineAgentStep } from '../pipeline/schema.js';
+import type { OperationOutcome, OperationResult } from '../pipeline/ports.js';
 import { checkAnswer, OneTurnOperationRunner, schemaInstruction } from './one-turn.js';
 
 /** A provider that answers with whatever you hand it, or throws. */
@@ -41,13 +42,25 @@ function step(over: Record<string, unknown> = {}): PipelineAgentStep {
 
 const GOOD = JSON.stringify({ items: ['a', 'b'], confidence: 0.9 });
 
+/**
+ * The answer, for a test that expects one.
+ *
+ * A turn now reports failure instead of throwing (CRL-44), so reading `.answer` off the
+ * outcome needs narrowing. Doing it here means a test that was expecting an answer says
+ * what came back instead of failing on `undefined`.
+ */
+function answered(outcome: OperationOutcome): OperationResult {
+  if (!outcome.ok) throw new Error(`expected a usable answer, got: ${outcome.reason}`);
+  return outcome;
+}
+
 describe('asking for a shape and getting one', () => {
   it('returns the parsed answer', async () => {
     const runner = new OneTurnOperationRunner({ clients: [client('claude', GOOD)] });
 
     const result = await runner.run(step(), { title: 'a record' });
 
-    expect(result.answer).toEqual({ items: ['a', 'b'], confidence: 0.9 });
+    expect(answered(result).answer).toEqual({ items: ['a', 'b'], confidence: 0.9 });
   });
 
   it('puts a list of records in front of the model, not [object Object]', async () => {
@@ -107,7 +120,7 @@ describe('asking for a shape and getting one', () => {
 
     // The answer is about to be poured into output templates and someone else's API.
     // Whatever else the model felt like adding has no business travelling that far.
-    expect(result.answer).toEqual({ items: [], confidence: 1 });
+    expect(answered(result).answer).toEqual({ items: [], confidence: 1 });
   });
 });
 
@@ -139,7 +152,7 @@ describe('failing over', () => {
       clients: [client('claude', 'I could not classify this record.'), client('gemini', GOOD)],
     });
 
-    expect((await runner.run(step(), {})).provider).toBe('gemini');
+    expect(answered(await runner.run(step(), {})).provider).toBe('gemini');
   });
 
   it('does not fail over for packaging it can unwrap', async () => {
@@ -148,7 +161,7 @@ describe('failing over', () => {
     });
 
     // A fence is not a reason to spend a second turn on another provider.
-    expect((await runner.run(step(), {})).provider).toBe('claude');
+    expect(answered(await runner.run(step(), {})).provider).toBe('claude');
   });
 
   it('fails over on a truncated reply instead of salvaging part of it', async () => {
@@ -156,7 +169,7 @@ describe('failing over', () => {
       clients: [client('claude', '{"items":["a"],"conf'), client('gemini', GOOD)],
     });
 
-    expect((await runner.run(step(), {})).provider).toBe('gemini');
+    expect(answered(await runner.run(step(), {})).provider).toBe('gemini');
   });
 
   it('reports every attempt when they all fail, not just the last', async () => {

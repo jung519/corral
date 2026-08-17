@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentEvent, AgentTransport, AgentTurnSpec } from '../../agent/types.js';
 import { PipelineSchema, type PipelineAgentStep } from '../pipeline/schema.js';
+import type { OperationOutcome, OperationResult } from '../pipeline/ports.js';
 import { CliTurnOperationRunner } from './cli-turn.js';
 
 function step(over: Record<string, unknown> = {}): PipelineAgentStep {
@@ -62,13 +63,25 @@ function fails(provider: 'claude' | 'gemini' | 'gpt', kind: 'timeout' | 'crashed
 
 const GOOD = JSON.stringify({ items: ['news'], confidence: 0.9 });
 
+/**
+ * The answer, for a test that expects one.
+ *
+ * A turn now reports failure instead of throwing (CRL-45), so reading `.answer` off the
+ * outcome needs narrowing. Doing it here means a test that was expecting an answer says
+ * what came back instead of failing on `undefined`.
+ */
+function answered(outcome: OperationOutcome): OperationResult {
+  if (!outcome.ok) throw new Error(`expected a usable answer, got: ${outcome.reason}`);
+  return outcome;
+}
+
 describe('the reply is the answer', () => {
   it('parses what the agent said and reports what it cost', async () => {
     const runner = new CliTurnOperationRunner({ transports: [replies('claude', GOOD)] });
 
     const result = await runner.run(step(), { title: 'a record' });
 
-    expect(result.answer).toEqual({ items: ['news'], confidence: 0.9 });
+    expect(answered(result).answer).toEqual({ items: ['news'], confidence: 0.9 });
     expect(result).toMatchObject({ provider: 'claude', tokens: 840, inputTokens: 800, outputTokens: 40, costUsd: 0.004 });
   });
 
@@ -80,7 +93,7 @@ describe('the reply is the answer', () => {
 
     const result = await runner.run(step(), {});
 
-    expect((result.answer.items as string[])[0]).toHaveLength(3000);
+    expect((answered(result).answer.items as string[])[0]).toHaveLength(3000);
   });
 
   it('recovers an answer the model wrapped in prose or fences', async () => {
@@ -88,7 +101,7 @@ describe('the reply is the answer', () => {
       transports: [replies('claude', 'Sure!\n```json\n' + GOOD + '\n```\nHope that helps.')],
     });
 
-    expect((await runner.run(step(), {})).answer).toEqual({ items: ['news'], confidence: 0.9 });
+    expect(answered(await runner.run(step(), {})).answer).toEqual({ items: ['news'], confidence: 0.9 });
   });
 
   it('fills the prompt the same way the API runner does', async () => {
