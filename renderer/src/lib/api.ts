@@ -121,6 +121,15 @@ export interface SaveIssue {
 
 /** Validate and write a definition. Refused unless `overwrite` when the key exists. */
 /**
+ * Which providers this core can actually ask, and the models configured for each.
+ *
+ * Not what the schema allows — what `opsChatClients` kept. Empty means the model step is
+ * unwired, and the editor should say so rather than offer a choice that cannot run.
+ */
+export const getOpsAgents = (): Promise<{ agents: Array<{ provider: string; models: string[]; defaultModel?: string }> }> =>
+  call('opsAgents');
+
+/**
  * Make the fetch a pipeline would make, without saving anything.
  *
  * Runs on the core so the credential resolves and no browser is in the way. Failures come

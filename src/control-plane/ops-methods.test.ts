@@ -204,6 +204,24 @@ describe('over the control plane', () => {
     expect(((await dispatch('opsPipelines', {}, restarted)) as any).pipelines[0].description).toBe('edited by hand');
   });
 
+  describe('which providers the editor may offer', () => {
+    it('offers only what can actually answer', async () => {
+      const ops = await startOpsHost({ stateDir: dir });
+      // What core-host hands over: the result of the same filter opsChatClients uses.
+      ops.useAgents([{ provider: 'claude', models: ['opus', 'sonnet'], defaultModel: 'sonnet' }]);
+
+      expect((await dispatch('opsAgents', {}, deps(ops))) as any).toEqual({
+        agents: [{ provider: 'claude', models: ['opus', 'sonnet'], defaultModel: 'sonnet' }],
+      });
+    });
+
+    it('is empty before a config arrives, so the editor can say the step is unwired', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      expect((await dispatch('opsAgents', {}, d)) as any).toEqual({ agents: [] });
+    });
+  });
+
   describe('trying a fetch before saving', () => {
     it('returns the response and what the paths pulled out of it', async () => {
       const d = deps(await startOpsHost({ stateDir: dir }));
@@ -346,7 +364,7 @@ describe('over the control plane', () => {
   it('declines cleanly on a core with no operational AI', async () => {
     const d = deps(undefined);
 
-    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete', 'opsTestFetch']) {
+    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete', 'opsTestFetch', 'opsAgents']) {
       expect(await dispatch(method, {}, d)).toMatchObject({ ok: false });
     }
   });

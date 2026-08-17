@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AgentSchema } from '../../config/schema.js';
 import { FileCredentialStore } from '../../credentials/file-store.js';
 import { OpsHost } from '../ops-host.js';
-import { opsChatClients, opsModelFor } from './clients.js';
+import { opsChatClients, opsModelFor, opsUsableAgents } from './clients.js';
 import { OneTurnOperationRunner } from './one-turn.js';
 
 let dir: string;
@@ -220,6 +220,46 @@ describe('choosing the providers from the shared config', () => {
     // A short classification turn doesn't want the model reserved for planning work.
     expect(modelFor('claude')).toBe('sonnet');
   });
+});
+
+describe('what the editor may offer', () => {
+  it('lists the models the config actually named, per provider', () => {
+    const agents = opsUsableAgents(
+      agentConfig({
+        models: { planning: 'opus', implementation: 'sonnet', review: 'opus' },
+        fallbacks: [
+          { provider: 'gemini', transport: 'api', credential: { service: 'google', account: 'default' }, models: { implementation: 'flash' } },
+        ],
+      }),
+    );
+
+    // `opus` once, not twice — the same model named for two stages is one choice.
+    expect(agents).toEqual([
+      { provider: 'claude', models: ['opus', 'sonnet'], defaultModel: 'sonnet' },
+      { provider: 'gemini', models: ['flash'], defaultModel: 'flash' },
+    ]);
+  });
+
+  it('leaves out a cli provider, because a pipeline could never ask it', () => {
+    // The cli transport spawns a coding agent that reads files and runs commands; there
+    // is no way to ask it one question and get one JSON object back. Offering it would
+    // let someone build a pipeline whose model step can never run.
+    //
+    // The other half of the filter — a missing credential — has no test because the
+    // config schema already refuses `api` without one, so it cannot be constructed here.
+    // The check stays as a guard against a config that arrives some other way.
+    const agents = opsUsableAgents(
+      agentConfig({
+        transport: 'cli',
+        fallbacks: [
+          { provider: 'gemini', transport: 'api', credential: { service: 'google', account: 'default' }, models: { implementation: 'flash' } },
+        ],
+      }),
+    );
+
+    expect(agents.map((a) => a.provider)).toEqual(['gemini']);
+  });
+
 });
 
 describe('a core with no api provider', () => {

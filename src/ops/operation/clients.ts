@@ -60,6 +60,27 @@ export async function opsChatClients(agent: AgentConfig, credentials: Credential
   return clients;
 }
 
+/**
+ * The providers a pipeline may name, with the models configured for each.
+ *
+ * Same filter as `opsChatClients` — api transport and a credential — because the point is
+ * to offer only what can answer. Without this the editor would list every provider the
+ * schema allows and let someone pick one this core cannot ask.
+ */
+export function opsUsableAgents(agent: AgentConfig): Array<{ provider: string; models: string[]; defaultModel?: string }> {
+  const byProvider = new Map<string, { provider: string; models: string[]; defaultModel?: string }>();
+  for (const entry of [agent, ...agent.fallbacks]) {
+    if (entry.transport !== 'api' || !entry.credential) continue;
+    const found = byProvider.get(entry.provider) ?? { provider: entry.provider, models: [] };
+    for (const m of [entry.models.planning, entry.models.implementation, entry.models.review]) {
+      if (m && !found.models.includes(m)) found.models.push(m);
+    }
+    found.defaultModel ??= entry.models.implementation ?? entry.models.planning;
+    byProvider.set(entry.provider, found);
+  }
+  return [...byProvider.values()];
+}
+
 /** Default model per provider, taken from the same config. Pipelines may still name one. */
 export function opsModelFor(agent: AgentConfig): (provider: AgentProviderId) => string | undefined {
   const byProvider = new Map<AgentProviderId, string | undefined>();

@@ -151,6 +151,10 @@ export async function dispatch(
       deps.ops.syncSubscriptions();
       return { ok: true, enabled };
     }
+    case 'opsAgents':
+      if (!deps.ops) return NO_OPS;
+      // Empty means the model step is unwired — every provider is on `cli` or has no key.
+      return { agents: deps.ops.usableAgents() };
     case 'opsTestFetch': {
       if (!deps.ops) return NO_OPS;
       // The same call the pipeline will make, through the same code — a trial that ran

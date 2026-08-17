@@ -59,6 +59,15 @@ export interface OpsHostOptions {
   now?: () => number;
 }
 
+/** A provider the operational AI can actually ask, and the models configured for it. */
+export interface OpsAgent {
+  provider: string;
+  /** Distinct models named in the config for this provider. */
+  models: string[];
+  /** What it uses when a pipeline names none. */
+  defaultModel?: string;
+}
+
 export interface ManualRunResult {
   ok: boolean;
   /** Absent only when the pipeline key was unknown. */
@@ -78,6 +87,8 @@ export class OpsHost {
   private readonly subscriptions = new Map<string, StopFn>();
   /** Why the last load failed, so the UI can show it instead of an empty list. */
   private loadError?: string;
+  /** Providers that can answer, filled in when a config arrives. */
+  private agents: OpsAgent[] = [];
 
   constructor(private readonly options: OpsHostOptions) {
     this.dir = pipelinesDir(options.stateDir);
@@ -114,6 +125,22 @@ export class OpsHost {
    */
   useOperation(operation: OperationRunner): void {
     this.operation = operation;
+  }
+
+  /**
+   * Which providers can actually answer, and with which models.
+   *
+   * Not "what is in the config" — what `opsChatClients` kept. A provider on the `cli`
+   * transport or without a resolvable key is dropped there, and offering it in the editor
+   * would let someone build a pipeline that can never run its model step.
+   */
+  useAgents(agents: OpsAgent[]): void {
+    this.agents = agents;
+  }
+
+  /** For the editor: the choices it may offer. */
+  usableAgents(): OpsAgent[] {
+    return this.agents;
   }
 
   /** Point the ceiling check at this counter — same reason as `useOperation`: the limits

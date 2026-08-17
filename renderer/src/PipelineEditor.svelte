@@ -18,10 +18,10 @@
    * with dotted field paths — one definition of what is valid, in the place that has to
    * load it.
    */
+  import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
-  import { MODELS, type Provider } from './lib/wizard';
 
   interface Props {
     onclose: () => void;
@@ -160,11 +160,32 @@
   let skipField = $state('');
   let skipIs = $state<'non_empty' | 'empty'>('non_empty');
 
+  // Only what this core can actually ask — a provider on the `cli` transport or without a
+  // key is not offered, because picking one would build a pipeline whose model step can
+  // never run. The list comes from the core, not from a table in the window.
+  let agents = $state<Array<{ provider: string; models: string[]; defaultModel?: string }>>([]);
   let provider = $state('');
-  // Blank = whatever the app is configured to use. A pipeline that runs thousands of times
-  // is exactly where naming a cheaper model pays, so it has to be nameable here.
   let model = $state('');
   let maxTokens = $state(4096);
+
+  const chosenAgent = $derived(agents.find((a) => a.provider === provider));
+  /** Models the config named for the chosen provider. */
+  const models = $derived(chosenAgent?.models ?? []);
+
+  onMount(async () => {
+    try {
+      const r = await api.getOpsAgents();
+      agents = r.agents ?? [];
+      if (agents.length === 1) provider = agents[0]!.provider;
+    } catch {
+      agents = [];
+    }
+  });
+
+  // Changing the provider invalidates a model that belonged to the previous one.
+  $effect(() => {
+    if (model && !models.includes(model)) model = '';
+  });
   let systemPrompt = $state('');
   let userTemplate = $state('');
   // `confidence` is here because the checks below offer a confidence rule, and a rule
@@ -572,34 +593,43 @@
           </div>
         {/if}
       {:else if step === 2}
+        {#if agents.length === 0}
+          <p class="testErr">{t('editor.noAgents')}</p>
+        {/if}
         <div class="two">
           <label class="field">
             <span>{t('editor.provider')}</span>
-            <select bind:value={provider}>
+            <select bind:value={provider} disabled={agents.length === 0}>
               <option value="">{t('ops.defaultProvider')}</option>
-              <option value="claude">Claude</option>
-              <option value="gemini">Gemini</option>
-              <option value="gpt">GPT</option>
+              {#each agents as a}<option value={a.provider}>{a.provider}</option>{/each}
             </select>
           </label>
-          <label class="field"><span>max_tokens</span><input type="number" bind:value={maxTokens} /></label>
+          <label class="field">
+            <span>{t('editor.model')}</span>
+            <select bind:value={model} disabled={!provider || models.length === 0}>
+              <option value="">{chosenAgent?.defaultModel ? `${t('editor.modelDefault')} (${chosenAgent.defaultModel})` : t('editor.modelDefault')}</option>
+              {#each models as m}<option value={m}>{m}</option>{/each}
+            </select>
+          </label>
         </div>
-        <label class="field">
-          <span>{t('editor.model')}</span>
-          <input bind:value={model} spellcheck="false" placeholder={t('editor.modelPlaceholder')} list="ops-models" />
-          <datalist id="ops-models">
-            {#each provider ? (MODELS[provider as Provider] ?? []) : Object.values(MODELS).flat() as m}<option value={m}></option>{/each}
-          </datalist>
-        </label>
+        <label class="field narrow"><span>max_tokens</span><input type="number" bind:value={maxTokens} /></label>
 
-        <label class="field"><span>{t('editor.system')}</span><textarea bind:value={systemPrompt} rows="3"></textarea></label>
-        <label class="field">
-          <span>{t('editor.userTemplate')}</span>
-          <textarea bind:value={userTemplate} rows="3" placeholder={'제목: {{title}}'}></textarea>
-        </label>
+        <!-- Both go to the model as one turn. "User" is the chat role, not the person
+             using Corral — saying so here saves guessing at the label. -->
+        <div class="block">
+          <p class="blockTitle">{t('editor.prompts')}</p>
+          <p class="hint">{t('editor.promptsHint')}</p>
+          <label class="field"><span>{t('editor.system')}</span><textarea bind:value={systemPrompt} rows="3"></textarea></label>
+          <label class="field">
+            <span>{t('editor.userTemplate')}</span>
+            <textarea bind:value={userTemplate} rows="3" placeholder={'제목: {{title}}'}></textarea>
+          </label>
+        </div>
+
         <label class="field">
           <span>{t('editor.schema')}</span>
           <textarea class="mono" bind:value={schemaText} rows="7" spellcheck="false"></textarea>
+          <small>{t('editor.schemaHint')}</small>
         </label>
 
         <details>

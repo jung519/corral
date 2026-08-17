@@ -20,7 +20,7 @@ import { DirectionCheckStore, DirectionStore } from './core/direction.js';
 import { TokenBudget } from './core/token-budget.js';
 import { logger } from './core/logger.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
-import { opsChatClients, opsModelFor } from './ops/operation/clients.js';
+import { opsChatClients, opsModelFor, opsUsableAgents } from './ops/operation/clients.js';
 import { OneTurnOperationRunner } from './ops/operation/one-turn.js';
 import { startOpsHost } from './ops/ops-host.js';
 import { FileCredentialStore } from './credentials/file-store.js';
@@ -127,6 +127,8 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
       // The operational AI asks the same providers the development one does (D24). Only
       // `api` entries qualify; with none, its model step stays unwired and says so.
       const clients = await opsChatClients(config.agent, credentials);
+      // The editor asks for this so it can offer only what can answer.
+      ops.useAgents(opsUsableAgents(config.agent));
       if (clients.length) ops.useOperation(new OneTurnOperationRunner({ clients, modelFor: opsModelFor(config.agent) }));
       else logger.warn('ops: no api-transport provider configured — pipelines cannot run their model step');
       if (!channelStarted) {
