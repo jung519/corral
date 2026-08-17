@@ -118,7 +118,14 @@
   // ── trying the fetch before saving ────────────────────────────────────────────────
   let sampleEvent = $state('{ "id": "1" }');
   let testing = $state(false);
-  let testResult = $state<{ ok: boolean; error?: string; body?: unknown; fields?: Record<string, unknown> } | null>(null);
+  let testResult = $state<{
+    ok: boolean;
+    error?: string;
+    body?: unknown;
+    fields?: Record<string, unknown>;
+    missing?: string[];
+    selectError?: string;
+  } | null>(null);
 
   async function testFetch(): Promise<void> {
     testing = true;
@@ -583,9 +590,18 @@
             {#if testResult && !testResult.ok}
               <p class="testErr">{testResult.error}</p>
             {:else if testResult}
-              {#if Object.keys(testResult.fields ?? {}).length}
+              {#if testResult.selectError}
+                <p class="testErr">{t('editor.testSelectBad')} {testResult.selectError}</p>
+              {/if}
+              <!-- Shown even when nothing came out. An absent block was the symptom: a
+                   mistyped path produced no fields, so the section vanished and left the
+                   response to be compared by eye. -->
+              {#if !testResult.selectError && (Object.keys(testResult.fields ?? {}).length || testResult.missing?.length)}
                 <p class="blockTitle mt">{t('editor.testFields')}</p>
                 <pre class="out">{JSON.stringify(testResult.fields, null, 2)}</pre>
+                {#if testResult.missing?.length}
+                  <p class="testNote">{t('editor.testMissing')} {testResult.missing.join(', ')}</p>
+                {/if}
               {/if}
               <p class="blockTitle mt">{t('editor.testBody')}</p>
               <pre class="out">{JSON.stringify(testResult.body, null, 2)}</pre>
@@ -955,6 +971,13 @@
     margin: 10px 0 0;
     font-size: 12px;
     color: var(--red, #f85149);
+  }
+  /* A path that found nothing is worth pointing at, but it is not a failure — the sample
+     may simply not carry that field. Muted rather than red. */
+  .testNote {
+    margin: 6px 0 0;
+    font-size: 12px;
+    color: var(--muted, #8b949e);
   }
   .saved {
     margin-left: 6px;

@@ -308,7 +308,18 @@ export class OpsHost {
     request: unknown,
     event: unknown,
     select: unknown,
-  ): Promise<{ ok: boolean; error?: string; body?: unknown; fields?: Record<string, unknown> }> {
+  ): Promise<{
+    ok: boolean;
+    error?: string;
+    body?: unknown;
+    fields?: Record<string, unknown>;
+    /** Names whose path matched nothing. Not an error — a sample may simply not carry the
+     *  field — but the one thing the person pressing this needs told. */
+    missing?: string[];
+    /** `select` itself could not be read. Reported beside the fetch rather than instead of
+     *  it: the request worked, and its response is still worth seeing. */
+    selectError?: string;
+  }> {
     const parsed = HttpRequestSchema.safeParse(request);
     if (!parsed.success) {
       return { ok: false, error: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ') };
@@ -321,7 +332,25 @@ export class OpsHost {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
     const map = SelectSchema.safeParse(select ?? {});
-    return { ok: true, body, fields: map.success ? applySelect(body, map.data) : {} };
+    if (!map.success) {
+      // Reported the same way a bad `request` is, rather than swallowed. Nothing the editor
+      // can produce reaches here today — it writes `name: path` lines, and any non-empty
+      // string is a valid selector — but the object form (`path`/`truncate`/`limit`) is in
+      // the file format already, so the day that box opens this becomes reachable, and a
+      // silent `{}` is the worst possible answer to "why did nothing come out?" (CRL-53).
+      const selectError = map.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; ');
+      return { ok: true, body, fields: {}, selectError };
+    }
+
+    const selected = applySelect(body, map.data);
+    // A path that matched nothing leaves `undefined` here, and `undefined` does not survive
+    // the trip to the window — the key simply vanishes, which is indistinguishable from
+    // never having asked for it. The names go separately so the editor can say which ones.
+    //
+    // An empty string and an empty list are values and are not in here: "the field is
+    // blank" and "the path is wrong" are different answers to look at.
+    const missing = Object.keys(map.data).filter((name) => selected[name] === undefined);
+    return { ok: true, body, fields: selected, missing };
   }
 
   /**
