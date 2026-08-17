@@ -65,6 +65,19 @@ export async function opsChatClients(agent: AgentConfig, credentials: Credential
 }
 
 /**
+ * Which CLIs can be run with no tools at all.
+ *
+ * Measured, not assumed (CRL-43). `claude --tools ""` leaves the agent unable to run a
+ * command or write a file. codex was tried and cannot: under `-s read-only` the sandbox
+ * blocks writes but the shell still runs, which is enough to read a secret and return it
+ * inside the answer — and no feature flag turns the shell off. gemini could not be
+ * measured on the machine at hand, so it stays out rather than being guessed at.
+ *
+ * A provider joins this set when someone has watched it refuse to run a command.
+ */
+const TOOLS_CAN_BE_OFF = new Set<string>(['claude']);
+
+/**
  * The CLI transports, in the same preference order.
  *
  * A CLI entry needs no key in the config — the binary carries its own login — so unlike
@@ -80,6 +93,12 @@ export async function opsCliTransports(agent: AgentConfig, credentials: Credenti
 
   for (const entry of [agent, ...agent.fallbacks]) {
     if (entry.transport !== 'cli') continue;
+    if (!TOOLS_CAN_BE_OFF.has(entry.provider)) {
+      logger.warn(
+        `ops: ${entry.provider} cli cannot be run without tools, so a pipeline's prompt — a queue message and an API response — would reach an agent that can act on it. Not offered (CRL-43).`,
+      );
+      continue;
+    }
     if (seen.has(entry.provider)) continue; // one login per provider, unlike API keys
     seen.add(entry.provider);
     const apiKey = entry.credential ? await credentials.get(entry.credential as CredentialRef).catch(() => null) : null;
@@ -108,9 +127,10 @@ export async function opsCliTransports(agent: AgentConfig, credentials: Credenti
 export function opsUsableAgents(agent: AgentConfig): Array<{ provider: string; models: string[]; defaultModel?: string }> {
   const byProvider = new Map<string, { provider: string; models: string[]; defaultModel?: string }>();
   for (const entry of [agent, ...agent.fallbacks]) {
-    // A CLI entry qualifies on its own — the binary carries its login. An API entry needs
-    // a key, because without one there is nothing to authenticate with.
-    if (entry.transport === 'api' ? !entry.credential : entry.transport !== 'cli') continue;
+    // An API entry needs a key, because without one there is nothing to authenticate with.
+    // A CLI entry carries its own login but must be runnable with no tools — the editor
+    // must not offer a provider a pipeline cannot safely be asked on (CRL-43).
+    if (entry.transport === 'api' ? !entry.credential : !TOOLS_CAN_BE_OFF.has(entry.provider)) continue;
     const found = byProvider.get(entry.provider) ?? { provider: entry.provider, models: [] };
     for (const m of [entry.models.planning, entry.models.implementation, entry.models.review]) {
       if (m && !found.models.includes(m)) found.models.push(m);

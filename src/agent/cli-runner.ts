@@ -19,6 +19,9 @@ export interface CliStreamParser<T> {
   parse(line: string): T | null;
   /** Normalized activity events (text / tool_use) for the live timeline. */
   activity(event: T): AgentEvent[];
+  /** The assistant's text, uncapped — for `spec.onAnswerText`. Omit when this CLI's
+   *  stream cannot supply it; the turn then simply reports no answer text. */
+  answerText?(event: T): string | null;
   /** Fold this event's cost/token data into the accumulator. */
   usage(event: T, acc: UsageAcc): void;
   /** Whether this event signals an auth/credential failure (non-retryable). The raw
@@ -58,6 +61,8 @@ export function runCliTurn<T>(
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    // Accumulated across the whole turn: a long reply arrives as several text blocks.
+    let answer = '';
     let sawAuth = false;
     let sawRateLimit = false;
     let timedOut = false;
@@ -77,6 +82,10 @@ export function runCliTurn<T>(
       const event = parser.parse(line);
       if (!event) return;
       for (const e of parser.activity(event)) onEvent(e);
+      if (spec.onAnswerText && parser.answerText) {
+        const t = parser.answerText(event);
+        if (t) answer += t;
+      }
       parser.usage(event, acc);
       if (parser.isAuthFailure(event, line)) sawAuth = true;
       if (parser.isRateLimit?.(event, line)) sawRateLimit = true;
@@ -100,6 +109,7 @@ export function runCliTurn<T>(
     child.on('close', (code) => {
       if (timer) clearTimeout(timer);
       if (parser.flush) for (const e of parser.flush()) onEvent(e);
+      if (answer) spec.onAnswerText?.(answer);
       onEvent({ type: 'usage', ...acc });
       // rate_limit before auth: a spent quota is auto-recoverable (fail over), whereas
       // auth needs manual re-auth — don't misreport a usage limit as the latter.

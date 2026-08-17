@@ -60,6 +60,26 @@ export interface AgentTurnSpec {
   maxBudgetUsd?: number;
   turnTimeoutMs?: number;
   allowedTools?: string[];
+  /**
+   * Run with no tools at all.
+   *
+   * A coding agent normally gets a shell and a filesystem, and its prompt is the user's
+   * own issue. An operational turn's prompt carries a queue message and an external API
+   * response — text nobody here controls — so it asks a question and must not be able to
+   * act on the answer to it. Measured: narrowing tools stops commands but not writes, so
+   * the only sound setting is none (CRL-43).
+   *
+   * A transport that cannot express this must refuse the turn rather than run it wide.
+   */
+  noTools?: boolean;
+  /**
+   * Receive the model's reply verbatim.
+   *
+   * The `text` AgentEvent is capped for the live timeline (`oneLine(text, 2000)`), which
+   * is right for a UI and wrong for an answer that has to parse as JSON. With no tools
+   * there is no file to read it from, so a caller that needs the whole thing asks here.
+   */
+  onAnswerText?: (text: string) => void;
   signal?: AbortSignal;
 }
 

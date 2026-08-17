@@ -240,9 +240,8 @@ describe('what the editor may offer', () => {
     ]);
   });
 
-  it('includes a cli provider — it answers by writing a file', () => {
-    // A CLI entry needs no key in the config; the binary carries its own login. It was
-    // left out until the operational AI had somewhere to run one (CRL-42).
+  it('includes a cli provider that can be run without tools', () => {
+    // A CLI entry needs no key in the config; the binary carries its own login (CRL-42).
     const agents = opsUsableAgents(
       agentConfig({
         transport: 'cli',
@@ -256,22 +255,49 @@ describe('what the editor may offer', () => {
     expect(agents.map((a) => a.provider)).toEqual(['claude', 'gemini']);
   });
 
+  it('does not offer a cli provider whose tools cannot be turned off', () => {
+    // The editor must not let someone build a pipeline that can only be asked unsafely.
+    const agents = opsUsableAgents(
+      agentConfig({
+        transport: 'cli',
+        credential: undefined,
+        fallbacks: [{ provider: 'gpt', transport: 'cli', models: {} }],
+      }),
+    );
+
+    expect(agents.map((a) => a.provider)).toEqual(['claude']);
+  });
+
 });
 
 describe('cli transports for a core with no key', () => {
-  it('builds one per provider from the same registry the development AI uses', async () => {
+  it('builds one from the same registry the development AI uses', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+
+    const transports = await opsCliTransports(agentConfig({ transport: 'cli', credential: undefined }), credentials);
+
+    expect(transports.map((t) => `${t.provider}:${t.transport}`)).toEqual(['claude:cli']);
+  });
+
+  it('leaves out a provider whose cli cannot be run without tools', async () => {
+    // Measured, not assumed (CRL-43): codex still runs the shell under `-s read-only`,
+    // which is enough to read a secret and return it inside the answer. gemini could not
+    // be measured, so it stays out rather than being guessed at.
     const credentials = new FileCredentialStore(join(dir, 'c.json'));
 
     const transports = await opsCliTransports(
       agentConfig({
         transport: 'cli',
         credential: undefined,
-        fallbacks: [{ provider: 'gemini', transport: 'cli', models: {} }],
+        fallbacks: [
+          { provider: 'gemini', transport: 'cli', models: {} },
+          { provider: 'gpt', transport: 'cli', models: {} },
+        ],
       }),
       credentials,
     );
 
-    expect(transports.map((t) => `${t.provider}:${t.transport}`)).toEqual(['claude:cli', 'gemini:cli']);
+    expect(transports.map((t) => t.provider)).toEqual(['claude']);
   });
 
   it('leaves api entries alone — those are the other runner\'s', async () => {
