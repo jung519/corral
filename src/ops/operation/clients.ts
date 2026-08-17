@@ -2,10 +2,16 @@
  * The providers the operational AI can ask, built from the same agent settings the
  * development AI uses (D24 — one place to configure a provider, not two).
  *
- * Only `api` entries make it through. The `cli` transport spawns a coding agent that
- * reads files and runs commands; there is no way to ask it one question and get one JSON
- * object back. So a core configured for CLI only can run pipelines' triggers and inputs
- * but not their model step — and it should say that plainly rather than appear to work.
+ * Only `api` entries make it through — for now.
+ *
+ * Not because a CLI agent could not produce a structured answer: it writes files, and
+ * handing one back is what the development side already does. What it needs is somewhere
+ * to run, and `AgentTurnSpec` wants a `WorkspaceHandle` and a `WorkspaceIO` that `ops/`
+ * is not allowed to reach (docs/module-boundaries.md). Giving the operational AI a run
+ * directory of its own is its own piece of work.
+ *
+ * Until then a core configured for CLI only can run pipelines' triggers and inputs but
+ * not their model step — and it should say that plainly rather than appear to work.
  */
 import { AnthropicChatClient } from '../../agent/claude-api.js';
 import { GeminiChatClient } from '../../agent/google-api.js';
