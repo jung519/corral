@@ -144,6 +144,36 @@ describe('loading definitions', () => {
     expect(host.list()).toEqual([]);
   });
 
+  it('runs the definitions that parse even when one does not', async () => {
+    // This was all or nothing: survivable on a reload, where whatever was already running
+    // stayed, and silently fatal on a cold start, where there is nothing to keep. Three
+    // good pipelines and one bad file came up as zero — and the schema getting stricter
+    // (a required `message`, a credential unless the emulator is set) made that easier to
+    // walk into, since a file written in one place can be invalid in another (CRL-62).
+    writePipeline('echo.yaml', PIPELINE);
+    writePipeline('broken.yaml', 'key: "NOT A KEY"\n');
+
+    const host = await startOpsHost({ stateDir: dir, operation: stubModel });
+
+    expect(host.list().map((p) => p.key)).toEqual(['echo']);
+    expect(host.error).toMatch(/broken\.yaml/); // still said out loud
+    expect((await host.runManually('echo', { data: { title: 'x' } })).ok).toBe(true);
+  });
+
+  it('drops a pipeline whose file has just been broken', async () => {
+    // The registry mirrors what parses. Keeping it because it used to be fine would leave
+    // the running set and the files on disk disagreeing, with nothing on screen to say so.
+    writePipeline('echo.yaml', PIPELINE);
+    const host = await startOpsHost({ stateDir: dir, operation: stubModel });
+    expect(host.list()).toHaveLength(1);
+
+    writePipeline('echo.yaml', 'key: "NOT A KEY"\n');
+    await host.load();
+
+    expect(host.list()).toEqual([]);
+    expect(host.error).toMatch(/echo\.yaml/);
+  });
+
   it('keeps the pipelines it already had when a reload goes bad', async () => {
     writePipeline('echo.yaml', PIPELINE);
     const host = await startOpsHost({ stateDir: dir, operation: stubModel });

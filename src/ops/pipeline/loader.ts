@@ -62,12 +62,23 @@ export function parsePipeline(raw: unknown, file = ''): { pipeline?: Pipeline; i
  * (and the state a fresh install is in). Anything present but broken IS an error: silently
  * skipping it would leave an operator staring at a pipeline that never runs.
  */
-export async function loadPipelines(dir: string): Promise<Pipeline[]> {
+/**
+ * Read every definition, keeping what parsed and reporting what did not.
+ *
+ * Separate from `loadPipelines` because the two callers want different things. A tool that
+ * reads a directory wants "these are the definitions, or tell me why not" — one bad file
+ * is a failed read. A running core wants the opposite: the pipelines that *do* parse are
+ * somebody's live work, and stopping them over a typo in an unrelated file is a worse
+ * outage than the typo (CRL-62).
+ */
+export async function readPipelines(dir: string): Promise<{ pipelines: Pipeline[]; issues: PipelineLoadIssue[] }> {
   let names: string[];
   try {
     names = (await readdir(dir)).filter((n) => /\.ya?ml$/i.test(n)).sort();
   } catch {
-    return [];
+    // No directory yet is not a problem — it is what a core looks like before anybody has
+    // written a pipeline.
+    return { pipelines: [], issues: [] };
   }
 
   const pipelines: Pipeline[] = [];
@@ -103,6 +114,12 @@ export async function loadPipelines(dir: string): Promise<Pipeline[]> {
     pipelines.push(pipeline);
   }
 
+  return { pipelines, issues };
+}
+
+/** Every definition, or nothing. Throws on the first sign of trouble. */
+export async function loadPipelines(dir: string): Promise<Pipeline[]> {
+  const { pipelines, issues } = await readPipelines(dir);
   if (issues.length) throw new PipelineLoadError(issues);
   return pipelines;
 }

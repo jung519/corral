@@ -5,12 +5,13 @@
  * that wrong produces either lost work or a subscription that redelivers the same poison
  * message forever, and neither shows up in a happy-path test.
  */
+import { readFileSync } from 'node:fs';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunOutcome, RunRecord } from '../pipeline/run.js';
 import { PipelineSchema, type Pipeline } from '../pipeline/schema.js';
-import { PubSubTrigger } from './pubsub.js';
+import { PubSubTrigger, SETTLED } from './pubsub.js';
 import type { TriggerHealth } from './types.js';
 
 const SUBSCRIPTION = 'projects/p/subscriptions/s';
@@ -530,5 +531,32 @@ describe('a message that keeps failing', () => {
     await stop();
 
     expect(queue.acked.length).toBeGreaterThanOrEqual(6);
+  });
+});
+
+/**
+ * The header comment is this file's specification — what happens to a message is decided
+ * there and implemented below. It has now been wrong twice: once when the budget policy
+ * changed and once when it changed back, both times leaving a sentence that the next
+ * reader would have taken as the rule.
+ *
+ * Only the acknowledge list can be checked mechanically, so that is what this checks. The
+ * prose still needs a person.
+ */
+describe('the header says what the code does', () => {
+  it('lists exactly the outcomes that are acknowledged', () => {
+    const header = readFileSync(new URL('./pubsub.ts', import.meta.url), 'utf8').split('*/')[0]!;
+    const acknowledged = header
+      .slice(header.indexOf('acknowledged (gone)'), header.indexOf('left unacknowledged'))
+      .toLowerCase();
+
+    // The comment writes them as prose — "finished, skipped, held back, rejected" — so
+    // match on the words a reader would recognise rather than the identifiers.
+    expect(acknowledged).toContain('finished');
+    expect(acknowledged).toContain('skipped');
+    expect(acknowledged).toContain('held back');
+    expect(acknowledged).toContain('rejected');
+    expect(acknowledged).not.toContain('budget'); // it is handed back now
+    expect([...SETTLED].sort()).toEqual(['completed', 'rejected', 'reported', 'skipped']);
   });
 });
