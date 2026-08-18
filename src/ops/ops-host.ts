@@ -27,7 +27,7 @@ import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
 import { FieldSelectorSchema, HttpRequestSchema } from './pipeline/schema.js';
 import { triggerRegistry } from './trigger/index.js';
-import type { StopFn } from './trigger/types.js';
+import type { StopFn, TriggerHealth } from './trigger/types.js';
 import { RuleAnswerValidator } from './validate/rules.js';
 
 /** The `select` map on its own — a trial fetch has no pipeline to take it from. */
@@ -95,6 +95,14 @@ export class OpsHost {
   private readonly dir: string;
   /** Live subscriptions, by pipeline key. Present only while a pipeline is enabled. */
   private readonly subscriptions = new Map<string, StopFn>();
+  /**
+   * Whether each trigger is actually working, as the trigger last reported it.
+   *
+   * Separate from `subscriptions` because they answer different questions: that map says
+   * "we hold a stop handle", which stays true while a subscription is being refused on
+   * every pull. This one says whether work is arriving (CRL-60).
+   */
+  private readonly health = new Map<string, TriggerHealth>();
   /** Why the last load failed, so the UI can show it instead of an empty list. */
   private loadError?: string;
   /** Providers that can answer, filled in when a config arrives. */
@@ -194,6 +202,7 @@ export class OpsHost {
       if (this.registry.isEnabled(key)) continue;
       void stop();
       this.subscriptions.delete(key);
+      this.health.delete(key);
       logger.info(`ops: pipeline "${key}" stopped`);
     }
 
@@ -208,10 +217,22 @@ export class OpsHost {
           // well have started before there was one.
           budget: { check: () => this.budget?.check() ?? { ok: true } },
         });
-        this.subscriptions.set(pipeline.key, adapter.start(pipeline, (event) => this.fire(pipeline.key, event)));
+        this.subscriptions.set(
+          pipeline.key,
+          adapter.start(
+            pipeline,
+            (event) => this.fire(pipeline.key, event),
+            (health) => this.health.set(pipeline.key, health),
+          ),
+        );
       } catch (err) {
-        // An unknown kind must not stop the others from running.
-        logger.error(`ops: could not start the trigger for "${pipeline.key}" — ${err instanceof Error ? err.message : String(err)}`);
+        // An unknown kind must not stop the others from running. Recorded rather than only
+        // logged: without a subscription there is nothing left to report it later, and a
+        // pipeline that vanished from the dashboard for an unstated reason is the thing
+        // this issue is about.
+        const reason = err instanceof Error ? err.message : String(err);
+        logger.error(`ops: could not start the trigger for "${pipeline.key}" — ${reason}`);
+        this.health.set(pipeline.key, { state: 'blocked', reason });
       }
     }
   }
@@ -229,7 +250,12 @@ export class OpsHost {
     }
   }
 
-  /** Pipelines with a live subscription right now. */
+  /**
+   * Pipelines this host holds a stop handle for.
+   *
+   * Not "pipelines that are working" — a subscription refused on every pull is in here all
+   * the same. `list()` carries the health for that question (CRL-60).
+   */
   running(): string[] {
     return [...this.subscriptions.keys()];
   }
@@ -249,6 +275,9 @@ export class OpsHost {
     /** The provider the pipeline names, or undefined to follow the app's setting. */
     provider?: string;
     activeRuns: number;
+    /** Whether work is actually arriving. Absent on a pipeline nothing has started —
+     *  a disabled one has no trigger to be healthy or otherwise. */
+    health?: TriggerHealth;
   }> {
     return this.registry.all().map((p) => ({
       key: p.key,
@@ -257,6 +286,7 @@ export class OpsHost {
       trigger: p.trigger.kind,
       provider: p.agent.provider,
       activeRuns: this.runner.activeCount(p.key),
+      health: this.health.get(p.key),
     }));
   }
 

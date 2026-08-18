@@ -10,14 +10,18 @@
  * reprocess a failure, or to try a prompt out before pointing a queue at it.
  */
 import type { Pipeline } from '../pipeline/schema.js';
-import type { FireFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
+import type { FireFn, ReportFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
 
 export class ManualTrigger implements TriggerAdapter {
   readonly kind = 'manual' as const;
 
   constructor(_ctx: TriggerContext = {}) {}
 
-  start(_pipeline: Pipeline, _fire: FireFn): StopFn {
+  start(_pipeline: Pipeline, _fire: FireFn, report?: ReportFn): StopFn {
+    // Nothing to attach to and nothing that can stop working: a manual pipeline is run by
+    // somebody pressing a button. Said out loud anyway, because a trigger that reports
+    // nothing looks the same as one that has not got round to it yet.
+    report?.({ state: 'attached' });
     return () => {};
   }
 }

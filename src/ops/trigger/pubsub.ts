@@ -43,7 +43,8 @@ import type { CredentialStore } from '../../credentials/types.js';
 import { pubsubClient, type PubSubClient, type ReceivedMessage } from '../google-pubsub.js';
 import type { RunOutcome, RunRecord } from '../pipeline/run.js';
 import type { Pipeline } from '../pipeline/schema.js';
-import type { FireFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
+import { HttpError } from '../../core/fetch-retry.js';
+import type { FireFn, ReportFn, StopFn, TriggerAdapter, TriggerContext, TriggerHealth } from './types.js';
 
 /** How long a pull waits for a message before returning empty. */
 const PULL_INTERVAL_MS = 2_000;
@@ -67,13 +68,27 @@ export class PubSubTrigger implements TriggerAdapter {
 
   constructor(private readonly ctx: PubSubContext = {}) {}
 
-  start(pipeline: Pipeline, fire: FireFn): StopFn {
+  start(pipeline: Pipeline, fire: FireFn, report?: ReportFn): StopFn {
     if (pipeline.trigger.kind !== 'pubsub') throw new Error('PubSubTrigger given a non-pubsub trigger');
     const { subscription, credential } = pipeline.trigger;
 
     let stopped = false;
     /** Set while the loop is waiting; calling it cuts the wait short. */
     let wake: (() => void) | undefined;
+
+    /**
+     * Say how it is going, but only when that changes.
+     *
+     * A pull runs every two seconds forever. Reporting each attempt would redraw the
+     * dashboard on a timer and bury the moment something actually changed.
+     */
+    let last = '';
+    const health = (next: TriggerHealth): void => {
+      const key = next.state === 'attached' ? 'attached' : `${next.state}:${next.reason}`;
+      if (key === last) return;
+      last = key;
+      report?.(next);
+    };
 
     /**
      * Wait, unless someone wakes us.
@@ -102,10 +117,16 @@ export class PubSubTrigger implements TriggerAdapter {
         client = await pubsubClient(credential, this.ctx.credentials, this.ctx.now);
       } catch (err) {
         logger.error(`ops: pipeline "${pipeline.key}" cannot reach Pub/Sub — ${message(err)}`);
+        // The credential is missing or unreadable. Nothing here retries, and waiting would
+        // not help if it did.
+        health({ state: 'blocked', reason: message(err) });
         return;
       }
 
       logger.info(`ops: pipeline "${pipeline.key}" subscribed to ${subscription}`);
+      // Subscribed is not the same as working: the credential has only been parsed at this
+      // point, and whether it is accepted is settled by the first pull.
+      health({ state: 'attached' });
       let waitingOnBudget = false;
       while (!stopped) {
         // ── is there anything left to spend? ────────────────────────────────────
@@ -140,9 +161,12 @@ export class PubSubTrigger implements TriggerAdapter {
           received = await client.pull(subscription, pipeline.max_concurrent);
         } catch (err) {
           logger.warn(`ops: pull failed for "${pipeline.key}" — ${message(err)}`);
+          health(pullHealth(err));
           await rest(PULL_INTERVAL_MS);
           continue;
         }
+        // It worked, so whatever was wrong is over.
+        health({ state: 'attached' });
 
         // ── did we stop while that pull was out? ────────────────────────────────
         //
@@ -244,6 +268,27 @@ function decode(message: ReceivedMessage['message']): unknown {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Whether waiting will fix this pull.
+ *
+ * `fetchRetry` has already made this judgement once — it retries 429, 5xx and a rate-limit
+ * 403, and throws everything else. So an `HttpError` arriving here means retrying did not
+ * help or was not worth trying, and the status says which kind of not-worth-trying:
+ *
+ *   401  the token was refused — a revoked, disabled or wrong-project key
+ *   403  the service account may not consume this subscription
+ *   404  no such subscription — a typo, a deletion, another project
+ *
+ * None of those change until a person changes something. Anything else — a socket that
+ * closed, a name that would not resolve, a 500 that outlasted its retry — is the sort of
+ * thing that comes back on its own, and the loop is already trying again every two seconds.
+ */
+function pullHealth(err: unknown): TriggerHealth {
+  const reason = message(err);
+  if (err instanceof HttpError && [401, 403, 404].includes(err.status)) return { state: 'blocked', reason };
+  return { state: 'retrying', reason };
 }
 
 function message(err: unknown): string {

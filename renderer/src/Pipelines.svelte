@@ -119,12 +119,27 @@
       {#each overview.pipelines as p (p.key)}
         {@const c = overview.counts[p.key]}
         <div class="row">
-          <span class="dot" class:on={p.enabled}></span>
+          <!-- The dot was `enabled` alone, which is what the operator asked for rather than
+               what happened: a subscription refused on every pull sat here lit (CRL-60). -->
+          <span
+            class="dot"
+            class:on={p.enabled && p.health?.state !== 'blocked' && p.health?.state !== 'retrying'}
+            class:blocked={p.enabled && p.health?.state === 'blocked'}
+            class:retrying={p.enabled && p.health?.state === 'retrying'}
+            title={p.health && p.health.state !== 'attached' ? p.health.reason : ''}
+          ></span>
           <a class="who" href="#/pipeline/{encodeURIComponent(p.key)}">
             <span class="key">{p.key}</span>
             <span class="desc">{p.description ?? ''}</span>
           </a>
           <span class="route">{p.trigger} → {p.provider ?? t('ops.defaultProvider')}</span>
+
+          {#if p.enabled && p.health && p.health.state !== 'attached'}
+            <!-- The reason, not just a colour. Otherwise it is back to reading the log. -->
+            <span class="health {p.health.state}" title={p.health.reason}>
+              {p.health.state === 'blocked' ? t('ops.health.blocked') : t('ops.health.retrying')}
+            </span>
+          {/if}
 
           <span class="counts">
             <span class="today">{c?.runs ?? 0} {t('ops.today')}</span>
@@ -208,6 +223,28 @@
   }
   .dot.on {
     background: var(--green, #3fb950);
+  }
+  /* Two failing colours, because they mean different things to whoever is looking:
+     amber is "wait", red is "go and change something". */
+  .dot.retrying {
+    background: var(--amber, #d29922);
+  }
+  .dot.blocked {
+    background: var(--red, #f85149);
+  }
+  .health {
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  .health.retrying {
+    color: var(--amber, #d29922);
+    border: 1px solid var(--amber, #d29922);
+  }
+  .health.blocked {
+    color: var(--red, #f85149);
+    border: 1px solid var(--red, #f85149);
   }
   .row {
     display: flex;
