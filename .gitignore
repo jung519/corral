@@ -10,3 +10,4 @@ coverage/
 .corral-state/
 corral.yaml
 corral.local.yaml
+tmp/
