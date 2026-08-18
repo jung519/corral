@@ -10,7 +10,7 @@ describe('dockerOptionsFromConfig', () => {
   });
 
   it('honors config and an image override', () => {
-    const opts = dockerOptionsFromConfig({ image: 'cfg-image', memory: '2g' }, 'override-image');
+    const opts = dockerOptionsFromConfig({ auto_build: false, mount_host_login: false, image: 'cfg-image', memory: '2g' }, 'override-image');
     expect(opts.image).toBe('override-image');
     expect(opts.memory).toBe('2g');
   });

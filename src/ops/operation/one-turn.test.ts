@@ -3,7 +3,7 @@
  * answer of the declared shape or move to another provider — and say which one answered.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { ChatClient, ChatTurn, NeutralMessage } from '../../agent/api-loop.js';
+import type { ChatClient, ChatTurn, NeutralMessage, ToolDef } from '../../agent/api-loop.js';
 import type { AgentProviderId } from '../../agent/types.js';
 import { PipelineSchema, type PipelineAgentStep } from '../pipeline/schema.js';
 import type { OperationOutcome, OperationResult } from '../pipeline/ports.js';
@@ -96,20 +96,27 @@ describe('asking for a shape and getting one', () => {
 
     await runner.run(step(), { title: 'a record' });
 
-    expect(seen[0][0].content).toContain('You label records.');
-    expect(seen[0][0].content).toContain('single JSON object');
-    expect(seen[0][1]).toEqual({ role: 'user', content: 'Title: a record' });
+    expect(seen[0]![0]!.content).toContain('You label records.');
+    expect(seen[0]![0]!.content).toContain('single JSON object');
+    expect(seen[0]![1]).toEqual({ role: 'user', content: 'Title: a record' });
   });
 
   it('sends no tools — this is one turn, not a loop', async () => {
-    const send = vi.fn(async () => ({ text: GOOD, toolCalls: [], inputTokens: 1, outputTokens: 1 }));
+    // Parameters spelled out so the recorded call is a tuple and not `[]` — the point of
+    // the test is the second argument.
+    const send = vi.fn(async (_messages: NeutralMessage[], _tools: ToolDef[], _model?: string) => ({
+      text: GOOD,
+      toolCalls: [],
+      inputTokens: 1,
+      outputTokens: 1,
+    }));
     const runner = new OneTurnOperationRunner({
       clients: [{ provider: 'claude', preflight: async () => ({ ok: true }), send }],
     });
 
     await runner.run(step(), {});
 
-    expect(send.mock.calls[0][1]).toEqual([]);
+    expect(send.mock.calls[0]![1]).toEqual([]);
   });
 
   it('keeps only the declared fields', async () => {

@@ -5,13 +5,15 @@ import { runStaticQa } from './static-qa-runner.js';
 const handle: WorkspaceHandle = { id: 'ISS-1', workdir: '/w', backend: 'local' };
 
 function fakeIo(written: Record<string, string>): WorkspaceIO {
+  // Typed as the port rather than cast through `unknown`: the cast was what let the
+  // callback parameters fall back to `any`.
   return {
-    async exec(_h, command) {
+    async exec(_h: WorkspaceHandle, command: string) {
       return command.includes('fail')
         ? { stdout: '', stderr: 'boom', code: 1 }
         : { stdout: 'ok', stderr: '', code: 0 };
     },
-    async writeFile(_h, path, content) {
+    async writeFile(_h: WorkspaceHandle, path: string, content: string) {
       written[path] = content;
     },
   } as unknown as WorkspaceIO;

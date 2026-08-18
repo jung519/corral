@@ -69,7 +69,7 @@ describe('running a pipeline by hand', () => {
     const runs = await host.history.list({ days: 1 });
     // A history with only the successes in it would be useless for what history is for.
     expect(runs).toHaveLength(2);
-    expect((await host.history.totals(1))[0].runs).toBe(2);
+    expect((await host.history.totals(1))[0]!.runs).toBe(2);
   });
 
   it('says which pipeline it could not find', async () => {

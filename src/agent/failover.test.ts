@@ -39,7 +39,7 @@ describe('FailoverAgent', () => {
     const m = [member('a', [ok()]), member('b', [ok()])];
     const fa = new FailoverAgent(m);
     expect((await fa.run(ws, issue, opts())).ok).toBe(true);
-    expect((m[1].adapter as FakeAgent).calls).toHaveLength(0);
+    expect((m[1]!.adapter as FakeAgent).calls).toHaveLength(0);
   });
 
   it('advances to the next agent on a rate_limit and sticks there', async () => {

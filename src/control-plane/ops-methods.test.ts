@@ -237,7 +237,7 @@ describe('over the control plane', () => {
       )) as any;
 
       // The URL was built from the sample event, so `{{id}}` can be checked before saving.
-      expect(requests[0].url).toBe('/api/records/7');
+      expect(requests[0]!.url).toBe('/api/records/7');
       expect(r).toMatchObject({ ok: true, body: { data: { title: 'hello' } }, fields: { title: 'hello' } });
     });
 
@@ -261,7 +261,7 @@ describe('over the control plane', () => {
       );
 
       // Which is the point: what you tried is what will run.
-      expect(requests[0].headers['x-api-key']).toBe('super-secret');
+      expect(requests[0]!.headers['x-api-key']).toBe('super-secret');
     });
 
     it('answers with the failure rather than throwing it', async () => {

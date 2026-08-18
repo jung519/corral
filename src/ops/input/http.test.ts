@@ -114,8 +114,8 @@ describe('the same shape for GraphQL', () => {
     const resolved = await new HttpInputResolver().resolve(input, { id: 42 });
 
     // No GraphQL adapter — it is a POST with a JSON body, and that is all it ever was.
-    expect(requests[0].method).toBe('POST');
-    expect(JSON.parse(requests[0].body)).toEqual({
+    expect(requests[0]!.method).toBe('POST');
+    expect(JSON.parse(requests[0]!.body)).toEqual({
       query: 'query($id: ID!) { record(id: $id) { title } }',
       variables: { id: 42 },   // a number stays a number — the API declared the type, not us
     });
@@ -135,7 +135,7 @@ describe('secrets', () => {
     await new HttpInputResolver(credentials).resolve(input, {});
 
     // The definition holds a pointer; the value only exists at call time.
-    expect(requests[0].headers.authorization).toBe('Bearer super-secret');
+    expect(requests[0]!.headers.authorization).toBe('Bearer super-secret');
   });
 
   it('goes on whatever header the API wants', async () => {
@@ -154,8 +154,8 @@ describe('secrets', () => {
 
     await new HttpInputResolver(credentials).resolve(input, {});
 
-    expect(requests[0].headers['x-api-key']).toBe('super-secret');
-    expect(requests[0].headers.authorization).toBeUndefined();
+    expect(requests[0]!.headers['x-api-key']).toBe('super-secret');
+    expect(requests[0]!.headers.authorization).toBeUndefined();
   });
 
   it('lets a header in the definition win, whatever case it was written in', async () => {
@@ -175,7 +175,7 @@ describe('secrets', () => {
 
     await new HttpInputResolver(credentials).resolve(input, {});
 
-    expect(requests[0].headers.authorization).toBe('Bearer from-the-definition');
+    expect(requests[0]!.headers.authorization).toBe('Bearer from-the-definition');
   });
 });
 

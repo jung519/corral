@@ -337,8 +337,8 @@ describe('what the run tells the outside world', () => {
     const runEvents = seen.filter((e) => e.kind === 'run');
     expect(runEvents.map((e) => e.label)).toEqual(['run started', 'run completed']);
     // The identifier is the run; the pipeline it belongs to rides along in data.
-    expect(runEvents[0].identifier).toBe(record.id);
-    expect(runEvents[0].data).toMatchObject({ pipeline: 'classify' });
+    expect(runEvents[0]!.identifier).toBe(record.id);
+    expect(runEvents[0]!.data).toMatchObject({ pipeline: 'classify' });
   });
 
   it('reports the outcome and the failing stage on the end event', async () => {

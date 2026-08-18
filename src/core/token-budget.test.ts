@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { bus, type CorralEvent } from './events.js';
-import { TokenBudget } from './token-budget.js';
+import { TokenBudget, type TokenLimits } from './token-budget.js';
 
 let dir: string;
 let clock: number;
@@ -29,7 +29,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-const budget = (limits = { dailyInputTokens: 1000, dailyOutputTokens: 500 }) =>
+const budget = (limits: TokenLimits = { dailyInputTokens: 1000, dailyOutputTokens: 500 }) =>
   new TokenBudget(limits, dir, { now: () => clock });
 
 describe('sharing one counter', () => {
