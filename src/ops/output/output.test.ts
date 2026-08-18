@@ -67,7 +67,7 @@ describe('calling the user API', () => {
     );
 
     expect(requests[0]).toMatchObject({ method: 'PATCH', url: '/api/records/42' });
-    expect(JSON.parse(requests[0].body)).toEqual({ labels: 'news' });
+    expect(JSON.parse(requests[0]!.body)).toEqual({ labels: 'news' });
   });
 
   it('can reference the identifier it came in with as well as the answer', async () => {
@@ -81,7 +81,7 @@ describe('calling the user API', () => {
     );
 
     // 7 stays a number: the body template is the receiver's JSON, not a rendering of it.
-    expect(JSON.parse(requests[0].body)).toEqual({ id: 7, title: 'a record' });
+    expect(JSON.parse(requests[0]!.body)).toEqual({ id: 7, title: 'a record' });
   });
 
   it('attaches the credential the definition names', async () => {
@@ -93,7 +93,7 @@ describe('calling the user API', () => {
       {},
     );
 
-    expect(requests[0].headers.authorization).toBe('Bearer super-secret');
+    expect(requests[0]!.headers.authorization).toBe('Bearer super-secret');
   });
 
   it('raises a rejected write rather than swallowing it', async () => {
@@ -128,9 +128,9 @@ describe('publishing a message', () => {
       },
     );
 
-    expect(requests[0].url).toBe('/v1/projects/p/topics/results:publish');
-    const sent = JSON.parse(requests[0].body) as { messages: Array<{ data: string }> };
-    expect(JSON.parse(Buffer.from(sent.messages[0].data, 'base64').toString())).toEqual({ labels: ['news'] });
+    expect(requests[0]!.url).toBe('/v1/projects/p/topics/results:publish');
+    const sent = JSON.parse(requests[0]!.body) as { messages: Array<{ data: string }> };
+    expect(JSON.parse(Buffer.from(sent.messages[0]!.data, 'base64').toString())).toEqual({ labels: ['news'] });
   });
 
   it('refuses a pubsub output with nothing to publish', () => {
@@ -145,8 +145,8 @@ describe('publishing a message', () => {
       { id: 42, items: 'news' },
     );
 
-    const sent = JSON.parse(requests[0].body) as { messages: Array<{ data: string }> };
-    expect(JSON.parse(Buffer.from(sent.messages[0].data, 'base64').toString())).toEqual({
+    const sent = JSON.parse(requests[0]!.body) as { messages: Array<{ data: string }> };
+    expect(JSON.parse(Buffer.from(sent.messages[0]!.data, 'base64').toString())).toEqual({
       recordId: 42,
       labels: 'news',
     });
@@ -221,7 +221,7 @@ on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review"
     const { run } = await host.runManually('classify', {});
 
     expect(run?.outcome).toBe('completed');
-    expect(JSON.parse(requests[0].body)).toEqual({ labels: ['news'] }); // the dropped value never left
+    expect(JSON.parse(requests[0]!.body)).toEqual({ labels: ['news'] }); // the dropped value never left
   });
 
   it('records a failed delivery as its own thing, with the tokens it already spent', async () => {
@@ -244,6 +244,6 @@ on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review"
     expect((await host.runManually('classify', {})).run?.outcome).toBe('completed');
     // A list answer arrives as a list. Joining it into "news" would be a different value
     // than the one the model gave and the validator approved.
-    expect(JSON.parse(requests[0].body)).toEqual({ labels: ['news'] });
+    expect(JSON.parse(requests[0]!.body)).toEqual({ labels: ['news'] });
   });
 });

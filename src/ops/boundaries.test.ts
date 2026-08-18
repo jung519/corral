@@ -31,7 +31,7 @@ function filesUnder(dir: string): string[] {
 /** Module specifiers this file imports. */
 function importsOf(file: string): string[] {
   const src = readFileSync(file, 'utf8');
-  return [...src.matchAll(/(?:^|\n)\s*(?:import|export)[^'"\n]*from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]);
+  return [...src.matchAll(/(?:^|\n)\s*(?:import|export)[^'"\n]*from\s+['"]([^'"]+)['"]/g)].map((m) => m[1]!);
 }
 
 describe('module boundaries', () => {
@@ -78,7 +78,7 @@ describe('module boundaries', () => {
         // still inside ops/, and only a resolved path can tell you that.
         const target = resolve(dirname(file), spec);
         if (target.startsWith(opsDir)) continue;
-        const top = target.replace(SRC, '').split('/')[0];
+        const top = target.replace(SRC, '').split('/')[0]!;
         if (!SHARED.includes(top)) outside.push(`${file.replace(SRC, '')} → ${spec}`);
       }
     }

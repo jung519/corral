@@ -51,7 +51,7 @@ describe('one run, one line', () => {
 
     const lines = readFileSync(logFile('2026-08-15'), 'utf8').trim().split('\n');
     expect(lines).toHaveLength(1);
-    expect(JSON.parse(lines[0])).toMatchObject({
+    expect(JSON.parse(lines[0]!)).toMatchObject({
       v: 1,
       pipeline: 'classify',
       outcome: 'completed',
@@ -92,7 +92,7 @@ describe('the daily totals', () => {
     await s.append(run({ outcome: 'agent_failed', stage: 'agent', tokens: undefined, costUsd: undefined }));
     await s.append(run({ outcome: 'skipped', stage: 'input', tokens: undefined, costUsd: undefined }));
 
-    const [today] = await s.totals(1);
+    const today = (await s.totals(1))[0]!;
 
     expect(today).toMatchObject({
       date: '2026-08-15',
@@ -115,7 +115,7 @@ describe('the daily totals', () => {
     await s.append(run({ outcome: 'completed', lowConfidence: true }));
     await s.append(run({ outcome: 'skipped' }));
 
-    expect((await s.totals(1))[0].lowConfidence).toBe(3);
+    expect((await s.totals(1))[0]!.lowConfidence).toBe(3);
   });
 
   it('is rebuilt when the file disagrees with the log', async () => {
@@ -173,7 +173,7 @@ describe('looking back over N days', () => {
   });
 
   it('returns the newest run first', async () => {
-    const [newest] = await store().list({ days: 7 });
+    const newest = (await store().list({ days: 7 }))[0]!;
 
     expect(dayKey(newest.startedAt)).toBe('2026-08-15');
   });
@@ -298,8 +298,8 @@ describe('when the files are damaged', () => {
 
     const totals = (await s.totals(1))[0];
 
-    expect(totals.runs).toBe(2);
-    expect(totals.tokens).toBe(30);
+    expect(totals!.runs).toBe(2);
+    expect(totals!.tokens).toBe(30);
   });
 
   it('treats a missing history directory as an empty history', async () => {
@@ -358,7 +358,7 @@ describe('summing', () => {
     const rebuilt = (await s.totals(1))[0]; // recomputed from the log
 
     expect(addedUp).toEqual(rebuilt);
-    expect(addedUp.costUsd).toBe(0.373);
+    expect(addedUp!.costUsd).toBe(0.373);
   });
 });
 
@@ -414,7 +414,7 @@ describe('no native modules', () => {
     // macOS and Windows — so this store must not reach for a package to do its job.
     for (const file of ['./jsonl-store.ts', './store.ts']) {
       const src = readFileSync(new URL(file, import.meta.url), 'utf8');
-      const specifiers = [...src.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]);
+      const specifiers = [...src.matchAll(/from\s+'([^']+)'/g)].map((m) => m[1]!);
 
       expect(specifiers.filter((s) => !s.startsWith('node:') && !s.startsWith('.'))).toEqual([]);
     }

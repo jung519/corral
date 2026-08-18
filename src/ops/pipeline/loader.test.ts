@@ -80,7 +80,7 @@ describe('a valid definition', () => {
   it('loads, and every field arrives as a runtime value', async () => {
     write('classify.yaml', VALID);
 
-    const [p] = await loadPipelines(dir);
+    const p = (await loadPipelines(dir))[0]!;
 
     expect(p.key).toBe('classify-record');
     expect(p.max_concurrent).toBe(2);
@@ -108,7 +108,7 @@ output: { kind: none }
 `,
     );
 
-    const [p] = await loadPipelines(dir);
+    const p = (await loadPipelines(dir))[0]!;
 
     expect(p.enabled).toBe(true);
     expect(p.max_concurrent).toBe(1); // start at one and raise once measured
@@ -155,7 +155,7 @@ output: { kind: none }
 `);
 
     expect(err.issues[0]).toMatchObject({ path: 'max_concurrent' });
-    expect(err.issues[0].message).toMatch(/number/i);
+    expect(err.issues[0]!.message).toMatch(/number/i);
   });
 
   it('rejects an adapter kind nothing implements, and lists the ones that exist', async () => {
@@ -171,8 +171,8 @@ output: { kind: none }
 
     // A kind in the schema that nothing runs would mean accepting a pipeline that can
     // never fire — the message has to point at what is actually available.
-    expect(err.issues[0].path).toContain('trigger');
-    expect(err.issues[0].message).toMatch(/manual|schedule|pubsub/);
+    expect(err.issues[0]!.path).toContain('trigger');
+    expect(err.issues[0]!.message).toMatch(/manual|schedule|pubsub/);
   });
 
   it('rejects a key that would not survive being used as an identifier', async () => {
@@ -187,7 +187,7 @@ output: { kind: none }
 `);
 
     expect(err.issues[0]).toMatchObject({ path: 'key' });
-    expect(err.issues[0].message).toMatch(/lowercase/);
+    expect(err.issues[0]!.message).toMatch(/lowercase/);
   });
 
   it('rejects a schema that declares no fields at all', async () => {
@@ -203,7 +203,7 @@ output: { kind: none }
 
     // Only declared properties survive the answer check, so this pipeline would pay for a
     // turn and discard everything it got back — reporting success while doing nothing.
-    expect(err.issues[0].message).toMatch(/at least one property/);
+    expect(err.issues[0]!.message).toMatch(/at least one property/);
   });
 
   it('rejects an allowed-values rule with no list and nowhere to get one', async () => {
@@ -219,14 +219,14 @@ agent:
 output: { kind: none }
 `);
 
-    expect(err.issues[0].message).toMatch(/inline `values` list or a `source`/);
+    expect(err.issues[0]!.message).toMatch(/inline `values` list or a `source`/);
   });
 
   it('reports malformed YAML against the file rather than crashing the load', async () => {
     const err = await load('key: [unclosed\n');
 
     expect(err.issues[0]).toMatchObject({ file: 'broken.yaml', path: '' });
-    expect(err.issues[0].message).toMatch(/not valid YAML/);
+    expect(err.issues[0]!.message).toMatch(/not valid YAML/);
   });
 
   it('collects every problem in one pass instead of one per run', async () => {

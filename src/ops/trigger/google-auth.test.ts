@@ -34,7 +34,7 @@ describe('the assertion', () => {
 
     const jwt = signAssertion(KEY, SCOPE, now);
 
-    const [header, payload, signature] = jwt.split('.');
+    const [header, payload, signature] = jwt.split('.') as [string, string, string];
     expect(JSON.parse(Buffer.from(header, 'base64url').toString())).toEqual({ alg: 'RS256', typ: 'JWT' });
     expect(JSON.parse(Buffer.from(payload, 'base64url').toString())).toMatchObject({
       iss: KEY.client_email,

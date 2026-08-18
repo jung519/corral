@@ -36,7 +36,7 @@ describe('saving a new pipeline', () => {
     const result = await savePipeline(dir, DEFINITION);
 
     expect(result).toMatchObject({ ok: true, file: 'classify-record.yaml' });
-    const [loaded] = await loadPipelines(dir);
+    const loaded = (await loadPipelines(dir))[0]!;
     expect(loaded.key).toBe('classify-record');
     expect(loaded.input.select).toEqual({ title: 'title' });
   });
@@ -108,8 +108,8 @@ describe('nothing invalid reaches disk', () => {
       agent: { ...DEFINITION.agent, schema: { type: 'object', properties: {} } },
     });
 
-    expect(result.issues?.[0].path).toBe('agent.schema');
-    expect(result.issues?.[0].message).toMatch(/at least one property/);
+    expect(result.issues?.[0]!.path).toBe('agent.schema');
+    expect(result.issues?.[0]!.message).toMatch(/at least one property/);
   });
 
   it('leaves a good file untouched when a bad edit is refused', async () => {
@@ -138,7 +138,7 @@ describe('editing an existing one', () => {
 
     await savePipeline(dir, { ...DEFINITION, description: 'changed' }, { overwrite: true });
 
-    expect((await loadPipelines(dir))[0].description).toBe('changed');
+    expect((await loadPipelines(dir))[0]!.description).toBe('changed');
   });
 
   it('writes back to the file that already holds the key, whatever it is called', async () => {
@@ -151,7 +151,7 @@ describe('editing an existing one', () => {
     // would then refuse them both as duplicates.
     expect(result.file).toBe('hand-written.yaml');
     expect(existsSync(join(dir, 'classify-record.yaml'))).toBe(false);
-    expect((await loadPipelines(dir))[0].description).toBe('edited');
+    expect((await loadPipelines(dir))[0]!.description).toBe('edited');
   });
 
   it('finds nothing for a key that is not there', async () => {
