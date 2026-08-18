@@ -165,7 +165,11 @@ describe('loading definitions', () => {
       description: 'hand the body straight back',
       enabled: true,
       trigger: 'manual',
+      provider: undefined,
       activeRuns: 0,
+      // A manual trigger has nothing to attach to, and says so rather than staying silent —
+      // no report at all looks the same as one that has not arrived yet (CRL-60).
+      health: { state: 'attached' },
     });
   });
 });

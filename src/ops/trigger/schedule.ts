@@ -11,7 +11,7 @@
 import { logger } from '../../core/logger.js';
 import type { Pipeline } from '../pipeline/schema.js';
 import { calendarFieldsIn, cronMatches, parseCron, type CronFields } from './cron.js';
-import type { FireFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
+import type { FireFn, ReportFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
 
 const TICK_MS = 60_000;
 
@@ -20,7 +20,7 @@ export class ScheduleTrigger implements TriggerAdapter {
 
   constructor(private readonly ctx: TriggerContext = {}) {}
 
-  start(pipeline: Pipeline, fire: FireFn): StopFn {
+  start(pipeline: Pipeline, fire: FireFn, report?: ReportFn): StopFn {
     if (pipeline.trigger.kind !== 'schedule') throw new Error('ScheduleTrigger given a non-schedule trigger');
     const { cron, timezone } = pipeline.trigger;
 
@@ -31,6 +31,8 @@ export class ScheduleTrigger implements TriggerAdapter {
       // A schedule nobody can read is a pipeline that silently never runs. Say so once,
       // loudly, and stay stopped rather than firing at some guessed interval.
       logger.error(`ops: pipeline "${pipeline.key}" has an unusable schedule "${cron}" — ${message(err)}`);
+      // Nothing about waiting makes a cron expression parse.
+      report?.({ state: 'blocked', reason: `unusable schedule "${cron}" — ${message(err)}` });
       return () => {};
     }
 
@@ -67,6 +69,9 @@ export class ScheduleTrigger implements TriggerAdapter {
     };
 
     const timer = setInterval(tick, TICK_MS);
+    // The expression parsed and the timer is running — there is nothing else this trigger
+    // depends on. A schedule cannot be refused by anybody the way a subscription can.
+    report?.({ state: 'attached' });
     // Never hold the process open for a timer; a core with nothing else to do should be
     // able to exit.
     timer.unref?.();

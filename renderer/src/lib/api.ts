@@ -76,6 +76,18 @@ export interface OpsPipeline {
   /** Undefined = follows the app's configured provider. */
   provider?: string;
   activeRuns: number;
+  /**
+   * Whether work is actually arriving. Absent while nothing has started the trigger.
+   *
+   * `enabled` is what the operator asked for; this is what happened. A subscription being
+   * refused on every pull is enabled and not working (CRL-60).
+   */
+  health?:
+    | { state: 'attached' }
+    /** Passes on its own — the loop is already retrying. */
+    | { state: 'retrying'; reason: string }
+    /** Does not pass until somebody changes something. */
+    | { state: 'blocked'; reason: string };
 }
 
 export interface OpsCounts {

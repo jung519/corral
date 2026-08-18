@@ -11,6 +11,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { RunOutcome, RunRecord } from '../pipeline/run.js';
 import { PipelineSchema, type Pipeline } from '../pipeline/schema.js';
 import { PubSubTrigger } from './pubsub.js';
+import type { TriggerHealth } from './types.js';
 
 const SUBSCRIPTION = 'projects/p/subscriptions/s';
 
@@ -22,6 +23,8 @@ class FakePubSub {
   pulls = 0;
   /** Hold a pull that has messages, so a stop can land in the middle of one. */
   pullDelayMs = 0;
+  /** Anything but 200 makes `pull` throw the way a real refusal does. */
+  pullStatus = 200;
   private queue: Array<{ ackId: string; data?: string; attributes?: Record<string, string> }> = [];
   private server!: Server;
   host = '';
@@ -32,9 +35,15 @@ class FakePubSub {
       req.on('data', (c) => (body += c));
       req.on('end', () => {
         const parsed = body ? (JSON.parse(body) as { ackIds?: string[]; maxMessages?: number }) : {};
-        res.writeHead(200, { 'content-type': 'application/json' });
+        const json = (status = 200): void => void res.writeHead(status, { 'content-type': 'application/json' });
         if (req.url?.endsWith(':pull')) {
           this.pulls++;
+          if (this.pullStatus !== 200) {
+            json(this.pullStatus);
+            res.end(JSON.stringify({ error: { message: 'refused' } }));
+            return;
+          }
+          json();
           const take = this.queue.splice(0, parsed.maxMessages ?? 1);
           const reply = (): void => {
             res.end(
@@ -52,11 +61,14 @@ class FakePubSub {
           else reply();
         } else if (req.url?.endsWith(':acknowledge')) {
           this.acked.push(...(parsed.ackIds ?? []));
+          json();
           res.end('{}');
         } else if (req.url?.endsWith(':modifyAckDeadline')) {
           this.nacked.push(...(parsed.ackIds ?? []));
+          json();
           res.end('{}');
         } else {
+          json();
           res.end('{}');
         }
       });
@@ -382,5 +394,95 @@ describe('without an emulator', () => {
     await stop();
 
     expect(fired).toBe(0);
+  });
+});
+
+/**
+ * Holding a stop handle is not the same as working. A subscription refused on every pull
+ * kept the dashboard lit and left one warning line every two seconds, which is the same
+ * thing an operator sees when the credential is missing entirely (CRL-60).
+ *
+ * Two failing states rather than one, because they send someone to different places: a 500
+ * clears up while they read about it, a 403 never does.
+ */
+describe('saying whether it is working', () => {
+  let seen: TriggerHealth[];
+
+  /** Start the trigger, collecting what it reports. */
+  function watch(): () => Promise<void> {
+    seen = [];
+    const stop = new PubSubTrigger().start(pipeline(), async () => record('completed'), (h) => seen.push(h));
+    return async () => {
+      queue.pullStatus = 200; // let whatever is in flight finish quickly
+      await stop();
+    };
+  }
+
+  it('says it is attached once it has a client', async () => {
+    const stop = watch();
+    await until(() => seen.length > 0);
+    await stop();
+
+    expect(seen).toEqual([{ state: 'attached' }]);
+  });
+
+  it('calls a refusal blocked — waiting will not grant a permission', async () => {
+    queue.pullStatus = 403;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+    await stop();
+
+    expect((seen.at(-1) as { reason: string }).reason).toContain('403');
+  });
+
+  it('calls a subscription that is not there blocked', async () => {
+    // A typo, a deletion, another project. None of them fix themselves.
+    queue.pullStatus = 404;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+    await stop();
+
+    expect(seen.at(-1)).toMatchObject({ state: 'blocked' });
+  });
+
+  it(
+    'calls a server error retrying — the loop is already trying again',
+    async () => {
+      // Slower than the others on purpose: `fetchRetry` backs off and tries a 5xx again
+      // before giving up, which is exactly why this one is not blocked.
+      queue.pullStatus = 500;
+      const stop = watch();
+      await until(() => seen.some((h) => h.state === 'retrying'), 15_000);
+      await stop();
+
+      expect(seen.at(-1)).toMatchObject({ state: 'retrying' });
+    },
+    20_000,
+  );
+
+  it('does not repeat itself while nothing changes', async () => {
+    // A pull runs every two seconds forever. Reporting each attempt would redraw the
+    // dashboard on a timer and bury the moment something actually changed.
+    queue.pullStatus = 403;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+    const after = seen.length;
+    await new Promise((r) => setTimeout(r, 1200)); // several more pulls, all refused
+    await stop();
+
+    expect(seen).toHaveLength(after);
+    expect(seen.map((h) => h.state)).toEqual(['attached', 'blocked']);
+  });
+
+  it('goes back to attached when the queue recovers', async () => {
+    queue.pullStatus = 403;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+
+    queue.pullStatus = 200;
+    await until(() => seen.at(-1)?.state === 'attached');
+    await stop();
+
+    expect(seen.map((h) => h.state)).toEqual(['attached', 'blocked', 'attached']);
   });
 });

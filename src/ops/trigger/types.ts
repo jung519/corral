@@ -21,6 +21,27 @@ export type FireFn = (event: unknown) => Promise<RunRecord | undefined>;
 /** A running subscription. Calling it must be safe more than once. */
 export type StopFn = () => void | Promise<void>;
 
+/**
+ * Whether work is actually arriving, and if not, whether waiting will help.
+ *
+ * Two failing states rather than one, because they send an operator to different places.
+ * A 500 from Pub/Sub clears up on its own and the loop is already retrying every two
+ * seconds; a 403 on the subscription never clears until somebody grants a permission. One
+ * shared "unhealthy" would leave them reading the log to tell which they have (CRL-60).
+ *
+ * Holding a stop handle is not the same as working — that is exactly the gap this closes.
+ * `start` returns synchronously and everything that can go wrong happens afterwards.
+ */
+export type TriggerHealth =
+  | { state: 'attached' }
+  /** The kind of wrong that passes. Nothing to do but wait. */
+  | { state: 'retrying'; reason: string }
+  /** The kind of wrong that does not. A person has to change something. */
+  | { state: 'blocked'; reason: string };
+
+/** How a trigger says whether it is working. Called on change, not on every attempt. */
+export type ReportFn = (health: TriggerHealth) => void;
+
 export interface TriggerAdapter {
   readonly kind: string;
   /**
@@ -29,8 +50,12 @@ export interface TriggerAdapter {
    * Whatever this sets up — a timer, a queue subscription — has to be released by the
    * returned function: an operator disabling a pipeline expects it to go quiet, and a
    * timer that outlives its pipeline is a run nobody asked for.
+   *
+   * `report` is how the trigger says whether it is actually working. Optional so that an
+   * adapter which cannot fail need not take it, but every adapter here does: a trigger
+   * that says nothing is indistinguishable from one that is fine.
    */
-  start(pipeline: Pipeline, fire: FireFn): StopFn;
+  start(pipeline: Pipeline, fire: FireFn, report?: ReportFn): StopFn;
 }
 
 export interface TriggerContext {
