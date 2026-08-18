@@ -20,19 +20,24 @@
  *                        rejected; the message body was unreadable; there is no such
  *                        pipeline
  *   left unacknowledged  the pipeline was at capacity, a step failed in a way that could
- *                        plausibly work next time, or the trigger was stopped between
- *                        taking the message and running it
+ *                        plausibly work next time, the ceiling ran out while this batch
+ *                        was in the air, or the trigger was stopped between taking the
+ *                        message and running it
  *
  * The rule behind it: **acknowledge whatever a retry would repeat.** A malformed message
  * parses the same way tomorrow and a missing pipeline is still missing — holding those
  * would be an infinite redelivery loop wearing a disguise.
  *
- * A spent ceiling is not one of those, and used to be treated as one. It is spent until
- * midnight, so holding the message would indeed redeliver into it all day — but
- * acknowledging threw the work away, and unlike a malformed message this one would run
- * perfectly well tomorrow. The answer is neither: don't take it out of the subscription
- * (CRL-49). `over_budget` stays in `SETTLED` for the one race left — a batch already in
- * flight when other runs exhaust the ceiling.
+ * A spent ceiling looks like one of those and is not. It is spent until midnight, so
+ * holding the message would have meant redelivering into it all day — which is why this
+ * used to acknowledge and throw the work away. Both halves are now false: the loop checks
+ * the ceiling before pulling (CRL-49), so nothing is taken out while it is spent, and a
+ * batch caught by the race is handed back rather than dropped (CRL-61). It waits in the
+ * subscription until there is budget for it.
+ *
+ * A message that comes back keeps coming back, so a pipeline failing on every one of them
+ * would spin: the loop waits after a batch that settled nothing, doubling to a minute and
+ * resetting the moment anything gets through (CRL-61).
  *
  * Nothing counts attempts here. A message that keeps failing is what a dead-letter policy
  * is for, and that policy belongs on the subscription where an operator can see and change
@@ -72,7 +77,7 @@ const MAX_BACKOFF_MS = 60_000;
  * air — went from `ack 8 / nack 0` (gone) to `ack 0 / nack 8` (waiting), with the loop
  * making one pull in the four seconds after, not a flood (CRL-61).
  */
-const SETTLED: readonly RunOutcome[] = ['completed', 'skipped', 'reported', 'rejected'];
+export const SETTLED: readonly RunOutcome[] = ['completed', 'skipped', 'reported', 'rejected'];
 
 export interface PubSubContext extends TriggerContext {
   credentials?: CredentialStore;

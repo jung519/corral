@@ -20,7 +20,7 @@ import { applySelect, NoneInputResolver } from './input/none.js';
 import { HttpOutputSink } from './output/http.js';
 import { NoneOutputSink } from './output/none.js';
 import { PubSubOutputSink } from './output/pubsub.js';
-import { loadPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
+import { readPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
 import { findPipelineFile, savePipeline, type SaveResult } from './pipeline/writer.js';
 import type { AnswerValidator, InputResolver, OperationOutcome, OperationRunner, OutputSink } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
@@ -168,19 +168,34 @@ export class OpsHost {
   }
 
   /**
-   * Re-read the definitions. A broken set is reported, not thrown: the core has to keep
-   * serving so the operator can see *why* and fix it — and the pipelines that were
-   * already loaded keep running meanwhile.
+   * Re-read the definitions. A broken one is reported, not thrown: the core has to keep
+   * serving so the operator can see *why* and fix it.
+   *
+   * **The files that parse are loaded even when others do not.** This used to be all or
+   * nothing, which was survivable on a reload — whatever was already running stayed — and
+   * silently fatal on a cold start, where there is nothing already running to keep. Three
+   * good pipelines and one bad file came up as zero (CRL-62).
+   *
+   * That got easier to hit as the schema got stricter: a `message` is now required on a
+   * Pub/Sub output, and a Pub/Sub credential is required unless `PUBSUB_EMULATOR_HOST` is
+   * set — which is read where the file is *parsed*, so a definition written against the
+   * emulator is invalid on a VM. One such file used to take the whole set down with it.
+   *
+   * The registry mirrors what currently parses, so a pipeline whose file has just been
+   * broken stops. The alternative — keeping it because it used to be fine — means the
+   * running set and the files on disk disagree, with nothing on screen to say so.
    */
   async load(): Promise<{ loaded: number; error?: string }> {
     try {
-      const pipelines = await loadPipelines(this.dir);
+      const { pipelines, issues } = await readPipelines(this.dir);
       this.registry.replaceAll(pipelines);
-      this.loadError = undefined;
+      this.loadError = issues.length ? new PipelineLoadError(issues).message : undefined;
+      if (this.loadError) logger.error(`ops: ${this.loadError}`);
       this.syncSubscriptions();
-      return { loaded: pipelines.length };
+      return { loaded: pipelines.length, error: this.loadError };
     } catch (err) {
-      this.loadError = err instanceof PipelineLoadError ? err.message : String(err);
+      // Nothing to do with a definition — the directory itself would not read.
+      this.loadError = String(err);
       logger.error(`ops: ${this.loadError}`);
       return { loaded: this.registry.size, error: this.loadError };
     }
