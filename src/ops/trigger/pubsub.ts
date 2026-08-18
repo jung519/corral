@@ -50,14 +50,29 @@ import type { FireFn, ReportFn, StopFn, TriggerAdapter, TriggerContext, TriggerH
 const PULL_INTERVAL_MS = 2_000;
 
 /**
+ * The longest the loop waits after batches that keep getting nowhere.
+ *
+ * A minute, because the things that put a pipeline here are things a person fixes — a
+ * rate limit that resets, an API that comes back, a rule that gets corrected — and none of
+ * them are worth checking twice a second. Short enough that the queue drains promptly once
+ * the fix lands.
+ */
+const MAX_BACKOFF_MS = 60_000;
+
+/**
  * Outcomes a retry would only repeat. Everything else keeps the message.
  *
- * `over_budget` is the odd one and only reachable now by a race: the loop checks the
- * ceiling before pulling, so a run can only hit it if other runs exhausted the ceiling
- * while this batch was in the air. Holding those would redeliver into a ceiling that is
- * spent until midnight; letting them go loses at most one batch rather than a day's work.
+ * `over_budget` used to be in here. The reasoning was that a spent ceiling stays spent
+ * until midnight, so holding the message would redeliver into it all day — true when the
+ * loop kept pulling regardless. It no longer does: the ceiling is checked before every pull
+ * (CRL-49), so a returned message is not picked up again until there is budget for it.
+ *
+ * With the storm gone, acknowledging was simply throwing the work away. Measured: a batch
+ * caught by the race — the ceiling exhausted by somebody else while this pull was in the
+ * air — went from `ack 8 / nack 0` (gone) to `ack 0 / nack 8` (waiting), with the loop
+ * making one pull in the four seconds after, not a flood (CRL-61).
  */
-const SETTLED: readonly RunOutcome[] = ['completed', 'skipped', 'reported', 'rejected', 'over_budget'];
+const SETTLED: readonly RunOutcome[] = ['completed', 'skipped', 'reported', 'rejected'];
 
 export interface PubSubContext extends TriggerContext {
   credentials?: CredentialStore;
@@ -124,6 +139,8 @@ export class PubSubTrigger implements TriggerAdapter {
       }
 
       logger.info(`ops: pipeline "${pipeline.key}" subscribed to ${subscription}`);
+      /** How long to wait after a batch that got nowhere. Zero while work is moving. */
+      let backoff = 0;
       // Subscribed is not the same as working: the credential has only been parsed at this
       // point, and whether it is accepted is settled by the first pull.
       health({ state: 'attached' });
@@ -193,7 +210,27 @@ export class PubSubTrigger implements TriggerAdapter {
         // Awaited here, which is what lets the stop handle wait for the loop itself: a
         // message half-processed and never settled would sit until its deadline lapses,
         // and that looks like a stall to whoever published it.
-        await Promise.all(received.map((m) => this.handle(pipeline, subscription, m, client, fire)));
+        const settled = await Promise.all(received.map((m) => this.handle(pipeline, subscription, m, client, fire)));
+
+        // ── did any of that get anywhere? ───────────────────────────────────────
+        //
+        // A returned message is available again immediately, and the loop only rested when
+        // a pull came back empty — so a pipeline failing on every message went pull, run,
+        // return, pull with nothing in between. Measured against a zero-latency queue: the
+        // same message delivered 65,366 times in nine seconds. Against real Pub/Sub the
+        // round trip sets the pace instead of the CPU, but it is the same loop, and each
+        // turn of it can cost a model call — `output_failed` means the answer was already
+        // paid for (CRL-61).
+        //
+        // Backing off only when *nothing* settled keeps a busy queue at full speed: one bad
+        // message among good ones is progress, and progress is what resets the wait.
+        if (settled.includes('settled')) {
+          backoff = 0;
+        } else {
+          backoff = backoff ? Math.min(backoff * 2, MAX_BACKOFF_MS) : PULL_INTERVAL_MS;
+          logger.warn(`ops: nothing settled on "${pipeline.key}" — waiting ${backoff}ms before pulling again`);
+          await rest(backoff);
+        }
       }
     };
 
@@ -213,21 +250,21 @@ export class PubSubTrigger implements TriggerAdapter {
     };
   }
 
-  /** Run one message and settle it according to how the run ended. */
+  /** Run one message and settle it according to how the run ended. Says which way. */
   private async handle(
     pipeline: Pipeline,
     subscription: string,
     received: ReceivedMessage,
     client: PubSubClient,
     fire: FireFn,
-  ): Promise<void> {
+  ): Promise<'settled' | 'returned'> {
     const event = decode(received.message);
     if (event === undefined) {
       // Unreadable now and unreadable on every redelivery. Dropping it is the only way
       // out of a loop that would otherwise never end.
       logger.warn(`ops: dropping an unreadable message on "${pipeline.key}" (${received.message.messageId ?? '?'})`);
       await client.ack(subscription, [received.ackId]).catch(() => {});
-      return;
+      return 'settled';
     }
 
     let record: RunRecord | undefined;
@@ -247,6 +284,7 @@ export class PubSubTrigger implements TriggerAdapter {
     await (settled ? client.ack(subscription, [received.ackId]) : client.nack(subscription, [received.ackId])).catch((err: unknown) =>
       logger.warn(`ops: could not settle a message on "${pipeline.key}" — ${message(err)}`),
     );
+    return settled ? 'settled' : 'returned';
   }
 
 }

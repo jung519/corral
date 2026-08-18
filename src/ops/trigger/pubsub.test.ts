@@ -25,6 +25,10 @@ class FakePubSub {
   pullDelayMs = 0;
   /** Anything but 200 makes `pull` throw the way a real refusal does. */
   pullStatus = 200;
+  /** Put a returned message back on the queue, as Pub/Sub does. Off by default so the
+   *  settle tests can count one delivery. */
+  redeliver = false;
+  private readonly bodies = new Map<string, string | undefined>();
   private queue: Array<{ ackId: string; data?: string; attributes?: Record<string, string> }> = [];
   private server!: Server;
   host = '';
@@ -65,6 +69,9 @@ class FakePubSub {
           res.end('{}');
         } else if (req.url?.endsWith(':modifyAckDeadline')) {
           this.nacked.push(...(parsed.ackIds ?? []));
+          // Deadline 0 means "give it to someone else now", so a returned message is
+          // available again immediately. Modelling that is what makes a retry loop visible.
+          if (this.redeliver) for (const id of parsed.ackIds ?? []) this.queue.push({ ackId: id, data: this.bodies.get(id) });
           json();
           res.end('{}');
         } else {
@@ -78,6 +85,7 @@ class FakePubSub {
   }
 
   publish(ackId: string, payload: unknown, attributes?: Record<string, string>): void {
+    this.bodies.set(ackId, payload === undefined ? undefined : Buffer.from(JSON.stringify(payload)).toString('base64'));
     this.queue.push({
       ackId,
       data: payload === undefined ? undefined : Buffer.from(JSON.stringify(payload)).toString('base64'),
@@ -206,10 +214,12 @@ describe('what happens to the message', () => {
     expect(await settle('rejected')).toBe('acked');
   });
 
-  it('acknowledges a run stopped by the day budget', async () => {
-    // Spent until midnight. Holding the message would mean redelivering into a spent
-    // budget all day — the retry storm this policy exists to prevent.
-    expect(await settle('over_budget')).toBe('acked');
+  it('keeps a run stopped by the day budget, rather than throwing the work away', async () => {
+    // This used to be acked, on the reasoning that a spent ceiling stays spent until
+    // midnight and holding the message would redeliver into it all day. That was true
+    // while the loop pulled regardless of the ceiling; it checks first now (CRL-49), so a
+    // returned message waits instead of coming straight back — and the work survives.
+    expect(await settle('over_budget')).toBe('nacked');
   });
 
   it('leaves a throttled message for later', async () => {
@@ -484,5 +494,41 @@ describe('saying whether it is working', () => {
     await stop();
 
     expect(seen.map((h) => h.state)).toEqual(['attached', 'blocked', 'attached']);
+  });
+});
+
+/**
+ * A returned message is available again at once, and the loop only rested when a pull came
+ * back empty — so a pipeline failing on every message went pull, run, return, pull with
+ * nothing in between. Measured against a zero-latency queue: the same message delivered
+ * 65,366 times in nine seconds, each turn able to cost a model call (CRL-61).
+ */
+describe('a message that keeps failing', () => {
+  it('is not picked up again straight away', async () => {
+    queue.redeliver = true;
+    queue.publish('m1', { id: 1 });
+
+    const stop = new PubSubTrigger().start(pipeline(), async () => record('agent_failed'));
+    await until(() => queue.nacked.length > 0);
+    await new Promise((r) => setTimeout(r, 1000)); // long enough for a spin to show
+    await stop();
+
+    // Without the wait this was hundreds of deliveries a second.
+    expect(queue.nacked.length).toBeLessThan(4);
+  });
+
+  it('does not slow a queue that is getting somewhere', async () => {
+    // One bad message among good ones is progress, and progress is what resets the wait.
+    queue.redeliver = false;
+    for (let i = 0; i < 8; i++) queue.publish(`m${i}`, { i });
+    let n = 0;
+
+    const stop = new PubSubTrigger().start(pipeline({ max_concurrent: 4 }), async () =>
+      record(++n % 4 === 0 ? 'agent_failed' : 'completed'),
+    );
+    await until(() => queue.acked.length >= 6, 3000);
+    await stop();
+
+    expect(queue.acked.length).toBeGreaterThanOrEqual(6);
   });
 });
