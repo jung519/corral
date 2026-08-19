@@ -230,9 +230,32 @@ export const ValidationSchema = z.object({
       source: HttpRequestSchema.optional(),
       /** Where the list sits inside the response, when it isn't the whole body. */
       select: z.string().optional(),
+      /**
+       * The name of an `agent.context` entry to judge against.
+       *
+       * The list the prompt showed the model and the list its answer is checked against
+       * are the same list. Saying it twice — once here and once up there — is a pipeline
+       * that drifts the day somebody edits one of them: the check would start accepting a
+       * value the model was never told about, or keep rejecting one it was (CRL-66).
+       */
+      from: z.string().min(1).optional(),
     })
-    .refine((v) => !!v.values || !!v.source, {
-      message: 'allowed_values needs either an inline `values` list or a `source` to fetch it from',
+    .superRefine((v, ctx) => {
+      // Three ways to say where the list comes from, and "none" and "more than one" are
+      // different mistakes — a reader who wrote neither should not have to work out which
+      // of two sentences applies to them.
+      const named = [v.values && 'values', v.source && 'source', v.from && 'from'].filter(Boolean);
+      if (named.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'allowed_values needs one of `values` (written here), `source` (fetched) or `from` (a context name)',
+        });
+      } else if (named.length > 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `allowed_values names more than one source for its list (${named.join(', ')}) — pick one`,
+        });
+      }
     })
     .optional(),
   max_items: z.object({ field: z.string().min(1), limit: z.number().int().positive() }).optional(),
@@ -283,6 +306,22 @@ export const AgentStepSchema = z.object({
    * the same mistake, three different behaviours, none of them the one that was meant.
    */
   .superRefine((step, ctx) => {
+    // `from` names an entry in `context`, and the two blocks only meet here — the
+    // validation schema on its own has no idea what was declared for the prompt. Same
+    // shape as the field check below: a name nothing answers to means a rule that will
+    // never see a list, and finding that out at 3am is the failure being avoided.
+    const from = step.validate.allowed_values?.from;
+    if (from && !(from in step.context)) {
+      const declared = Object.keys(step.context);
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['validate', 'allowed_values', 'from'],
+        message: declared.length
+          ? `"${from}" is not declared in \`agent.context\` — it has ${declared.map((n) => `"${n}"`).join(', ')}`
+          : `"${from}" is not declared in \`agent.context\`, which is empty`,
+      });
+    }
+
     const properties = step.schema.properties;
     for (const [rule, field] of [
       ['allowed_values', step.validate.allowed_values?.field],

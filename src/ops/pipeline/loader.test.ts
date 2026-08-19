@@ -206,6 +206,45 @@ output: { kind: none }
     expect(err.issues[0]!.message).toMatch(/at least one property/);
   });
 
+  it('rejects a `from` that names nothing in agent.context', async () => {
+    const err = await load(`
+key: no-such-context
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { items: { type: array } } }
+  context:
+    allowed: { values: [a, b] }
+  validate:
+    allowed_values: { field: items, from: allwoed }
+output: { kind: none }
+`);
+
+    // The typo is the whole point — a rule pointing at a name nothing answers to would
+    // never see a list, and the two blocks only meet at load time.
+    expect(err.issues[0]!.path).toBe('agent.validate.allowed_values.from');
+    expect(err.issues[0]!.message).toMatch(/not declared in `agent.context`.*"allowed"/);
+  });
+
+  it('rejects an allowed-values rule that names two sources for its list', async () => {
+    const err = await load(`
+key: two-sources
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { items: { type: array } } }
+  context:
+    allowed: { values: [a] }
+  validate:
+    allowed_values: { field: items, from: allowed, values: [b] }
+output: { kind: none }
+`);
+
+    expect(err.issues[0]!.message).toMatch(/more than one source.*pick one/);
+  });
+
   it('rejects an allowed-values rule with no list and nowhere to get one', async () => {
     const err = await load(`
 key: no-vocabulary
@@ -219,7 +258,9 @@ agent:
 output: { kind: none }
 `);
 
-    expect(err.issues[0]!.message).toMatch(/inline `values` list or a `source`/);
+    // Names all three ways, because a reader who wrote none of them has no way to guess
+    // which one their case wants (CRL-66 added `from`).
+    expect(err.issues[0]!.message).toMatch(/needs one of `values`.*`source`.*`from`/);
   });
 
   it('reports malformed YAML against the file rather than crashing the load', async () => {

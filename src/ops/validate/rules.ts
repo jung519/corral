@@ -12,7 +12,7 @@
  */
 import { logger } from '../../core/logger.js';
 import { ContextStore, CONTEXT_TTL_MS, type ContextStoreOptions } from '../context/store.js';
-import type { AnswerValidator, ValidationVerdict } from '../pipeline/ports.js';
+import type { AnswerValidator, Fields, ValidationVerdict } from '../pipeline/ports.js';
 import type { PipelineAgentStep, PipelineValidation } from '../pipeline/schema.js';
 
 /** Kept as the name this file has always exported. The value, and the reasoning behind
@@ -33,7 +33,7 @@ export class RuleAnswerValidator implements AnswerValidator {
     this.store = options.store ?? new ContextStore(options);
   }
 
-  async check(step: PipelineAgentStep, answer: Record<string, unknown>): Promise<ValidationVerdict> {
+  async check(step: PipelineAgentStep, answer: Record<string, unknown>, context: Fields = {}): Promise<ValidationVerdict> {
     const rules: PipelineValidation = step.validate;
     const result = { ...answer };
     const dropped: string[] = [];
@@ -56,7 +56,7 @@ export class RuleAnswerValidator implements AnswerValidator {
         }
         let allowed: Set<string>;
         try {
-          allowed = await this.vocabulary(rules.allowed_values);
+          allowed = await this.vocabulary(rules.allowed_values, context);
         } catch (err) {
           // Without the list there is no way to tell a good value from a bad one, and
           // guessing would defeat the rule. Refuse rather than pass it through.
@@ -132,7 +132,21 @@ export class RuleAnswerValidator implements AnswerValidator {
    * list in the prompt (CRL-64). A `Set` is built here because that is what this end of
    * the turn wants; the store keeps the plainer list the prompt wants.
    */
-  private async vocabulary(rule: NonNullable<PipelineValidation['allowed_values']>): Promise<Set<string>> {
+  private async vocabulary(
+    rule: NonNullable<PipelineValidation['allowed_values']>,
+    context: Fields,
+  ): Promise<Set<string>> {
+    if (rule.from) {
+      // Already fetched, for the prompt. Reading it from there rather than asking again is
+      // the point of `from` — one declaration, one request, one list (CRL-66).
+      const list = context[rule.from];
+      if (!Array.isArray(list)) {
+        // The schema refuses a `from` that names nothing, so reaching this means the
+        // resolved context was not handed over — a wiring fault, not a definition one.
+        throw new Error(`context "${rule.from}" was not resolved, so there is no list to judge against`);
+      }
+      return new Set(list.map((v) => String(v)));
+    }
     return new Set((await this.store.list(rule)).map((v) => String(v)));
   }
 }

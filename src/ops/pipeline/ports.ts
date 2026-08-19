@@ -100,7 +100,15 @@ export type ValidationVerdict =
 
 /** Checks the answer in code, whatever the prompt asked for (CRL-15). */
 export interface AnswerValidator {
-  check(step: PipelineAgentStep, answer: Record<string, unknown>): Promise<ValidationVerdict>;
+  /**
+   * `context` is what the prompt was given, **before** it was merged into the field bag.
+   *
+   * Before, because a context name is the weakest in that bag: an event field of the same
+   * name wins there, and a check reading the merged version could end up treating a value
+   * that arrived on a queue message as the controlled vocabulary. What the model was shown
+   * is the only list its answer can fairly be judged against (CRL-66).
+   */
+  check(step: PipelineAgentStep, answer: Record<string, unknown>, context: Fields): Promise<ValidationVerdict>;
 }
 
 /** Delivers the result to the user's system (CRL-20). */
