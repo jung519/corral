@@ -12,6 +12,7 @@
    */
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
+  import RunPrompt from './RunPrompt.svelte';
   import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
@@ -33,6 +34,10 @@
   const FAILURES = ['input_failed', 'agent_failed', 'rejected', 'output_failed'];
 
   let runs = $state<api.OpsRun[]>([]);
+  /** This pipeline's summary, for the one thing this screen cannot read off its history:
+   *  what a manual run has to be handed (CRL-72). */
+  let summary = $state<api.OpsPipeline | undefined>(undefined);
+  let asking = $state(false);
   let totals = $state<api.OpsDailyTotals[]>([]);
   let filter = $state('');
   let days = $state(7);
@@ -54,9 +59,16 @@
     try {
       // Filtering client-side: a day is at most a few hundred runs for one pipeline, and
       // one fetch keeps the tabs instant instead of a round trip per click.
-      const [r, tt] = await Promise.all([api.getRuns({ days, pipeline: pipelineKey, limit: 500 }), api.getTotals(days)]);
+      const [r, tt, ov] = await Promise.all([
+        api.getRuns({ days, pipeline: pipelineKey, limit: 500 }),
+        api.getTotals(days),
+        // Along for the ride rather than on its own timer: it only changes when the
+        // definition does, and this screen refreshes on runs, not on a clock.
+        api.getOverview(),
+      ]);
       runs = r.runs;
       totals = tt.totals;
+      summary = ov.pipelines.find((p) => p.key === pipelineKey);
       online = true;
     } catch {
       online = false;
@@ -65,8 +77,14 @@
     }
   }
 
-  async function run() {
-    const r = await api.runPipeline(pipelineKey);
+  /** Ask for the event first when the definition needs one — same rule as the list. */
+  function start() {
+    if (summary?.wantsEvent) asking = true;
+    else void run();
+  }
+
+  async function run(input?: unknown) {
+    const r = await api.runPipeline(pipelineKey, input);
     if (!r.ok) toast(r.error ?? `${r.run?.outcome ?? 'failed'} — ${r.run?.reason ?? ''}`, 'error');
     await refresh();
   }
@@ -102,8 +120,17 @@
 <PageHeader title={pipelineKey} {online} meta={today ? `${today.runs} ${t('ops.today')}` : ''}>
   <a class="ghost back" href="#/">{t('detail.back')}</a>
   <button class="ghost danger" onclick={remove}>{t('detail.delete')}</button>
-  <Button onclick={run}>{t('ops.run')}</Button>
+  <Button onclick={start}>{t('ops.run')}</Button>
 </PageHeader>
+
+{#if asking}
+  <RunPrompt
+    {pipelineKey}
+    fields={summary?.eventFields ?? []}
+    onclose={() => (asking = false)}
+    onrun={(input) => run(input)}
+  />
+{/if}
 
 <main>
   <section>

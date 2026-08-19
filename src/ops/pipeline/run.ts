@@ -119,6 +119,28 @@ export function fillTemplate(template: string, fields: Fields): string {
 }
 
 /**
+ * Every `{{name}}` a value asks for, however deeply nested, each name once.
+ *
+ * The other direction of `fillTemplate`: not "fill these in" but "what would have to be
+ * filled in". A manual run is the caller of this — a request block that says
+ * `/records/{{id}}` cannot be run without an `id`, and until CRL-72 the screen offering
+ * that run had no way to know it (and sent `{}`, so every such run was skipped).
+ *
+ * Order is the order they appear, so a prefilled body reads like the URL it came from.
+ */
+export function placeholderNames(value: unknown): string[] {
+  const found = new Set<string>();
+  const walk = (node: unknown): void => {
+    if (typeof node === 'string') {
+      for (const m of node.matchAll(PLACEHOLDER)) found.add(m[1] as string);
+    } else if (Array.isArray(node)) node.forEach(walk);
+    else if (node && typeof node === 'object') Object.values(node).forEach(walk);
+  };
+  walk(value);
+  return [...found];
+}
+
+/**
  * The same substitution where the result does not have to be text — an output body, a
  * message to publish.
  *

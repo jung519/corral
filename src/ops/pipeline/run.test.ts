@@ -14,7 +14,16 @@ import type {
   ValidationVerdict,
 } from './ports.js';
 import type { TokenUsage } from '../../core/token-budget.js';
-import { PipelineRunner, conditionHolds, fillTemplate, fillValue, readPath, type RunBudget, type RunDeps } from './run.js';
+import {
+  PipelineRunner,
+  conditionHolds,
+  fillTemplate,
+  fillValue,
+  placeholderNames,
+  readPath,
+  type RunBudget,
+  type RunDeps,
+} from './run.js';
 import { PipelineSchema, type Pipeline } from './schema.js';
 
 function pipeline(overrides: Record<string, unknown> = {}): Pipeline {
@@ -469,6 +478,37 @@ describe('what the run tells the outside world', () => {
     const ids = [await runner.run(pipeline(), {}), await runner.run(pipeline(), {})].map((r) => r.id);
 
     expect(new Set(ids).size).toBe(2);
+  });
+});
+
+describe('the names a template asks for', () => {
+  it('finds them wherever they sit in a request', () => {
+    // A request block is the shape this exists for: the URL, a header and a body are all
+    // places an event's field can be needed from.
+    const request = {
+      method: 'GET',
+      url: 'https://api.example.com/records/{{id}}',
+      headers: { 'x-tenant': '{{tenant}}' },
+      body: { nested: ['{{deep}}'] },
+    };
+    expect(placeholderNames(request)).toEqual(['id', 'tenant', 'deep']);
+  });
+
+  it('says nothing when nothing is asked for', () => {
+    // A fixed URL needs no event, which is what lets a manual run just go (CRL-72).
+    expect(placeholderNames({ url: 'https://api.example.com/records' })).toEqual([]);
+  });
+
+  it('names each one once', () => {
+    expect(placeholderNames({ a: '{{id}}/{{id}}', b: '{{ id }}' })).toEqual(['id']);
+  });
+
+  it('reads the same names fillTemplate would fill', () => {
+    // The two have to agree about what a placeholder is, or a prefilled body would offer
+    // a name the substitution ignores.
+    const template = 'a {{one}} b {{two.deep}} c {{not-a-name}}';
+    expect(placeholderNames(template)).toEqual(['one', 'two.deep']);
+    expect(fillTemplate(template, { one: 1, 'two.deep': 2 })).toBe('a 1 b 2 c {{not-a-name}}');
   });
 });
 

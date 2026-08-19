@@ -200,7 +200,54 @@ describe('loading definitions', () => {
       // A manual trigger has nothing to attach to, and says so rather than staying silent —
       // no report at all looks the same as one that has not arrived yet (CRL-60).
       health: { state: 'attached' },
+      // The event IS the input here, so a manual run needs a body. There are no names to
+      // offer: a `select` names paths into that body, not keys of it (CRL-72).
+      wantsEvent: true,
+      eventFields: [],
     });
+  });
+
+  it('names what a manual run of a fetch-back pipeline has to be given', async () => {
+    writePipeline(
+      'fetch.yaml',
+      `
+key: fetch
+trigger: { kind: pubsub, topic: t, subscription: s, credential: { service: gcp, account: default } }
+input:
+  kind: http
+  request:
+    url: "https://api.example.com/records/{{id}}"
+    headers: { x-tenant: "{{tenant}}" }
+agent:
+  prompt: { system: s, user_template: "x" }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: none }
+`,
+    );
+    const host = await startOpsHost({ stateDir: dir });
+
+    // Without these the run screen sent `{}`, the URL rendered as `/records/`, and every
+    // manual run of a pipeline shaped the way corral recommends ended `skipped`.
+    expect(host.list()[0]).toMatchObject({ key: 'fetch', wantsEvent: true, eventFields: ['id', 'tenant'] });
+  });
+
+  it('asks for nothing when the fetch needs nothing', async () => {
+    writePipeline(
+      'fixed.yaml',
+      `
+key: fixed
+trigger: { kind: schedule, cron: "0 9 * * *" }
+input: { kind: http, request: { url: "https://api.example.com/today" } }
+agent:
+  prompt: { system: s, user_template: "x" }
+  schema: { type: object, properties: { answer: { type: string } } }
+output: { kind: none }
+`,
+    );
+    const host = await startOpsHost({ stateDir: dir });
+
+    // A fixed URL is complete on its own, so the run button should not stop to ask.
+    expect(host.list()[0]).toMatchObject({ key: 'fixed', wantsEvent: false, eventFields: [] });
   });
 });
 
