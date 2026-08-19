@@ -180,6 +180,32 @@ export const InputSchema = z.discriminatedUnion('kind', [NoneInputSchema, HttpIn
 // regardless. A model that ignores an instruction must not be able to write a bad value
 // into someone's system.
 
+/**
+ * Where a piece of prompt material comes from.
+ *
+ * The same shape as `allowed_values`: a list written inline, or one fetched from an API.
+ * That is deliberate — it is the same question ("what are the choices") asked at the other
+ * end of the turn, and two different shapes for it would mean writing the URL twice.
+ *
+ * The list is passed to the prompt as it arrives. Tidying it into something a person would
+ * read needs to know what the values mean — which parent a key belongs to, which label goes
+ * with it — and Corral does not. A caller who wants it tidied can have their own endpoint
+ * answer that way; `select` already points at whichever part of the response to take.
+ */
+export const ContextSourceSchema = z
+  .object({
+    /** Written into the definition. Anything a template can render. */
+    values: z.array(z.unknown()).optional(),
+    /** Fetched at run time, and briefly cached — a list that changes daily should not mean
+     *  editing the pipeline. */
+    source: HttpRequestSchema.optional(),
+    /** Where the list sits inside the response, when it isn't the whole body. */
+    select: z.string().optional(),
+  })
+  .refine((c) => !!c.values || !!c.source, {
+    message: 'context needs either an inline `values` list or a `source` to fetch it from',
+  });
+
 export const OutputShapeSchema = z
   .object({
     type: z.literal('object'),
@@ -231,6 +257,19 @@ export const AgentStepSchema = z.object({
     /** `{{field}}` placeholders are filled from the selected input fields. */
     user_template: z.string().min(1),
   }),
+  /**
+   * Material the prompt needs, fetched before the turn and merged into the fields a
+   * template can reach (CRL-64).
+   *
+   * The case it exists for: a rule says "choose from this list" and the list lives
+   * somewhere else. Without this the model never saw the list, answered names that were
+   * not on it, and `allowed_values` threw every one away.
+   *
+   * Names declared here are the weakest in the bag. An event field or a selected input
+   * field of the same name wins — the same order `select` already beats the event by, and
+   * for the same reason: the value belonging to *this* run is the more specific one.
+   */
+  context: z.record(z.string(), ContextSourceSchema).default({}),
   /** The structured answer's shape. Requested from the model and checked on return. */
   schema: OutputShapeSchema,
   validate: ValidationSchema.default({}),
@@ -362,6 +401,7 @@ export type PipelineInput = z.infer<typeof InputSchema>;
 export type PipelineAgentStep = z.infer<typeof AgentStepSchema>;
 export type PipelineOutput = z.infer<typeof OutputSchema>;
 export type HttpRequestDef = z.infer<typeof HttpRequestSchema>;
+export type ContextSource = z.infer<typeof ContextSourceSchema>;
 export type FieldSelector = z.infer<typeof FieldSelectorSchema>;
 export type PipelineValidation = z.infer<typeof ValidationSchema>;
 export type Condition = z.infer<typeof ConditionSchema>;

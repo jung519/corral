@@ -18,7 +18,15 @@
 import { bus } from '../../core/events.js';
 import { ConcurrencyLimiter } from '../../core/concurrency-limiter.js';
 import type { BudgetVerdict, TokenUsage } from '../../core/token-budget.js';
-import type { AnswerValidator, Fields, InputResolver, OperationOutcome, OperationRunner, OutputSink } from './ports.js';
+import type {
+  AnswerValidator,
+  ContextResolver,
+  Fields,
+  InputResolver,
+  OperationOutcome,
+  OperationRunner,
+  OutputSink,
+} from './ports.js';
 import type { Condition, Pipeline } from './schema.js';
 
 /** Where a run stopped. Everything except `completed` and `skipped` is a failure. */
@@ -37,7 +45,7 @@ export type RunOutcome =
   | 'rejected'
   | 'output_failed';
 
-export type RunStage = 'input' | 'agent' | 'validate' | 'output';
+export type RunStage = 'input' | 'context' | 'agent' | 'validate' | 'output';
 
 export interface RunRecord {
   id: string;
@@ -77,6 +85,9 @@ export interface RunBudget {
 export interface RunDeps {
   /** By `input.kind`. */
   resolvers: Map<string, InputResolver>;
+  /** Fetches the prompt material a step declares. Omit and a `context` block is refused
+   *  at run time rather than silently ignored. */
+  context?: ContextResolver;
   operation: OperationRunner;
   validator: AnswerValidator;
   /** By `output.kind`. */
@@ -259,10 +270,38 @@ export class PipelineRunner {
         return done('over_budget', { stage: 'agent', reason: allowed.reason });
       }
 
+      // ── what the prompt needs before it can be asked ─────────────────────────
+      //
+      // After the ceiling check, not before it: a run that has no budget will not ask the
+      // model anything, so there is nothing for a list to be needed for. One fetch saved
+      // on every run of a spent day.
+      //
+      // Refused rather than carried on without (CRL-65). A prompt that says "choose from
+      // {{allowed}}" with nothing there asks the model to pick from an empty set, and the
+      // answer check then drops whatever it picked — a paid-for turn that could not have
+      // succeeded. `input_failed` rather than a code of its own: the queue semantics are
+      // exactly right already (not in `SETTLED`, so the message waits) and a list that
+      // could not be fetched is the same kind of thing as a record that could not be.
+      let material = fields;
+      if (Object.keys(pipeline.agent.context).length) {
+        const resolver = this.deps.context;
+        if (!resolver) {
+          return done('input_failed', { stage: 'context', reason: 'this core has nothing wired to fetch a context list' });
+        }
+        try {
+          // Weakest in the bag. An event field or a selected input field of the same name
+          // wins, the same way a `select` already beats the event: the value belonging to
+          // this run is the more specific one.
+          material = { ...(await resolver.resolve(pipeline.agent)), ...fields };
+        } catch (err) {
+          return done('input_failed', { stage: 'context', reason: message(err) });
+        }
+      }
+
       this.emit(head, 'agent', 'calling the model');
       let operation: OperationOutcome;
       try {
-        operation = await this.deps.operation.run(pipeline.agent, fields);
+        operation = await this.deps.operation.run(pipeline.agent, material);
       } catch (err) {
         // The runner broke its own contract — a bug, not a failed turn. Nobody knows what
         // it spent, and zero is the honest answer to a question nobody can answer. Every
@@ -305,7 +344,7 @@ export class PipelineRunner {
         answer = verdict.answer;
         dropped = verdict.dropped;
       } else if ('lowConfidence' in verdict) {
-        const withAnswer = { ...fields, ...verdict.answer };
+        const withAnswer = { ...material, ...verdict.answer };
         reviewUrl = pipeline.on_low_confidence.review_url
           ? fillTemplate(pipeline.on_low_confidence.review_url, withAnswer)
           : undefined;
@@ -330,7 +369,7 @@ export class PipelineRunner {
         return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, ...spend, lowConfidence });
       }
       try {
-        await sink.send(pipeline.output, { ...fields, ...answer });
+        await sink.send(pipeline.output, { ...material, ...answer });
       } catch (err) {
         // The turn is already spent, so this is the expensive failure — it has to be
         // distinguishable from the cheap ones when someone reads the history.

@@ -37,6 +37,19 @@ export interface InputResolver {
  * below are the whole turn's, summed across every provider tried, not just the one that
  * happened to work.
  */
+/**
+ * Fetches what a step's `context` declares, before the turn (CRL-64).
+ *
+ * Its own port rather than a job for the input resolver: an input answers "what is this
+ * run about" and there is one of them, while context answers "what are the choices" and
+ * there can be several. Folding them together would have made the single input slot carry
+ * two unrelated kinds of thing.
+ */
+export interface ContextResolver {
+  /** Name → value, ready to merge into the field bag. Throws when a list cannot be had. */
+  resolve(step: PipelineAgentStep): Promise<Fields>;
+}
+
 export interface OperationSpend {
   /** Tokens spent — THE unit for the shared ceiling (D11/D12). */
   tokens?: number;

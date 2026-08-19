@@ -22,12 +22,21 @@ import { NoneOutputSink } from './output/none.js';
 import { PubSubOutputSink } from './output/pubsub.js';
 import { readPipelines, pipelinesDir, PipelineLoadError } from './pipeline/loader.js';
 import { findPipelineFile, savePipeline, type SaveResult } from './pipeline/writer.js';
-import type { AnswerValidator, InputResolver, OperationOutcome, OperationRunner, OutputSink } from './pipeline/ports.js';
+import type {
+  AnswerValidator,
+  ContextResolver,
+  InputResolver,
+  OperationOutcome,
+  OperationRunner,
+  OutputSink,
+} from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
 import { PipelineRunner, type RunRecord } from './pipeline/run.js';
 import { FieldSelectorSchema, HttpRequestSchema } from './pipeline/schema.js';
 import { triggerRegistry } from './trigger/index.js';
 import type { StopFn, TriggerHealth } from './trigger/types.js';
+import { ContextStore } from './context/store.js';
+import { StoreContextResolver } from './context/resolver.js';
 import { RuleAnswerValidator } from './validate/rules.js';
 
 /** The `select` map on its own — a trial fetch has no pipeline to take it from. */
@@ -63,6 +72,7 @@ export interface OpsHostOptions {
   /** Swap in real steps as they land. */
   operation?: OperationRunner;
   validator?: AnswerValidator;
+  context?: ContextResolver;
   resolvers?: InputResolver[];
   sinks?: OutputSink[];
   history?: OpsHistoryStore;
@@ -113,6 +123,9 @@ export class OpsHost {
     this.history = options.history ?? new JsonlOpsHistoryStore(options.stateDir, { now: options.now });
     this.operation = options.operation ?? new UnwiredOperationRunner();
     this.budget = options.budget;
+    // Built here rather than inside either user, because both users have to be the same
+    // one. See the `validator` line below.
+    const lists = new ContextStore({ credentials: options.credentials, now: options.now });
     this.runner = new PipelineRunner({
       resolvers: new Map(
         (options.resolvers ?? [new NoneInputResolver(), new HttpInputResolver(options.credentials)]).map((r) => [r.kind, r]),
@@ -126,9 +139,13 @@ export class OpsHost {
           ]
         ).map((s) => [s.kind, s]),
       ),
+      context: options.context ?? new StoreContextResolver(lists),
       // Read through, so a provider swap takes effect without rebuilding the runner.
       operation: { run: (step, fields) => this.operation.run(step, fields) },
-      validator: options.validator ?? new RuleAnswerValidator({ credentials: options.credentials, now: options.now }),
+      // The same store the resolver got. One fetch, so the list the model was shown is the
+      // list its answer is judged against rather than a second copy that might differ
+      // (CRL-64).
+      validator: options.validator ?? new RuleAnswerValidator({ store: lists }),
       // Read through, like `operation` — the config that carries the limits arrives after
       // the operational AI has started.
       budget: { check: () => this.budget?.check() ?? { ok: true }, record: (u) => this.budget?.record(u) },

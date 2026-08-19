@@ -5,7 +5,14 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bus, type CorralEvent } from '../../core/events.js';
-import type { AnswerValidator, InputResolver, OperationRunner, OutputSink, ValidationVerdict } from './ports.js';
+import type {
+  AnswerValidator,
+  ContextResolver,
+  InputResolver,
+  OperationRunner,
+  OutputSink,
+  ValidationVerdict,
+} from './ports.js';
 import type { TokenUsage } from '../../core/token-budget.js';
 import { PipelineRunner, conditionHolds, fillTemplate, fillValue, readPath, type RunBudget, type RunDeps } from './run.js';
 import { PipelineSchema, type Pipeline } from './schema.js';
@@ -25,7 +32,7 @@ function pipeline(overrides: Record<string, unknown> = {}): Pipeline {
 }
 
 /** Counts what each step was asked to do — the model call is the one that costs money. */
-let calls: { resolve: number; operation: number; send: number };
+let calls: { resolve: number; context: number; operation: number; send: number };
 let resolved: { raw: unknown; fields: Record<string, unknown> };
 let verdict: ValidationVerdict;
 let operationError: Error | undefined;
@@ -56,9 +63,21 @@ const sink: OutputSink = {
   },
 };
 
+/** What a `context` block resolves to, and whether asking for it fails. */
+let contextFields: Record<string, unknown>;
+let contextError: Error | undefined;
+const context: ContextResolver = {
+  resolve: async () => {
+    calls.context++;
+    if (contextError) throw contextError;
+    return contextFields;
+  },
+};
+
 function deps(over: Partial<RunDeps> = {}): RunDeps {
   return {
     resolvers: new Map([['none', resolver]]),
+    context,
     operation,
     validator,
     sinks: new Map([['none', sink]]),
@@ -66,11 +85,15 @@ function deps(over: Partial<RunDeps> = {}): RunDeps {
   };
 }
 
+/** A step that declares one list for its prompt. */
+const withContext = { agent: { prompt: { system: 's', user_template: 'choose from {{allowed}}' }, schema: { type: 'object', properties: { items: { type: 'array' } } }, context: { allowed: { values: ['a', 'b'] } } } };
+
 beforeEach(() => {
-  calls = { resolve: 0, operation: 0, send: 0 };
+  calls = { resolve: 0, context: 0, operation: 0, send: 0 };
   resolved = { raw: { data: { labels: [] } }, fields: { title: 'a record' } };
   verdict = { ok: true, answer: { items: ['a'] } };
-  operationError = resolveError = sendError = undefined;
+  contextFields = { allowed: ['a', 'b'] };
+  operationError = resolveError = sendError = contextError = undefined;
 });
 
 describe('a run that works', () => {
@@ -80,7 +103,7 @@ describe('a run that works', () => {
     expect(record.outcome).toBe('completed');
     expect(record.stage).toBeUndefined();
     expect(record.tokens).toBe(120);
-    expect(calls).toEqual({ resolve: 1, operation: 1, send: 1 });
+    expect(calls).toEqual({ resolve: 1, context: 0, operation: 1, send: 1 });
   });
 
   it('hands the output what the input selected AND what the model answered', async () => {
@@ -183,6 +206,94 @@ describe('each failure is a different failure', () => {
  * billed all day against a ceiling that read zero — the spend control bypassed by the shape
  * of the code rather than by any decision.
  */
+describe('material the prompt needs', () => {
+  it('reaches the model alongside the input', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const capture: OperationRunner = {
+      run: async (_s, fields) => {
+        seen.push(fields);
+        return { ok: true, answer: { items: ['a'] } };
+      },
+    };
+
+    await new PipelineRunner(deps({ operation: capture })).run(pipeline(withContext), {});
+
+    expect(seen[0]).toEqual({ allowed: ['a', 'b'], title: 'a record' });
+  });
+
+  it('is not fetched by a pipeline that declares none', async () => {
+    await new PipelineRunner(deps()).run(pipeline(), {});
+
+    expect(calls.context).toBe(0);
+  });
+
+  it('loses a name to the event and to the input', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const capture: OperationRunner = {
+      run: async (_s, fields) => {
+        seen.push(fields);
+        return { ok: true, answer: { items: ['a'] } };
+      },
+    };
+    contextFields = { allowed: ['a'], title: 'the list won' };
+
+    await new PipelineRunner(deps({ operation: capture })).run(pipeline(withContext), {});
+
+    // The value belonging to this run is the more specific one — the same order a `select`
+    // already beats the event by.
+    expect(seen[0]).toMatchObject({ title: 'a record' });
+  });
+
+  it('reaches the output template too, so {{allowed}} means the same thing everywhere', async () => {
+    const seen: Array<Record<string, unknown>> = [];
+    const capture: OutputSink = { kind: 'none', send: async (_o, fields) => void seen.push(fields) };
+
+    await new PipelineRunner(deps({ sinks: new Map([['none', capture]]) })).run(pipeline(withContext), {});
+
+    expect(seen[0]).toMatchObject({ allowed: ['a', 'b'] });
+  });
+
+  it('is fetched after the ceiling check, so a spent day costs no requests', async () => {
+    const budget: RunBudget = { check: () => ({ ok: false, reason: 'spent' }), record: () => {} };
+
+    const record = await new PipelineRunner(deps({ budget })).run(pipeline(withContext), {});
+
+    expect(record.outcome).toBe('over_budget');
+    expect(calls.context).toBe(0);
+  });
+});
+
+describe('material that cannot be had', () => {
+  it('stops the run before the model is asked', async () => {
+    contextError = new Error('vocabulary endpoint said 500');
+
+    const record = await new PipelineRunner(deps()).run(pipeline(withContext), {});
+
+    // A prompt saying "choose from nothing" would spend a turn the answer check then throws
+    // away. Nothing is spent here.
+    expect(calls.operation).toBe(0);
+    expect(record.tokens).toBeUndefined();
+  });
+
+  it('says which step it was and why', async () => {
+    contextError = new Error('vocabulary endpoint said 500');
+
+    const record = await new PipelineRunner(deps()).run(pipeline(withContext), {});
+
+    expect(record).toMatchObject({ outcome: 'input_failed', stage: 'context' });
+    expect(record.reason).toContain('500');
+  });
+
+  it('is refused when nothing is wired to fetch it at all', async () => {
+    const record = await new PipelineRunner(deps({ context: undefined })).run(pipeline(withContext), {});
+
+    // Silently ignoring the block would send the prompt out with an empty placeholder,
+    // which is the failure this whole feature exists to stop.
+    expect(record).toMatchObject({ outcome: 'input_failed', stage: 'context' });
+    expect(calls.operation).toBe(0);
+  });
+});
+
 describe('what a failed turn costs', () => {
   /** A runner that reports a failure the way the port asks it to: with the bill attached. */
   const failsExpensively: OperationRunner = {
