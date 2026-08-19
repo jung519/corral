@@ -328,6 +328,18 @@ export class OpsHost {
   }
 
   /**
+   * One pipeline's definition, as the runtime holds it.
+   *
+   * The parsed form rather than the file's bytes: defaults are filled in, so an editor
+   * opening it sees the same values the runtime does instead of having to know what an
+   * omitted field means. Absent when nothing answers to that key — including when the
+   * definitions failed to load, which is why `overview` carries the load error.
+   */
+  definition(key: string): Pipeline | undefined {
+    return this.registry.get(key);
+  }
+
+  /**
    * Everything the operations dashboard shows, in one answer.
    *
    * One call rather than three: the screen polls, and a dashboard that made a round trip

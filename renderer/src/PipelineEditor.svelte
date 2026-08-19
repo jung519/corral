@@ -26,8 +26,32 @@
   interface Props {
     onclose: () => void;
     onsaved: (key: string) => void;
+    /**
+     * A pipeline to open instead of a blank one.
+     *
+     * The definition is fetched here rather than passed in, so the caller only has to know
+     * a key — and so what is loaded is what the runtime is actually holding.
+     */
+    editing?: string;
   }
-  let { onclose, onsaved }: Props = $props();
+  let { onclose, onsaved, editing }: Props = $props();
+
+  /**
+   * The definition as it was opened, or undefined when creating.
+   *
+   * Kept for two jobs. It tells save to overwrite rather than refuse, and it holds the
+   * parts of a request this editor has no field for — see `carriedOver`.
+   */
+  /**
+   * `raw` rather than deep-reactive, and that is load-bearing rather than a nicety. A
+   * `$state` proxy cannot be structured-cloned, and this object's leaves travel back out
+   * through the IPC bridge on save — with a plain `$state` the save failed with "an object
+   * could not be cloned" and no issue to show for it. Nothing here is ever mutated either;
+   * it is a record of what was opened.
+   */
+  let original = $state.raw<Record<string, unknown> | undefined>(undefined);
+  /** Why an existing definition could not be opened, if so. */
+  let blocked = $state('');
 
   let step = $state(0);
   let saving = $state(false);
@@ -247,7 +271,32 @@
     } catch {
       agents = [];
     }
+    if (editing) await open(editing);
   });
+
+  /** Load an existing definition, or say why it cannot be shown here. */
+  async function open(pipelineKey: string): Promise<void> {
+    let r: Awaited<ReturnType<typeof api.getDefinition>>;
+    try {
+      r = await api.getDefinition(pipelineKey);
+    } catch (err) {
+      blocked = `${t('editor.loadFailed')} ${err instanceof Error ? err.message : String(err)}`;
+      return;
+    }
+    if (!r.ok || !r.definition) {
+      blocked = `${t('editor.loadFailed')} ${r.error ?? pipelineKey}`;
+      return;
+    }
+    const cannot = unrepresentable(r.definition);
+    if (cannot) {
+      blocked = `${t('editor.cannotOpen')} ${cannot}`;
+      return;
+    }
+    load(r.definition);
+    // Set last: it is what makes save an overwrite, so nothing is armed until the boxes
+    // actually hold the definition.
+    original = r.definition;
+  }
 
   // Changing the provider invalidates a model that belonged to the previous one.
   $effect(() => {
@@ -365,8 +414,203 @@
    * request is two places to drift, and the whole worth of the trial is that what was tried
    * is what will run.
    */
+  /** A record, or an empty one — every block below is optional in some shape. */
+  function obj(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  }
+
+  /** `{ name: 'path' }` back to the `name: path` lines the boxes hold. */
+  function formatPairs(map: unknown): string {
+    return Object.entries(obj(map))
+      .map(([name, value]) => `${name}: ${String(value)}`)
+      .join('\n');
+  }
+
+  function headerRows(map: unknown): Array<{ name: string; value: string }> {
+    return Object.entries(obj(map)).map(([name, value]) => ({ name, value: String(value) }));
+  }
+
+  /**
+   * Why this definition cannot be opened here, or '' if it can.
+   *
+   * The file format is wider than this editor. Every box holds a string, so a definition
+   * using a shape a box cannot hold would come back flattened the moment it was saved —
+   * a `truncate` silently gone, a GraphQL query turned into text, an inline vocabulary
+   * dropped. Refusing to open is the only answer that cannot lose someone's work; the file
+   * is still there to edit, which is what it was always for.
+   *
+   * Each message names the field, in the same dotted form the loader uses, so it reads
+   * like the errors the core already sends back.
+   */
+  function unrepresentable(d: Record<string, unknown>): string {
+    const bad: string[] = [];
+
+    const input = obj(d.input);
+    for (const [name, selector] of Object.entries(obj(input.select))) {
+      // `{ path, truncate, limit }` — a cap this editor has no box for.
+      if (typeof selector !== 'string') bad.push(`input.select.${name}`);
+    }
+    const request = obj(input.request);
+    if (input.kind === 'http' && !['GET', 'POST'].includes(String(request.method))) {
+      bad.push('input.request.method');
+    }
+
+    for (const [name, source] of Object.entries(obj(obj(d.agent).context))) {
+      const c = obj(source);
+      // An inline list has no row to live in — the row is a name, a URL and a path.
+      if (c.values) bad.push(`agent.context.${name}.values`);
+      const from = obj(c.source);
+      if (c.source && String(from.method) !== 'GET') bad.push(`agent.context.${name}.source.method`);
+      if (Object.keys(obj(from.headers)).length) bad.push(`agent.context.${name}.source.headers`);
+      if (from.body) bad.push(`agent.context.${name}.source.body`);
+    }
+
+    const output = obj(d.output);
+    const outRequest = obj(output.request);
+    if (output.kind === 'http' && !['POST', 'PATCH', 'PUT'].includes(String(outRequest.method))) {
+      bad.push('output.request.method');
+    }
+    // The body and message boxes are `name: value` lines, so only flat text survives them.
+    for (const [where, map] of [
+      ['output.request.body', outRequest.body],
+      ['output.message', output.message],
+    ] as const) {
+      for (const [name, value] of Object.entries(obj(map))) {
+        if (typeof value !== 'string' && typeof value !== 'number' && typeof value !== 'boolean') {
+          bad.push(`${where}.${name}`);
+        }
+      }
+    }
+
+    return bad.join(', ');
+  }
+
+  /**
+   * Fill every box from a definition the core handed over.
+   *
+   * The mirror of `buildDefinition`, and it has to stay one: a field this misses is a field
+   * that silently reverts to the editor's default when someone presses save. `unrepresentable`
+   * above is what keeps "misses" from meaning "loses".
+   *
+   * A schedule opens in the typed box rather than the picker. The file holds a cron
+   * expression, and any expression can be shown that way — reading one back into "every
+   * week, Tuesday, 09:00" only works for the few shapes the picker can make, and guessing
+   * wrong would rewrite somebody's schedule.
+   */
+  function load(d: Record<string, unknown>): void {
+    key = String(d.key ?? '');
+    description = String(d.description ?? '');
+    maxConcurrent = Number(d.max_concurrent ?? 1);
+
+    const trigger = obj(d.trigger);
+    triggerKind = trigger.kind === 'schedule' || trigger.kind === 'pubsub' ? trigger.kind : 'manual';
+    if (trigger.kind === 'schedule') {
+      cronMode = 'manual';
+      cron = String(trigger.cron ?? '');
+      timezone = String(trigger.timezone ?? localZone());
+    } else if (trigger.kind === 'pubsub') {
+      topic = String(trigger.topic ?? '');
+      subscription = String(trigger.subscription ?? '');
+      loadCredential(trigger.credential);
+    }
+
+    const input = obj(d.input);
+    inputKind = input.kind === 'http' ? 'http' : 'none';
+    selectText = formatPairs(input.select);
+    requireText = (Array.isArray(input.require) ? input.require : []).join(', ');
+    const skip = obj(input.skip_if);
+    skipField = String(skip.field ?? '');
+    skipIs = skip.is === 'empty' ? 'empty' : 'non_empty';
+    if (input.kind === 'http') {
+      const request = obj(input.request);
+      inputMethod = request.method === 'POST' ? 'POST' : 'GET';
+      inputUrl = String(request.url ?? '');
+      inputHeaders = headerRows(request.headers);
+      inputTimeout = Number(request.timeout_ms ?? 15000);
+    }
+
+    const agent = obj(d.agent);
+    provider = String(agent.provider ?? '');
+    model = String(agent.model ?? '');
+    maxTokens = Number(agent.max_tokens ?? 4096);
+    const prompt = obj(agent.prompt);
+    systemPrompt = String(prompt.system ?? '');
+    userTemplate = String(prompt.user_template ?? '');
+    schemaText = JSON.stringify(agent.schema ?? {}, null, 2);
+    contextRows = Object.entries(obj(agent.context)).map(([name, source]) => ({
+      name,
+      url: String(obj(obj(source).source).url ?? ''),
+      select: String(obj(source).select ?? ''),
+    }));
+
+    const validate = obj(agent.validate);
+    const allowed = obj(validate.allowed_values);
+    allowedField = String(allowed.field ?? '');
+    // Which of the three the file used decides the tab, so the one that is filled in is
+    // the one shown — the schema already refuses more than one.
+    allowedFrom = allowed.from ? 'context' : allowed.source ? 'source' : 'inline';
+    allowedFromName = String(allowed.from ?? '');
+    allowedValues = (Array.isArray(allowed.values) ? allowed.values : []).join(', ');
+    allowedUrl = String(obj(allowed.source).url ?? '');
+    allowedSelect = String(allowed.select ?? '');
+    const maxItems = obj(validate.max_items);
+    maxItemsField = String(maxItems.field ?? '');
+    if (maxItems.limit) maxItemsLimit = Number(maxItems.limit);
+    const confidence = obj(validate.min_confidence);
+    confidenceField = String(confidence.field ?? '');
+    if (confidence.threshold !== undefined) confidenceThreshold = Number(confidence.threshold);
+
+    const output = obj(d.output);
+    outputKind = output.kind === 'http' || output.kind === 'pubsub' ? output.kind : 'none';
+    if (output.kind === 'http') {
+      const request = obj(output.request);
+      outputMethod = request.method === 'POST' ? 'POST' : request.method === 'PUT' ? 'PUT' : 'PATCH';
+      outputUrl = String(request.url ?? '');
+      outputHeaders = headerRows(request.headers);
+      outputBody = formatPairs(request.body);
+      outputTimeout = Number(request.timeout_ms ?? 15000);
+    } else if (output.kind === 'pubsub') {
+      outputTopic = String(output.topic ?? '');
+      outputMessage = formatPairs(output.message);
+      loadCredential(output.credential);
+    }
+
+    const low = obj(d.on_low_confidence);
+    lowAction = low.action === 'skip' || low.action === 'send' ? low.action : 'report';
+    reviewUrl = String(low.review_url ?? '');
+  }
+
+  /** A credential reference names a secret the store already holds; the value is not shown. */
+  function loadCredential(ref: unknown): void {
+    const c = obj(ref);
+    if (!c.service) return;
+    pubCredService = String(c.service);
+    pubCredAccount = String(c.account ?? 'default');
+    void refreshPubCredSaved();
+  }
+
+  /**
+   * What the opened definition keeps that this editor has no field for.
+   *
+   * A request can name a credential in the store and say how to put it on the wire, and an
+   * input request can carry a body (a GraphQL query, per D7). The editor offers a header
+   * instead, deliberately — but "not offered" must not mean "deleted", so those leaves go
+   * back out exactly as they came in. `enabled` is the same: a pipeline turned off in its
+   * file must not come back on because someone fixed a typo in its prompt.
+   */
+  function carriedOver(block: 'input' | 'output'): Record<string, unknown> {
+    const request = obj(obj(obj(original)[block]).request);
+    const kept: Record<string, unknown> = {};
+    for (const field of ['credential', 'auth', 'body'] as const) {
+      if (request[field] !== undefined) kept[field] = request[field];
+    }
+    return kept;
+  }
+
   function inputRequest(): Record<string, unknown> {
     const request: Record<string, unknown> = {
+      // What the editor does not own comes first, so the four fields it does own win.
+      ...carriedOver('input'),
       method: inputMethod,
       url: inputUrl,
       headers: headerMap(inputHeaders),
@@ -440,6 +684,7 @@
     }
 
     const outRequest: Record<string, unknown> = {
+      ...carriedOver('output'),
       method: outputMethod,
       url: outputUrl,
       headers: headerMap(outputHeaders),
@@ -462,6 +707,9 @@
 
     return {
       key,
+      // A pipeline turned off in its file stays off through an edit. The editor has no
+      // switch for it — the list does — so it travels as it arrived.
+      enabled: original ? original.enabled : undefined,
       description: description || undefined,
       max_concurrent: maxConcurrent,
       trigger,
@@ -493,7 +741,9 @@
         pubCredValue = '';
         await refreshPubCredSaved();
       }
-      const result = await api.savePipeline(buildDefinition());
+      // Overwrite only when editing. Creating still refuses to land on an existing key —
+      // that check is what stops a new pipeline from replacing one that is running.
+      const result = await api.savePipeline(buildDefinition(), !!original);
       if (result.ok) {
         onsaved(key);
         return;
@@ -549,24 +799,35 @@
   }}
 >
   <div class="modal" role="dialog" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
-    <h2>{t('editor.title')}</h2>
+    <h2>{original || editing ? t('editor.editTitle') : t('editor.title')}</h2>
 
-    <div class="steps">
-      {#each STEPS as label, i}
-        <button class="tab" class:on={step === i} class:bad={issuesFor(i).length > 0} onclick={() => (step = i)}>
-          <span class="num">{i + 1}</span>{label}
-        </button>
-      {/each}
-    </div>
+    {#if !blocked}
+      <div class="steps">
+        {#each STEPS as label, i}
+          <button class="tab" class:on={step === i} class:bad={issuesFor(i).length > 0} onclick={() => (step = i)}>
+            <span class="num">{i + 1}</span>{label}
+          </button>
+        {/each}
+      </div>
+    {/if}
 
     <div class="body">
-      {#if step === 0}
+      {#if blocked}
+        <!-- Nothing is filled in, so nothing can be saved over: the boxes stay empty and
+             `original` stays unset, which leaves the save button building a new pipeline
+             rather than replacing the one that could not be shown. -->
+        <p class="testErr">{blocked}</p>
+      {:else if step === 0}
         <label class="field">
           <span>{t('editor.key')}</span>
-          <input bind:value={key} placeholder="classify-record" spellcheck="false" />
+          <!-- Read-only while editing. The key is what history, the file name and past runs
+               are filed under; changing it here would leave the runs behind under a name
+               nothing answers to any more, and write a second file besides. Renaming is a
+               thing to do to the file, deliberately, not a side effect of fixing a prompt. -->
+          <input bind:value={key} placeholder="classify-record" spellcheck="false" readonly={!!original} />
           <!-- It is an identifier, not a title: it becomes the file name, the history key
                and the URL. Saying so beats being refused on save. -->
-          <small>{t('editor.keyHint')}</small>
+          <small>{original ? t('editor.keyFixed') : t('editor.keyHint')}</small>
         </label>
         <label class="field"><span>{t('editor.description')}</span><input bind:value={description} /></label>
         <label class="field narrow">
@@ -973,11 +1234,13 @@
       {/if}
       <span class="spacer"></span>
       <button class="ghost" onclick={onclose}>{t('editor.cancel')}</button>
-      {#if step > 0}<button class="ghost" onclick={() => (step -= 1)}>{t('editor.back')}</button>{/if}
-      {#if step < LAST}
-        <Button onclick={() => (step += 1)}>{t('editor.next')}</Button>
-      {:else}
-        <Button class="primary" onclick={save} disabled={saving}>{t('editor.save')}</Button>
+      {#if !blocked}
+        {#if step > 0}<button class="ghost" onclick={() => (step -= 1)}>{t('editor.back')}</button>{/if}
+        {#if step < LAST}
+          <Button onclick={() => (step += 1)}>{t('editor.next')}</Button>
+        {:else}
+          <Button class="primary" onclick={save} disabled={saving}>{t('editor.save')}</Button>
+        {/if}
       {/if}
     </div>
   </div>

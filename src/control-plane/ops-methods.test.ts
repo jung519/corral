@@ -163,6 +163,60 @@ describe('over the control plane', () => {
     expect(((await dispatch('opsRun', { key: 'from-the-app', input: {} }, d)) as any).ok).toBe(true);
   });
 
+  describe('opening one to edit it', () => {
+    const definition = {
+      key: 'editable',
+      description: 'as written',
+      trigger: { kind: 'manual' },
+      input: { kind: 'none', select: { title: 'data.title' } },
+      agent: {
+        prompt: { system: 's', user_template: 'u' },
+        schema: { type: 'object', properties: { answer: { type: 'string' } } },
+      },
+      output: { kind: 'none' },
+    };
+
+    it('hands over the definition with the defaults filled in', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+      await dispatch('opsSave', { definition }, d);
+
+      const got = (await dispatch('opsDefinition', { key: 'editable' }, d)) as any;
+
+      // The parsed form, not the file's bytes: an editor filling boxes wants values, and
+      // `max_concurrent` was never written down (CRL-73).
+      expect(got.ok).toBe(true);
+      expect(got.definition).toMatchObject({
+        key: 'editable',
+        description: 'as written',
+        max_concurrent: 1,
+        enabled: true,
+        input: { kind: 'none', select: { title: 'data.title' } },
+      });
+    });
+
+    it('says so when nothing answers to that key', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+
+      expect((await dispatch('opsDefinition', { key: 'nope' }, d)) as any).toMatchObject({ ok: false });
+    });
+
+    it('replaces the pipeline when saving with overwrite, and refuses without it', async () => {
+      const d = deps(await startOpsHost({ stateDir: dir }));
+      await dispatch('opsSave', { definition }, d);
+
+      const edited = { ...definition, description: 'edited in the app' };
+      // Without `overwrite` a save onto a live key is refused — that check is what stops a
+      // NEW pipeline from replacing one that is running.
+      expect(((await dispatch('opsSave', { definition: edited }, d)) as any).ok).toBe(false);
+      expect(((await dispatch('opsDefinition', { key: 'editable' }, d)) as any).definition.description).toBe('as written');
+
+      expect(((await dispatch('opsSave', { definition: edited, overwrite: true }, d)) as any).ok).toBe(true);
+      expect(((await dispatch('opsDefinition', { key: 'editable' }, d)) as any).definition.description).toBe('edited in the app');
+      // One pipeline, not two: the writer finds the file already holding that key.
+      expect(((await dispatch('opsPipelines', {}, d)) as any).pipelines).toHaveLength(1);
+    });
+  });
+
   it('hands back field paths instead of saving something broken', async () => {
     const d = deps(await startOpsHost({ stateDir: dir }));
 
@@ -364,7 +418,7 @@ describe('over the control plane', () => {
   it('declines cleanly on a core with no operational AI', async () => {
     const d = deps(undefined);
 
-    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete', 'opsTestFetch', 'opsAgents']) {
+    for (const method of ['opsPipelines', 'opsRun', 'opsHistory', 'opsTotals', 'opsSetEnabled', 'opsSave', 'opsDelete', 'opsTestFetch', 'opsAgents', 'opsDefinition']) {
       expect(await dispatch(method, {}, d)).toMatchObject({ ok: false });
     }
   });

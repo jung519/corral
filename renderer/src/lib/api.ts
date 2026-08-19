@@ -170,6 +170,15 @@ export const testFetch = (
 export const deletePipeline = (key: string): Promise<{ ok: boolean; file?: string; error?: string }> =>
   call('opsDelete', { key });
 
+/**
+ * One pipeline's definition, for opening it in the editor.
+ *
+ * The parsed form the runtime holds, not the file's bytes — the editor wants values, and
+ * the file's YAML would have to be parsed and defaulted here to get them.
+ */
+export const getDefinition = (key: string): Promise<{ ok: boolean; definition?: Record<string, unknown>; error?: string }> =>
+  call('opsDefinition', { key });
+
 export const savePipeline = (
   definition: unknown,
   overwrite = false,

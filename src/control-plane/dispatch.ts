@@ -168,6 +168,13 @@ export async function dispatch(
       // The trigger is stopped before the file goes, and any run already going is left to
       // finish — see `OpsHost.remove`.
       return await deps.ops.remove(String(a.key ?? ''));
+    case 'opsDefinition': {
+      if (!deps.ops) return NO_OPS;
+      // For the editor: what is in the file, so opening a pipeline shows what it actually
+      // says rather than an empty form to retype it into (CRL-73).
+      const definition = deps.ops.definition(String(a.key ?? ''));
+      return definition ? { ok: true, definition } : { ok: false, error: `no pipeline named "${String(a.key ?? '')}"` };
+    }
     case 'opsSave':
       if (!deps.ops) return NO_OPS;
       // Issues come back with the same dotted field paths the loader uses, so an editor
