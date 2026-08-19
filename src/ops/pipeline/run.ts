@@ -141,12 +141,64 @@ export function fillValue(template: string, fields: Fields): unknown {
   return fillTemplate(template, fields);
 }
 
-/** Read a dotted path out of a parsed document. */
+/**
+ * Read a dotted path out of a parsed document.
+ *
+ * A segment may end in `[]`, which means "and then each item of that list". The rest of
+ * the path applies to every item and the results come back as one flat list:
+ *
+ *   majors[].minors[].key   →  ["BUNSIK", "FRUIT", "CRAFT"]
+ *   majors[].key            →  ["FOOD", "ACTIVITY"]
+ *
+ * Without `[]` nothing changed. It was added because a controlled vocabulary is very often
+ * a parent/child tree, and a plain dotted path cannot cross a list — `majors.minors` reads
+ * as a key on an array and comes back undefined, which left such a source unusable
+ * (CRL-70). Naming an index (`majors.0.minors.0.key`) reaches one value, which is not what
+ * a list of allowed values is.
+ *
+ * Items missing the field are dropped rather than left as holes. `allowed_values` renders
+ * what it is given with `String()`, so a hole would admit the literal `"undefined"` as an
+ * allowed value.
+ */
 export function readPath(source: unknown, path: string): unknown {
-  return path.split('.').reduce<unknown>((node, key) => {
-    if (node === null || typeof node !== 'object') return undefined;
-    return (node as Record<string, unknown>)[key];
-  }, source);
+  let node: unknown = source;
+  /** Whether `node` is a list being mapped over rather than a single value. */
+  let spread = false;
+
+  for (const segment of path.split('.')) {
+    const each = segment.endsWith('[]');
+    const key = each ? segment.slice(0, -2) : segment;
+
+    node = spread ? mapKey(node as unknown[], key) : readKey(node, key);
+    if (node === undefined) return undefined;
+
+    if (each) {
+      // The value under this key has to be a list for "each item of it" to mean anything.
+      // Anything else is a path that does not match what is there — the same answer a
+      // missing key gets.
+      const lists = spread ? (node as unknown[]) : [node];
+      if (!lists.every((v) => Array.isArray(v))) return undefined;
+      node = (lists as unknown[][]).flat();
+      spread = true;
+    }
+  }
+
+  return node;
+}
+
+function readKey(node: unknown, key: string): unknown {
+  if (node === null || typeof node !== 'object') return undefined;
+  return (node as Record<string, unknown>)[key];
+}
+
+/** The key off every item, with the items that don't have it left out. */
+function mapKey(items: unknown[], key: string): unknown[] {
+  const out: unknown[] = [];
+  for (const item of items) {
+    const value = readKey(item, key);
+    if (value !== undefined) out.push(value);
+  }
+  return out;
 }
 
 function isEmpty(value: unknown): boolean {
