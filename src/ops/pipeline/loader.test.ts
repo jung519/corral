@@ -206,6 +206,33 @@ output: { kind: none }
     expect(err.issues[0]!.message).toMatch(/at least one property/);
   });
 
+  it('accepts what the editor builds for a list plus a rule that points at it', async () => {
+    // The editor writes `source: { url }` with no method and `select` only when it was
+    // filled in, and it writes `from` as the name it offered in a dropdown. If the defaults
+    // did not cover that, the first save from a clean screen would fail on the editor's own
+    // output (CRL-67).
+    write('editor.yaml', `
+key: from-the-editor
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: "choose from {{allowed}}" }
+  schema: { type: object, properties: { items: { type: array } } }
+  context:
+    allowed:
+      source: { url: "https://api.example.com/vocabulary" }
+      select: data.values
+  validate:
+    allowed_values: { field: items, from: allowed }
+output: { kind: none }
+`);
+
+    const pipelines = await loadPipelines(dir);
+
+    expect(pipelines[0]!.agent.context.allowed).toMatchObject({ select: 'data.values' });
+    expect(pipelines[0]!.agent.validate.allowed_values).toMatchObject({ from: 'allowed' });
+  });
+
   it('rejects a `from` that names nothing in agent.context', async () => {
     const err = await load(`
 key: no-such-context

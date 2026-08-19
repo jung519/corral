@@ -117,33 +117,49 @@
 
   // ── trying the fetch before saving ────────────────────────────────────────────────
   let sampleEvent = $state('{ "id": "1" }');
-  let testing = $state(false);
-  let testResult = $state<{
+  /** Which slot is in flight, '' for none. */
+  let testing = $state('');
+  interface FetchResult {
     ok: boolean;
     error?: string;
     body?: unknown;
     fields?: Record<string, unknown>;
     missing?: string[];
     selectError?: string;
-  } | null>(null);
+  }
+  let results = $state<Record<string, FetchResult | null>>({});
+  const testResult = $derived(results.input ?? null);
 
-  async function testFetch(): Promise<void> {
-    testing = true;
-    testResult = null;
+  /**
+   * Try one fetch and keep its answer under `slot`.
+   *
+   * Keyed rather than single, because a step can declare several lists now and each of them
+   * is a separate guess to prove. The input fetch keeps the slot it always had (`input`).
+   */
+  async function tryFetch(slot: string, request: Record<string, unknown>, select: Record<string, string>): Promise<void> {
+    testing = slot;
+    results = { ...results, [slot]: null };
     try {
       let event: unknown = {};
       try {
         event = JSON.parse(sampleEvent || '{}');
       } catch {
-        testResult = { ok: false, error: t('editor.testBadEvent') };
+        results = { ...results, [slot]: { ok: false, error: t('editor.testBadEvent') } };
         return;
       }
-      testResult = await api.testFetch(inputRequest(), event, parsePairs(selectText));
+      results = { ...results, [slot]: await api.testFetch(request, event, select) };
     } catch (err) {
-      testResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
+      results = { ...results, [slot]: { ok: false, error: err instanceof Error ? err.message : String(err) } };
     } finally {
-      testing = false;
+      testing = '';
     }
+  }
+
+  const testFetch = (): Promise<void> => tryFetch('input', inputRequest(), parsePairs(selectText));
+
+  /** A context row's fetch, described the same way the input's is. */
+  function contextRequest(row: { url: string }): Record<string, unknown> {
+    return { method: 'GET', url: row.url, headers: {}, timeout_ms: inputTimeout };
   }
 
   /** Whether a ref already holds a secret, so an operator knows not to retype it. */
@@ -204,8 +220,33 @@
   // The headline rule: values outside the list are dropped and recorded, never sent on.
   // The list is either written here or fetched, because a vocabulary that changes daily
   // should not mean editing the pipeline.
+  /**
+   * Material the prompt needs, fetched before the turn.
+   *
+   * Declared above the prompt rather than below it: you name a list, then write the sentence
+   * that uses it, and reading the screen top to bottom is the same order.
+   */
+  let contextRows = $state<Array<{ name: string; url: string; select: string }>>([]);
+
+  function addContext(): void {
+    contextRows = [...contextRows, { name: '', url: '', select: '' }];
+  }
+
+  function removeContext(i: number): void {
+    contextRows = contextRows.filter((_, j) => j !== i);
+    // A tab pointing at a list that no longer exists would save a `from` the loader
+    // refuses, so the choice goes back to the one that is always available.
+    if (!namedContexts().length) allowedFrom = 'inline';
+  }
+
+  /** Rows complete enough to be referred to by name. */
+  function namedContexts(): string[] {
+    return contextRows.filter((r) => r.name.trim() && r.url.trim()).map((r) => r.name.trim());
+  }
+
   let allowedField = $state('');
-  let allowedFrom = $state<'inline' | 'source'>('inline');
+  let allowedFrom = $state<'inline' | 'source' | 'context'>('inline');
+  let allowedFromName = $state('');
   let allowedValues = $state('');
   let allowedUrl = $state('');
   let allowedSelect = $state('');
@@ -320,18 +361,27 @@
         ? { kind: 'http', request, select, require, skip_if }
         : { kind: 'none', select, require, skip_if };
 
+    const context: Record<string, unknown> = {};
+    for (const row of contextRows) {
+      if (!row.name.trim() || !row.url.trim()) continue;
+      context[row.name.trim()] = { source: { url: row.url.trim() }, select: row.select.trim() || undefined };
+    }
+
     const validate: Record<string, unknown> = {};
     if (allowedField.trim()) {
+      const field = allowedField.trim();
       validate.allowed_values =
-        allowedFrom === 'inline'
-          ? {
-              field: allowedField.trim(),
-              values: allowedValues
-                .split(',')
-                .map((v) => v.trim())
-                .filter(Boolean),
-            }
-          : { field: allowedField.trim(), source: { url: allowedUrl }, select: allowedSelect || undefined };
+        allowedFrom === 'context'
+          ? { field, from: allowedFromName.trim() }
+          : allowedFrom === 'inline'
+            ? {
+                field,
+                values: allowedValues
+                  .split(',')
+                  .map((v) => v.trim())
+                  .filter(Boolean),
+              }
+            : { field, source: { url: allowedUrl }, select: allowedSelect || undefined };
     }
     if (maxItemsField) validate.max_items = { field: maxItemsField, limit: maxItemsLimit };
     if (confidenceField) validate.min_confidence = { field: confidenceField, threshold: confidenceThreshold };
@@ -373,6 +423,7 @@
       trigger,
       input,
       agent: {
+        context: Object.keys(context).length ? context : undefined,
         provider: provider || undefined,
         model: model.trim() || undefined,
         max_tokens: maxTokens,
@@ -626,8 +677,8 @@
               ><span>{t('editor.testEvent')}</span>
               <input class="mono" bind:value={sampleEvent} spellcheck="false" /></label
             >
-            <button class="plus" onclick={testFetch} disabled={testing || !inputUrl.trim()}>
-              {testing ? t('editor.testing') : t('editor.testRun')}
+            <button class="plus" onclick={testFetch} disabled={!!testing || !inputUrl.trim()}>
+              {testing === 'input' ? t('editor.testing') : t('editor.testRun')}
             </button>
 
             {#if testResult && !testResult.ok}
@@ -673,6 +724,42 @@
         </div>
         <label class="field narrow"><span>max_tokens</span><input type="number" bind:value={maxTokens} /></label>
 
+        <!-- Above the prompt, because that is the order you write it in: name the list,
+             then write the sentence that uses it. -->
+        <div class="block">
+          <p class="blockTitle">{t('editor.context')}</p>
+          <p class="hint">{t('editor.contextHint')}</p>
+          {#each contextRows as row, i}
+            <div class="row">
+              <label class="field"
+                ><span>{t('editor.contextName')}</span>
+                <input bind:value={row.name} spellcheck="false" placeholder="allowed" /></label
+              >
+              <label class="field"><span>URL</span><input bind:value={row.url} spellcheck="false" placeholder="https://api.example.com/vocabulary" /></label>
+              <label class="field"
+                ><span>{t('editor.allowedSelect')}</span>
+                <input bind:value={row.select} spellcheck="false" placeholder="data.values" /></label
+              >
+              <button class="minus" onclick={() => removeContext(i)} aria-label={t('editor.contextRemove')}>−</button>
+            </div>
+            {#if row.name.trim() && row.url.trim()}
+              <button class="plus" onclick={() => tryFetch(`context:${row.name.trim()}`, contextRequest(row), {})} disabled={!!testing}>
+                {testing === `context:${row.name.trim()}` ? t('editor.testing') : t('editor.contextTest')}
+              </button>
+              {@const r = results[`context:${row.name.trim()}`]}
+              {#if r && !r.ok}
+                <p class="testErr">{r.error}</p>
+              {:else if r}
+                <!-- The list goes to the prompt as it arrives, so what is worth seeing is
+                     what arrived — not a tidied version of it. -->
+                <p class="blockTitle mt">{t('editor.contextGot')}</p>
+                <pre class="out">{JSON.stringify(r.body, null, 2)}</pre>
+              {/if}
+            {/if}
+          {/each}
+          <button class="plus" onclick={addContext}>{t('editor.contextAdd')}</button>
+        </div>
+
         <!-- Both go to the model as one turn. "User" is the chat role, not the person
              using Corral — saying so here saves guessing at the label. -->
         <div class="block">
@@ -706,8 +793,22 @@
               <div class="tabs">
                 <button class="tab" class:on={allowedFrom === 'inline'} onclick={() => (allowedFrom = 'inline')}>{t('editor.allowed.inline')}</button>
                 <button class="tab" class:on={allowedFrom === 'source'} onclick={() => (allowedFrom = 'source')}>{t('editor.allowed.source')}</button>
+                <!-- Offered only when there is something to point at. A `from` naming
+                     nothing is refused at load, so the choice should not exist yet. -->
+                {#if namedContexts().length}
+                  <button class="tab" class:on={allowedFrom === 'context'} onclick={() => (allowedFrom = 'context')}>{t('editor.allowed.context')}</button>
+                {/if}
               </div>
-              {#if allowedFrom === 'inline'}
+              {#if allowedFrom === 'context'}
+                <label class="field"
+                  ><span>{t('editor.allowedFromName')}</span>
+                  <select bind:value={allowedFromName}>
+                    <option value="">—</option>
+                    {#each namedContexts() as name}<option value={name}>{name}</option>{/each}
+                  </select>
+                  <small>{t('editor.allowedFromHint')}</small></label
+                >
+              {:else if allowedFrom === 'inline'}
                 <label class="field"
                   ><span>{t('editor.allowedValues')}</span>
                   <input bind:value={allowedValues} spellcheck="false" placeholder="news, sport, culture" /></label
@@ -917,9 +1018,14 @@
     padding: 12px;
     margin-bottom: 10px;
   }
-  .sched .tabs {
+  /* The children carry `flex: 1`, so the row was always the intent — but the rule only
+     existed under `.sched`, which left the allowed-values tabs stacked full width. Hoisted
+     rather than duplicated, so both places lay out the same way. */
+  .tabs {
     display: flex;
     gap: 6px;
+  }
+  .sched .tabs {
     margin-bottom: 12px;
   }
   .sched .row {
