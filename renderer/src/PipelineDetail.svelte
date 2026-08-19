@@ -13,6 +13,7 @@
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
   import RunPrompt from './RunPrompt.svelte';
+  import PipelineEditor from './PipelineEditor.svelte';
   import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
@@ -38,6 +39,14 @@
    *  what a manual run has to be handed (CRL-72). */
   let summary = $state<api.OpsPipeline | undefined>(undefined);
   let asking = $state(false);
+  /**
+   * Whether the editor is open on this pipeline.
+   *
+   * Here rather than on a list row, for the same reason delete is: this is the screen you
+   * are on when you mean to change this one pipeline, and a row in a list puts the button
+   * one slip away from its neighbour.
+   */
+  let editing = $state(false);
   let totals = $state<api.OpsDailyTotals[]>([]);
   let filter = $state('');
   let days = $state(7);
@@ -120,8 +129,21 @@
 <PageHeader title={pipelineKey} {online} meta={today ? `${today.runs} ${t('ops.today')}` : ''}>
   <a class="ghost back" href="#/">{t('detail.back')}</a>
   <button class="ghost danger" onclick={remove}>{t('detail.delete')}</button>
+  <button class="ghost" onclick={() => (editing = true)}>{t('detail.edit')}</button>
   <Button onclick={start}>{t('ops.run')}</Button>
 </PageHeader>
+
+{#if editing}
+  <PipelineEditor
+    editing={pipelineKey}
+    onclose={() => (editing = false)}
+    onsaved={() => {
+      editing = false;
+      toast(`${pipelineKey}: ${t('ops.saved')}`);
+      void refresh();
+    }}
+  />
+{/if}
 
 {#if asking}
   <RunPrompt
