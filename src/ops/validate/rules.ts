@@ -11,31 +11,26 @@
  * Nothing knows what the values mean.
  */
 import { logger } from '../../core/logger.js';
-import type { CredentialStore } from '../../credentials/types.js';
-import { runHttpRequest } from '../http.js';
+import { ContextStore, CONTEXT_TTL_MS, type ContextStoreOptions } from '../context/store.js';
 import type { AnswerValidator, ValidationVerdict } from '../pipeline/ports.js';
-import { readPath } from '../pipeline/run.js';
 import type { PipelineAgentStep, PipelineValidation } from '../pipeline/schema.js';
 
-/** How long a fetched vocabulary is reused. A list that changes daily doesn't need
- *  fetching thousands of times a day, and a stale-by-minutes list is not a hazard. */
-export const VOCABULARY_TTL_MS = 5 * 60_000;
+/** Kept as the name this file has always exported. The value, and the reasoning behind
+ *  it, moved to the store when the fetch did (CRL-64). */
+export const VOCABULARY_TTL_MS = CONTEXT_TTL_MS;
 
-export interface RuleValidatorOptions {
-  credentials?: CredentialStore;
-  /** Injectable so tests don't depend on wall-clock. */
-  now?: () => number;
-  ttlMs?: number;
+export interface RuleValidatorOptions extends ContextStoreOptions {
+  /** The host's shared store. Omit and this builds one from the options above. */
+  store?: ContextStore;
 }
 
 export class RuleAnswerValidator implements AnswerValidator {
-  private readonly cache = new Map<string, { at: number; values: Set<string> }>();
-  private readonly now: () => number;
-  private readonly ttlMs: number;
+  private readonly store: ContextStore;
 
-  constructor(private readonly options: RuleValidatorOptions = {}) {
-    this.now = options.now ?? (() => Date.now());
-    this.ttlMs = options.ttlMs ?? VOCABULARY_TTL_MS;
+  /** Pass the host's store so the prompt and the check read one fetch. Left to build its
+   *  own only for tests that exercise this class alone. */
+  constructor(options: RuleValidatorOptions = {}) {
+    this.store = options.store ?? new ContextStore(options);
   }
 
   async check(step: PipelineAgentStep, answer: Record<string, unknown>): Promise<ValidationVerdict> {
@@ -130,22 +125,15 @@ export class RuleAnswerValidator implements AnswerValidator {
     return { ok: true, answer: result, dropped: dropped.length ? dropped : undefined };
   }
 
-  /** The allowed list — inline, or fetched and briefly cached. */
+  /**
+   * The allowed list, as a set to test membership against.
+   *
+   * The fetching and the caching are the store's now, shared with whatever put the same
+   * list in the prompt (CRL-64). A `Set` is built here because that is what this end of
+   * the turn wants; the store keeps the plainer list the prompt wants.
+   */
   private async vocabulary(rule: NonNullable<PipelineValidation['allowed_values']>): Promise<Set<string>> {
-    if (rule.values) return new Set(rule.values);
-    if (!rule.source) throw new Error('no values and no source'); // the schema rejects this shape
-
-    const key = `${rule.source.method} ${rule.source.url}${rule.select ? `#${rule.select}` : ''}`;
-    const hit = this.cache.get(key);
-    if (hit && this.now() - hit.at < this.ttlMs) return hit.values;
-
-    const body = await runHttpRequest<unknown>(rule.source, {}, this.options.credentials);
-    const raw = rule.select ? readPath(body, rule.select) : body;
-    if (!Array.isArray(raw)) throw new Error(`expected a list${rule.select ? ` at "${rule.select}"` : ''}`);
-
-    const values = new Set(raw.map((v) => String(v)));
-    this.cache.set(key, { at: this.now(), values });
-    return values;
+    return new Set((await this.store.list(rule)).map((v) => String(v)));
   }
 }
 
