@@ -241,6 +241,21 @@ output: { kind: none }
     expect(run?.reason).toMatch(/is gone/);
   });
 
+  it('skips an event that did not carry what the url names, without fetching', async () => {
+    writePipeline(definition());
+    const host = await startOpsHost({ stateDir: dir, operation: neverCalled });
+
+    const { run } = await host.runManually('classify', { wrongName: 9 });
+
+    // Skipped for the same reason a gone record is: the redelivery carries the same event,
+    // so the address is missing the same piece. What changed with CRL-74 is that it stops
+    // before fetching — `/records/` is a different address, and what comes back from it is
+    // somebody else's record or a list of them.
+    expect(run).toMatchObject({ outcome: 'skipped', stage: 'input' });
+    expect(run?.reason).toMatch(/"id"/);
+    expect(requests).toEqual([]);
+  });
+
   it('fails a fetch that could work next time', async () => {
     respond = () => ({ status: 503, body: {} });
     writePipeline(definition());

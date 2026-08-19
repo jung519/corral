@@ -96,6 +96,57 @@ describe('calling the user API', () => {
     expect(requests[0]!.headers.authorization).toBe('Bearer super-secret');
   });
 
+  /**
+   * The address is the part of a request that cannot have a hole in it.
+   *
+   * A schedule's event carries `scheduledAt` and the pipeline's name, so a definition that
+   * writes back to `/records/{{id}}` without selecting an `id` out of the response used to
+   * PATCH `/records/` — and a receiver that answers 200 to that left the run recorded
+   * `completed` with the answer nowhere anyone wanted (CRL-74).
+   */
+  describe('a request with a hole in its address', () => {
+    it('is refused before it is sent, naming the field', async () => {
+      const sink = new HttpOutputSink();
+
+      await expect(
+        sink.send(output({ kind: 'http', request: { method: 'PATCH', url: `${base}/api/records/{{id}}` } }), {
+          items: ['a'],
+        }),
+      ).rejects.toThrow(/"id"/);
+
+      // The point of the whole change: nothing reached the receiver.
+      expect(requests).toEqual([]);
+    });
+
+    it('is refused for a header too, since a header is filled the same way', async () => {
+      await expect(
+        new HttpOutputSink().send(
+          output({ kind: 'http', request: { url: `${base}/r`, headers: { 'x-tenant': '{{tenant}}' } } }),
+          {},
+        ),
+      ).rejects.toThrow(/header "x-tenant".*"tenant"/);
+      expect(requests).toEqual([]);
+    });
+
+    it('sends when the field is an empty string, because that is a value', async () => {
+      // Somebody chose ''. Refusing it would be second-guessing data rather than catching
+      // an absent field — the line `fillValue` already draws for bodies.
+      await new HttpOutputSink().send(output({ kind: 'http', request: { url: `${base}/r?q={{term}}` } }), { term: '' });
+
+      expect(requests[0]).toMatchObject({ url: '/r?q=' });
+    });
+
+    it('leaves a body alone — a missing field there is already answered with null', async () => {
+      // The receiver can see a null and act on it; an address cannot carry one.
+      await new HttpOutputSink().send(
+        output({ kind: 'http', request: { method: 'POST', url: `${base}/r`, body: { labels: '{{items}}' } } }),
+        {},
+      );
+
+      expect(JSON.parse(requests[0]!.body)).toEqual({ labels: null });
+    });
+  });
+
   it('raises a rejected write rather than swallowing it', async () => {
     status = 401;
 
@@ -235,6 +286,36 @@ on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review"
     // has to be able to tell it from a run that never called the model.
     expect(run).toMatchObject({ outcome: 'output_failed', stage: 'output', tokens: 10 });
     expect((await host.history.list({ days: 1 }))[0]).toMatchObject({ outcome: 'output_failed', tokens: 10 });
+  });
+
+  it('is not a completed run when the address had a hole in it', async () => {
+    // The definition writes back to the record it read, but nothing named `id` reaches
+    // this run — a schedule's event carries no identifier and no `select` supplies one.
+    mkdirSync(join(dir, 'pipelines'), { recursive: true });
+    writeFileSync(
+      join(dir, 'pipelines', 'c.yaml'),
+      `
+key: classify
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { items: { type: array } } }
+output:
+  kind: http
+  request: { method: PATCH, url: "${base}/api/records/{{id}}/labels", body: { labels: "{{items}}" } }
+`,
+    );
+    const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'] }) });
+
+    const { run } = await host.runManually('classify', {});
+
+    // Before CRL-74 this PATCHed `/api/records//labels`, the test server answered 200, and
+    // the run was recorded `completed` — an answer produced, paid for, and delivered
+    // nowhere. The reason names the field so the definition can be fixed.
+    expect(run).toMatchObject({ outcome: 'output_failed', stage: 'output', tokens: 10 });
+    expect(run?.reason).toMatch(/"id"/);
+    expect(requests).toEqual([]);
   });
 
   it('delivers when everything passed', async () => {

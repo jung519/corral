@@ -307,7 +307,12 @@ export class PipelineRunner {
         // "Gone" is not "broken". A deleted record answers the same way forever, so this
         // is a conclusion, not a failure — and a queue told otherwise would redeliver it
         // until its dead-letter policy gave up.
-        if (err instanceof Error && err.name === 'TargetMissingError') {
+        //
+        // An event that did not carry what the url names is the same shape of answer: the
+        // redelivery carries the same event, so the address is missing the same piece. It
+        // reads as skipped for exactly the reason `require` does below (CRL-74), and it
+        // gets there before a wrong address is fetched rather than after.
+        if (err instanceof Error && ['TargetMissingError', 'TemplateUnresolvedError'].includes(err.name)) {
           return done('skipped', { stage: 'input', reason: message(err) });
         }
         return done('input_failed', { stage: 'input', reason: message(err) });
