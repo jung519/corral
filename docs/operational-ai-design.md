@@ -106,6 +106,30 @@ corral이 실행·관제하는 것이다. 비즈니스 로직은 실행하지 �
 | D23 | AI 설정(③단계)은 **모델 스펙 + 판단 상세**(프롬프트·출력 스키마·검증 규칙)를 모두 담는다 |
 | D24 | AI 프로바이더·상한 등 **기본 설정은 개발·운영이 공유**한다 |
 
+### 3.6 프롬프트 재료 (CRL-63~68)
+
+허용값 목록은 이미 조회·캐시되는데 **채점에만** 쓰였다. 모델에게 보기를 주지 않고 채점하니
+답이 전부 버려졌고, 그런데도 실행은 `completed`로 끝났다. 분석은
+`ops-prompt-context.md`, 작업 계획은 `ops-prompt-context-plan.md`에 있다.
+
+| # | 결정 | 근거 |
+|---|---|---|
+| D25 | **`agent.context` 자리를 신설**한다. 검증 블록에 재료 공급을 겸하게 하지 않는다 | `validate`에 공급 기능을 얹으면 블록 이름이 하는 일을 설명하지 못한다. `context`는 허용값 말고 기준표·분류 지침도 같은 자리에 들어간다 |
+| D26 | `validate.allowed_values`가 **`from`으로 context 이름을 참조**한다 | 안 그러면 목록을 두 곳에 적는다. 한쪽만 고치면 채점은 새 값을 통과시키는데 모델은 그런 값이 있는 줄도 모른다 |
+| D27 | **조회 실패 시 모델을 부르지 않는다.** 결과는 `input_failed` + `stage: 'context'` | 목록 없이 물으면 답이 전부 버려져 토큰만 쓴다. 새 outcome을 만들지 않는 이유는 큐 의미론이 이미 맞기 때문이다 — `SETTLED`에 없으므로 메시지가 기다린다 |
+| D28 | **목록은 원문 그대로** 넣는다. 사람이 읽는 형태로 다듬는 기능은 두지 않는다 | 다듬기는 어휘의 구조(부모·key·라벨)를 아는 쪽만 할 수 있고 corral은 도메인을 모른다. 필요하면 조회 API가 하면 되고 `select`가 이미 그 경로다 |
+| D29 | **`prompt.system`은 치환하지 않는다.** 재료는 `user_template`에만 | 치환하면 이벤트에서 온 문자열이 시스템 메시지로 들어간다. 프롬프트 인젝션 표면을 system 역할로 승격시키는 것이고, CRL-43이 정리한 문제와 같은 종류다 |
+
+**이름 충돌** — `context`가 가방에서 가장 약하다. `{ ...context, ...event, ...selected }`
+순서다. `select`가 이벤트를 이기는 것과 같은 이유로, 이 실행에 속한 값이 더 구체적이다.
+**채점은 병합 전 값을 본다** — 그러지 않으면 큐 메시지로 들어온 값이 통제 어휘 자리에 앉는다.
+
+**단계의 위치** — `require` 뒤, **예산 확인 뒤**, 모델 호출 앞이다. 상한에 걸린 실행은
+모델을 안 부르므로 목록도 필요 없다.
+
+**전부 버려지면 성공으로 끝내지 않는다 (CRL-63)** — 남은 값이 없고 버린 값이 있으면
+`rejected`다. 모델이 빈 배열을 답한 것은 프롬프트가 허용한 답이라 통과한다.
+
 ---
 
 ## 4. UI 설계
@@ -150,9 +174,11 @@ corral이 실행·관제하는 것이다. 비즈니스 로직은 실행하지 �
 3. AI 작업                                         ← D23
    프로바이더 · 모델  ← 이 코어가 실제로 물을 수 있는 것만 (opsAgents)
    max_tokens
+   프롬프트에 넣을 재료 (+/−): 이름 · URL · 응답 경로 · 조회 시험   ← D25·D29
+     프롬프트 위에 둔다 — 재료를 선언하고 그것을 쓰는 문장을 아래에 적는 순서
    모델에 보내는 것: 시스템 메시지 · 요청  (둘이 한 턴으로 간다)
    답 형식(JSON Schema)
-   답 검사: 허용값(직접 나열 / 조회) · 개수 상한 · 신뢰도
+   답 검사: 허용값(직접 나열 / 조회 / 위 재료 참조) · 개수 상한 · 신뢰도   ← D26
 
 4. 결과 전송
    ( ) 전송 안 함 (이력만)  (•) 내 API  ( ) 토픽 발행
@@ -232,10 +258,15 @@ input:                            # ② 내용 조회: 이벤트 → AI 입력 �
 agent:                            # ③ AI 작업 (1턴)
   provider: claude                # 생략하면 앱 전역 설정을 따른다
   max_tokens: 4096
+  context:                        # 프롬프트에 넣을 재료 — 턴 전에 조회한다 (D25)
+    allowed:                      # 이름. user_template 에서 {{allowed}} 로 읽는다
+      source: { url: "https://<host>/api/vocabulary" }   # 또는 values: [...]
+      select: "data.values"
   prompt:
     system: |
       <역할·규칙>
     user_template: |
+      다음 중에서만 고른다: {{allowed}}
       제목: {{title}}
       설명: {{detail}}
   schema:                         # 구조화 출력의 모양
@@ -249,8 +280,7 @@ agent:                            # ③ AI 작업 (1턴)
                                   # 타입이 규칙과 맞아야 한다. 아니면 불러올 때 거부된다
     allowed_values:
       field: items
-      source: { url: "https://<host>/api/vocabulary" }   # 또는 values: [...]
-      select: "data.values"
+      from: allowed               # 위 context 이름. values/source 와 셋 중 하나 (D26)
     max_items:      { field: items, limit: 4 }
     min_confidence: { field: confidence, threshold: 0.7 }
 
