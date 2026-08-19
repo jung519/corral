@@ -156,6 +156,44 @@ describe('a rule that judges against what the prompt was shown', () => {
   });
 });
 
+describe('a vocabulary that arrives nested', () => {
+  // The shape a real endpoint answered with, which is what CRL-70 was for: the values to
+  // classify against are the child keys, and a plain dotted path cannot reach them.
+  const NESTED = {
+    majors: [
+      { key: 'FOOD', label: '\uba39\uac70\ub9ac', minors: [{ key: 'BUNSIK' }, { key: 'FRUIT' }] },
+      { key: 'ACTIVITY', label: '\uccb4\ud5d8', minors: [{ key: 'CRAFT' }] },
+    ],
+  };
+  const spec = { ...SOURCE, select: 'majors[].minors[].key' };
+  const withFrom = {
+    context: { allowed: spec },
+    validate: { allowed_values: { field: 'items', from: 'allowed' } },
+  };
+
+  it('flattens to the child keys the prompt and the check both need', async () => {
+    stubList([NESTED]);
+    const lists = new ContextStore();
+
+    const material = await new StoreContextResolver(lists).resolve(step(withFrom));
+
+    expect(material).toEqual({ allowed: ['BUNSIK', 'FRUIT', 'CRAFT'] });
+  });
+
+  it('judges an answer against them, keeping the good and dropping the invented', async () => {
+    stubList([NESTED]);
+    const lists = new ContextStore();
+    const s = step(withFrom);
+
+    const material = await new StoreContextResolver(lists).resolve(s);
+    const verdict = await new RuleAnswerValidator({ store: lists }).check(s, { items: ['BUNSIK', 'INVENTED'] }, material);
+
+    // Before this, `select: "majors"` handed the check a list of records, every value was
+    // dropped, and the run ended `rejected` with nothing to show.
+    expect(verdict).toMatchObject({ ok: true, answer: { items: ['BUNSIK'] }, dropped: ['items: INVENTED'] });
+  });
+});
+
 describe('a pipeline with several lists', () => {
   it('names the one that could not be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));

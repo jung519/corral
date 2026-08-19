@@ -472,6 +472,51 @@ describe('what the run tells the outside world', () => {
   });
 });
 
+describe('reaching into a list', () => {
+  // A controlled vocabulary is very often a parent/child tree. This shape is the one that
+  // made the feature necessary — a real endpoint that answers with its minors nested
+  // (CRL-70).
+  const tags = {
+    majors: [
+      { key: 'FOOD', minors: [{ key: 'BUNSIK' }, { key: 'FRUIT' }] },
+      { key: 'ACTIVITY', minors: [{ key: 'CRAFT' }] },
+    ],
+  };
+
+  it('crosses one list', () => {
+    expect(readPath(tags, 'majors[].key')).toEqual(['FOOD', 'ACTIVITY']);
+  });
+
+  it('crosses two, and flattens', () => {
+    // Not [["BUNSIK","FRUIT"],["CRAFT"]]. A list of allowed values is one list.
+    expect(readPath(tags, 'majors[].minors[].key')).toEqual(['BUNSIK', 'FRUIT', 'CRAFT']);
+  });
+
+  it('leaves a path without `[]` alone', () => {
+    expect(readPath(tags, 'majors.minors')).toBeUndefined();
+    expect(readPath(tags, 'majors.0.minors.0.key')).toBe('BUNSIK');
+  });
+
+  it('drops items that do not have the field', () => {
+    // A hole would survive as `undefined`, and `allowed_values` renders what it is given
+    // with String() — which would admit the literal "undefined" as an allowed value.
+    expect(readPath({ a: [{ k: 1 }, {}, { k: 3 }] }, 'a[].k')).toEqual([1, 3]);
+  });
+
+  it('answers undefined when the thing is not a list', () => {
+    // `[]` on a string is a path that does not match what is there, which is the same
+    // answer a missing key gets rather than a special kind of failure.
+    expect(readPath(tags, 'majors[].key[]')).toBeUndefined();
+    expect(readPath(tags, 'nope[].x')).toBeUndefined();
+  });
+
+  it('answers an empty list when no item has the field', () => {
+    // Different from undefined on purpose: the lists were there and were crossed, and
+    // nothing in them answered to that name.
+    expect(readPath(tags, 'majors[].nope')).toEqual([]);
+  });
+});
+
 describe('the small pieces', () => {
   it('reads dotted paths, and missing ones are just missing', () => {
     expect(readPath({ a: { b: { c: 1 } } }, 'a.b.c')).toBe(1);
