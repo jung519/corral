@@ -32,9 +32,14 @@
    * Prefilled with the names, not with an empty object.
    *
    * The names are the whole answer to "what does this want" — asked for as a skeleton, the
-   * reader fills in values instead of first working out which keys exist. Blank strings
-   * rather than placeholder values: an invented `"1"` is a value, and a value that came
-   * from us is the kind that gets run by accident.
+   * reader fills in values instead of first working out which keys exist. No invented
+   * values: a made-up `"1"` is a value, and a value that came from us is the kind that gets
+   * run by accident.
+   *
+   * `null` rather than `""` for the same reason. An empty string IS a value, and a request
+   * is sent with it (see `refuseHoles`) — so a skeleton run unchanged would fetch
+   * `/records/` and end in a puzzling skip. `null` is the absence the run then names out
+   * loud: "the url needs \"id\"" (CRL-74).
    */
   // Read once on purpose — after this the text belongs to whoever is typing it, and
   // re-deriving it from the prop would wipe what they wrote. A different pipeline arrives
@@ -43,7 +48,7 @@
   let text = $state(skeleton(fields));
 
   function skeleton(names: string[]): string {
-    return names.length ? `{\n${names.map((n) => `  "${n}": ""`).join(',\n')}\n}` : '{\n  \n}';
+    return names.length ? `{\n${names.map((n) => `  "${n}": null`).join(',\n')}\n}` : '{\n  \n}';
   }
   let error = $state('');
   let busy = $state(false);

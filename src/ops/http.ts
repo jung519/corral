@@ -12,7 +12,7 @@
 import { fetchJson } from '../core/fetch-retry.js';
 import type { CredentialRef, CredentialStore } from '../credentials/types.js';
 import type { Fields } from './pipeline/ports.js';
-import { fillTemplate, fillValue } from './pipeline/run.js';
+import { fillTemplate, fillValue, placeholderNames } from './pipeline/run.js';
 import type { HttpRequestDef } from './pipeline/schema.js';
 
 /**
@@ -53,12 +53,61 @@ function fillStrings(map: Record<string, string>, fields: Fields): Record<string
   return Object.fromEntries(Object.entries(map).map(([k, v]) => [k.toLowerCase(), fillTemplate(v, fields)]));
 }
 
+/**
+ * A request that named a field the run does not have.
+ *
+ * Named so the lifecycle can tell it from a transport failure: the two want opposite
+ * things from a queue. A wrong address is the same wrong address on redelivery, so the
+ * input stage reads this as a conclusion rather than something to retry.
+ */
+export class TemplateUnresolvedError extends Error {
+  constructor(where: string, names: string[]) {
+    super(`${where} needs ${names.map((n) => `"${n}"`).join(', ')}, and this run has no such field`);
+    this.name = 'TemplateUnresolvedError';
+  }
+}
+
+/**
+ * Refuse a request whose address still has a hole in it.
+ *
+ * `fillTemplate` renders an unknown name as nothing, which is right for a prompt — a
+ * sentence with a gap is still a sentence. An address is not: `/records/{{id}}` with no
+ * `id` becomes `/records/`, which is a *different address*, and sending there is not what
+ * the definition said to do. On the output side the receiver often answers 200 to it, so
+ * the run was recorded `completed` while the answer went nowhere anyone wanted (CRL-74) —
+ * the same silently-successful failure CRL-63 was about, at the other end of the run.
+ *
+ * **Only `undefined` and `null` count as missing.** An empty string is a value somebody
+ * chose, and `fillValue` already draws that line for bodies for the same reason: refusing
+ * it would be us second-guessing data rather than catching an absent field.
+ *
+ * Headers are checked with the URL because they are filled the same way — text, with a
+ * missing name silently becoming ''. The body is not: `fillValue` sends `null` there, which
+ * is a value the receiver can see and act on, and is a decided behaviour rather than a gap.
+ */
+function refuseHoles(request: HttpRequestDef, fields: Fields): void {
+  const holes = (text: string): string[] =>
+    placeholderNames(text).filter((name) => fields[name] === undefined || fields[name] === null);
+
+  const inUrl = holes(request.url);
+  if (inUrl.length) throw new TemplateUnresolvedError('the url', inUrl);
+
+  for (const [header, value] of Object.entries(request.headers)) {
+    const inHeader = holes(value);
+    if (inHeader.length) throw new TemplateUnresolvedError(`header "${header}"`, inHeader);
+  }
+}
+
 /** Perform the request a definition describes, with `fields` filled in. */
 export async function runHttpRequest<T = unknown>(
   request: HttpRequestDef,
   fields: Fields,
   credentials?: CredentialStore,
 ): Promise<T> {
+  // Before anything is built, let alone sent: a request with a hole in its address is not
+  // the request the definition described.
+  refuseHoles(request, fields);
+
   // Not `fillDeep`: a header is text by definition, and a list rendered into one would be
   // sent as `[object Object]` by the fetch layer rather than refused here.
   const headers: Record<string, string> = fillStrings(request.headers, fields);
