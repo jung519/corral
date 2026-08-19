@@ -157,9 +157,53 @@
 
   const testFetch = (): Promise<void> => tryFetch('input', inputRequest(), parsePairs(selectText));
 
+  /**
+   * Bring an answer into view the moment it is rendered.
+   *
+   * The trial buttons sit at the bottom of a body taller than the window, so an answer
+   * drawn below them lands off-screen and the button reads as broken — pressed, nothing
+   * happened. It cost a verification run's worth of digging to find out the fetch had
+   * been working all along (CRL-75).
+   *
+   * `nearest` rather than `center`: if the answer already fits, nothing moves. Attached
+   * rather than called after the fetch, because the element does not exist until Svelte
+   * has drawn it.
+   */
+  function reveal(el: HTMLElement): void {
+    el.scrollIntoView({ block: 'nearest' });
+  }
+
   /** A context row's fetch, described the same way the input's is. */
   function contextRequest(row: { url: string }): Record<string, unknown> {
     return { method: 'GET', url: row.url, headers: {}, timeout_ms: inputTimeout };
+  }
+
+  /**
+   * The row's own path, as a `select` map the trial can run.
+   *
+   * Keyed by the row's name so "found nothing" names the list the way the person writing
+   * it does. An empty path is not a path: the response itself is then the list, and
+   * asking for `{}` back is how the trial says so.
+   */
+  function contextSelect(row: { name: string; select: string }): Record<string, string> {
+    const path = row.select.trim();
+    return path ? { [row.name.trim()]: path } : {};
+  }
+
+  /**
+   * What a run would say about this list, or '' if it would accept it.
+   *
+   * The trial fetches through the same code the pipeline uses, but the pipeline asks one
+   * more thing of the answer than a fetch does: `ContextStore.list` refuses anything that
+   * is not an array. Checking it here is the difference between "your path is wrong" now
+   * and a run that ends `agent_failed` at 3am (CRL-71).
+   */
+  function listComplaint(row: { name: string; select: string }, r: FetchResult): string {
+    const path = row.select.trim();
+    // No path: the body IS the list, so the body is what has to be one.
+    const picked = path ? r.fields?.[row.name.trim()] : r.body;
+    if (path && picked === undefined) return t('editor.contextPathEmpty');
+    return Array.isArray(picked) ? '' : t('editor.contextNotList');
   }
 
   /** Whether a ref already holds a secret, so an operator knows not to retype it. */
@@ -682,8 +726,9 @@
             </button>
 
             {#if testResult && !testResult.ok}
-              <p class="testErr">{testResult.error}</p>
+              <p class="testErr" {@attach reveal}>{testResult.error}</p>
             {:else if testResult}
+              <div {@attach reveal}>
               {#if testResult.selectError}
                 <p class="testErr">{t('editor.testSelectBad')} {testResult.selectError}</p>
               {/if}
@@ -699,6 +744,7 @@
               {/if}
               <p class="blockTitle mt">{t('editor.testBody')}</p>
               <pre class="out">{JSON.stringify(testResult.body, null, 2)}</pre>
+              </div>
             {/if}
           </div>
         {/if}
@@ -743,17 +789,32 @@
               <button class="minus" onclick={() => removeContext(i)} aria-label={t('editor.contextRemove')}>−</button>
             </div>
             {#if row.name.trim() && row.url.trim()}
-              <button class="plus" onclick={() => tryFetch(`context:${row.name.trim()}`, contextRequest(row), {})} disabled={!!testing}>
+              <button
+                class="plus"
+                onclick={() => tryFetch(`context:${row.name.trim()}`, contextRequest(row), contextSelect(row))}
+                disabled={!!testing}
+              >
                 {testing === `context:${row.name.trim()}` ? t('editor.testing') : t('editor.contextTest')}
               </button>
               {@const r = results[`context:${row.name.trim()}`]}
               {#if r && !r.ok}
                 <p class="testErr">{r.error}</p>
               {:else if r}
-                <!-- The list goes to the prompt as it arrives, so what is worth seeing is
-                     what arrived — not a tidied version of it. -->
-                <p class="blockTitle mt">{t('editor.contextGot')}</p>
-                <pre class="out">{JSON.stringify(r.body, null, 2)}</pre>
+                {@const complaint = listComplaint(row, r)}
+                <div {@attach reveal}>
+                  {#if row.select.trim()}
+                    <!-- The path is the guess worth proving. The response is often nested
+                         and long, and reading `majors[].minors[].key` off it by eye is not
+                         checking it — which is what this button existed to do (CRL-71). -->
+                    <p class="blockTitle mt">{t('editor.contextPicked')}</p>
+                    <pre class="out">{JSON.stringify(r.fields?.[row.name.trim()], null, 2)}</pre>
+                  {/if}
+                  {#if complaint}<p class="testErr">{complaint}</p>{/if}
+                  <!-- Kept even when the path worked: the list goes to the prompt as it
+                       arrives, and the rest of the response is how you find the next path. -->
+                  <p class="blockTitle mt">{t('editor.contextGot')}</p>
+                  <pre class="out">{JSON.stringify(r.body, null, 2)}</pre>
+                </div>
               {/if}
             {/if}
           {/each}
