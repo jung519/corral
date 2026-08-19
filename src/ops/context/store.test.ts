@@ -108,6 +108,54 @@ describe('the prompt end and the checking end', () => {
   });
 });
 
+describe('a rule that judges against what the prompt was shown', () => {
+  const withFrom = {
+    context: { allowed: SOURCE },
+    validate: { allowed_values: { field: 'items', from: 'allowed' } },
+  };
+
+  it('uses the resolved list, and the URL is written once', async () => {
+    const asked = stubList([{ values: ['news', 'sport'] }]);
+    const lists = new ContextStore();
+    const s = step(withFrom);
+
+    const material = await new StoreContextResolver(lists).resolve(s);
+    const verdict = await new RuleAnswerValidator({ store: lists }).check(s, { items: ['news', 'invented'] }, material);
+
+    expect(verdict).toMatchObject({ ok: true, answer: { items: ['news'] } });
+    // One declaration, one request — the whole point of `from`.
+    expect(asked.calls()).toBe(1);
+  });
+
+  it('judges against the list, not against a field that shadowed its name', async () => {
+    stubList([{ values: ['news', 'sport'] }]);
+    const lists = new ContextStore();
+    const s = step(withFrom);
+    const resolved = await new StoreContextResolver(lists).resolve(s);
+
+    // What `run.ts` builds for the prompt: a context name is the weakest in the bag, so an
+    // event field of the same name wins there. The check must NOT read that version — a
+    // value that arrived on a queue message is not the controlled vocabulary.
+    const merged = { ...resolved, allowed: ['whatever-the-caller-sent'] };
+    expect(merged.allowed).not.toEqual(resolved.allowed);
+
+    const verdict = await new RuleAnswerValidator({ store: lists }).check(s, { items: ['news'] }, resolved);
+
+    expect(verdict).toMatchObject({ ok: true, answer: { items: ['news'] } });
+  });
+
+  it('refuses when the resolved context never arrived', async () => {
+    stubList([{ values: ['news'] }]);
+    const s = step(withFrom);
+
+    // A wiring fault, not a definition one — the schema already refuses a `from` that names
+    // nothing. Saying so beats treating "no list" as "nothing is allowed".
+    const verdict = await new RuleAnswerValidator().check(s, { items: ['news'] }, {});
+
+    expect(verdict).toMatchObject({ ok: false, reasons: [expect.stringContaining('was not resolved')] });
+  });
+});
+
 describe('a pipeline with several lists', () => {
   it('names the one that could not be loaded', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 500 })));

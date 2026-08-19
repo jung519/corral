@@ -283,16 +283,22 @@ export class PipelineRunner {
       // exactly right already (not in `SETTLED`, so the message waits) and a list that
       // could not be fetched is the same kind of thing as a record that could not be.
       let material = fields;
+      // Kept unmerged as well, because the answer check has to see the list the model was
+      // shown rather than whatever survived the merge. A context name is the weakest in the
+      // bag, so `material` may carry an event field under that name — judging an answer
+      // against a value that arrived on a queue message is not a check (CRL-66).
+      let context: Fields = {};
       if (Object.keys(pipeline.agent.context).length) {
         const resolver = this.deps.context;
         if (!resolver) {
           return done('input_failed', { stage: 'context', reason: 'this core has nothing wired to fetch a context list' });
         }
         try {
+          context = await resolver.resolve(pipeline.agent);
           // Weakest in the bag. An event field or a selected input field of the same name
           // wins, the same way a `select` already beats the event: the value belonging to
           // this run is the more specific one.
-          material = { ...(await resolver.resolve(pipeline.agent)), ...fields };
+          material = { ...context, ...fields };
         } catch (err) {
           return done('input_failed', { stage: 'context', reason: message(err) });
         }
@@ -333,7 +339,7 @@ export class PipelineRunner {
       const spend = { ...cost, provider: operation.provider, model: operation.model, failedOver: operation.failedOver };
 
       // ── checking the answer ──────────────────────────────────────────────────
-      const verdict = await this.deps.validator.check(pipeline.agent, operation.answer);
+      const verdict = await this.deps.validator.check(pipeline.agent, operation.answer, context);
 
       let answer: Record<string, unknown>;
       let dropped: string[] | undefined;
