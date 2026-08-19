@@ -67,12 +67,30 @@ export class RuleAnswerValidator implements AnswerValidator {
           // guessing would defeat the rule. Refuse rather than pass it through.
           return { ok: false, reasons: [`could not load the allowed values for "${field}": ${message(err)}`] };
         }
+        const outside: string[] = [];
         const kept = asList(value).filter((v) => {
           if (allowed.has(v)) return true;
+          outside.push(v);
           dropped.push(`${field}: ${v}`); // recorded, so an operator can see the model drifting
           return false;
         });
         result[field] = Array.isArray(value) ? kept : (kept[0] ?? null);
+
+        // Nothing the model offered survived, so the field is empty and there is nothing to
+        // send. Refused rather than passed on, for the same reason a list of records is
+        // refused above rather than emptied: an empty value delivered as a completed run is
+        // the outcome this rule exists to prevent, and it is the one an operator would never
+        // think to look for. Some dropped and some kept is progress and stays a success
+        // (CRL-63).
+        //
+        // An answer that arrived empty is not this. The prompt tells the model to return an
+        // empty list when it has no grounds, and honouring that instruction is not drift.
+        if (kept.length === 0 && outside.length > 0) {
+          return {
+            ok: false,
+            reasons: [`every value for "${field}" was outside the allowed list — dropped: ${outside.join(', ')}`],
+          };
+        }
       }
     }
 

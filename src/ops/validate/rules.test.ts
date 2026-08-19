@@ -64,7 +64,6 @@ describe('values outside the allowed list', () => {
     const v = new RuleAnswerValidator();
 
     expect(await v.check(step(rule), { items: 'news' })).toMatchObject({ answer: { items: 'news' } });
-    expect(await v.check(step(rule), { items: 'invented' })).toMatchObject({ answer: { items: null } });
   });
 
   it('says nothing about a field the model did not answer with', async () => {
@@ -128,6 +127,54 @@ describe('an allowed list that has to be fetched', () => {
     const v = new RuleAnswerValidator();
 
     expect((await v.check(step(rule), { items: ['news'] })).ok).toBe(false);
+  });
+});
+
+describe('an answer where nothing survived the allowed list', () => {
+  const rule = { allowed_values: { field: 'items', values: ['news', 'sport'] } };
+
+  it('is refused rather than delivered as an empty list', async () => {
+    const v = new RuleAnswerValidator();
+
+    const verdict = await v.check(step(rule), { items: ['invented', 'other'] });
+
+    // Not `{ ok: true, answer: { items: [] } }`. That is a completed run that published
+    // nothing, which is the one ending an operator would never think to go looking for.
+    expect(verdict.ok).toBe(false);
+  });
+
+  it('says which values it threw away', async () => {
+    const v = new RuleAnswerValidator();
+
+    const verdict = await v.check(step(rule), { items: ['invented', 'other'] });
+
+    // The rejected path carries no `dropped` of its own (`run.ts` attaches it only to a
+    // successful verdict), so the reason is the only place this can be read.
+    expect(verdict).toMatchObject({ ok: false, reasons: [expect.stringContaining('invented, other')] });
+  });
+
+  it('refuses a single value that was outside the list', async () => {
+    const v = new RuleAnswerValidator();
+
+    // A scalar empties to `null` rather than `[]`, which reaches the user's API just as
+    // uselessly. Same ending, same refusal.
+    expect(await v.check(step(rule), { items: 'invented' })).toMatchObject({ ok: false });
+  });
+
+  it('still accepts an answer that was empty to begin with', async () => {
+    const v = new RuleAnswerValidator();
+
+    // The prompt tells the model to return an empty list when it has no grounds. Obeying
+    // that is not drift, and nothing was dropped to make it look like drift.
+    expect(await v.check(step(rule), { items: [] })).toMatchObject({ ok: true, answer: { items: [] } });
+  });
+
+  it('still accepts an answer where something survived', async () => {
+    const v = new RuleAnswerValidator();
+
+    const verdict = await v.check(step(rule), { items: ['invented', 'news'] });
+
+    expect(verdict).toMatchObject({ ok: true, answer: { items: ['news'] }, dropped: ['items: invented'] });
   });
 });
 
