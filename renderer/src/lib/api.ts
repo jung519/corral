@@ -73,6 +73,10 @@ export interface OpsPipeline {
   description?: string;
   enabled: boolean;
   trigger: string;
+  /** Whether a manual run has to be handed an event body before it can go (CRL-72). */
+  wantsEvent: boolean;
+  /** The names that body has to carry. Empty when the input kind has none to name. */
+  eventFields: string[];
   /** Undefined = follows the app's configured provider. */
   provider?: string;
   activeRuns: number;

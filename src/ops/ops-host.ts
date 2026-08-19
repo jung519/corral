@@ -31,8 +31,8 @@ import type {
   OutputSink,
 } from './pipeline/ports.js';
 import { PipelineRegistry } from './pipeline/registry.js';
-import { PipelineRunner, type RunRecord } from './pipeline/run.js';
-import { FieldSelectorSchema, HttpRequestSchema } from './pipeline/schema.js';
+import { placeholderNames, PipelineRunner, type RunRecord } from './pipeline/run.js';
+import { FieldSelectorSchema, HttpRequestSchema, type Pipeline } from './pipeline/schema.js';
 import { triggerRegistry } from './trigger/index.js';
 import type { StopFn, TriggerHealth } from './trigger/types.js';
 import { ContextStore } from './context/store.js';
@@ -310,6 +310,10 @@ export class OpsHost {
     /** Whether work is actually arriving. Absent on a pipeline nothing has started —
      *  a disabled one has no trigger to be healthy or otherwise. */
     health?: TriggerHealth;
+    /** Whether a manual run has to be given an event body — see `manualEvent`. */
+    wantsEvent: boolean;
+    /** The names that body has to carry, in the order the definition mentions them. */
+    eventFields: string[];
   }> {
     return this.registry.all().map((p) => ({
       key: p.key,
@@ -319,6 +323,7 @@ export class OpsHost {
       provider: p.agent.provider,
       activeRuns: this.runner.activeCount(p.key),
       health: this.health.get(p.key),
+      ...manualEvent(p.input),
     }));
   }
 
@@ -478,4 +483,25 @@ export async function startOpsHost(options: OpsHostOptions): Promise<OpsHost> {
   await host.load();
   await host.history.prune().catch(() => 0);
   return host;
+}
+
+/**
+ * What a manual run of this pipeline has to be handed.
+ *
+ * A trigger brings its own event; a person pressing "run" is standing in for one, and
+ * needs to know what the event was going to carry. Answered from the definition because
+ * that is where it is written — the screen offering the run has no other way to know, and
+ * the one that guessed `{}` made every fetch-back pipeline unrunnable by hand (CRL-72).
+ *
+ * The two input kinds want different things and say so differently:
+ *
+ * - `http` — the event supplies the placeholders in the request. Empty means the URL is
+ *   fixed and nothing is missing, so the run can just go.
+ * - `none` — the event IS the input. There are no names to list (a `select` names paths
+ *   into the body, not keys of it), but a body is always wanted.
+ */
+function manualEvent(input: Pipeline['input']): { wantsEvent: boolean; eventFields: string[] } {
+  if (input.kind !== 'http') return { wantsEvent: true, eventFields: [] };
+  const eventFields = placeholderNames(input.request);
+  return { wantsEvent: eventFields.length > 0, eventFields };
 }

@@ -13,9 +13,11 @@
    */
   import { onMount } from 'svelte';
   import PipelineEditor from './PipelineEditor.svelte';
+  import RunPrompt from './RunPrompt.svelte';
   import Button from './lib/Button.svelte';
   import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
+  import type { OpsPipeline } from './lib/api';
   import { t } from './lib/i18n.svelte';
   import { toast } from './lib/toast.svelte';
   import type { CorralEvent } from './lib/types';
@@ -41,8 +43,23 @@
     }
   }
 
-  async function run(key: string) {
-    const r = await api.runPipeline(key);
+  /** The pipeline whose event body is being written, if any. */
+  let asking = $state<OpsPipeline | undefined>(undefined);
+
+  /**
+   * Run once, asking for the event first when the definition needs one.
+   *
+   * A pipeline with a fixed URL is complete on its own and still runs on one click. One
+   * that reads `/records/{{id}}` cannot, and used to be sent an empty event and skipped
+   * (CRL-72) — so it stops here and asks.
+   */
+  function start(p: OpsPipeline) {
+    if (p.wantsEvent) asking = p;
+    else void run(p.key);
+  }
+
+  async function run(key: string, input?: unknown) {
+    const r = await api.runPipeline(key, input);
     // A manual run is how a pipeline gets tried out, so the reason it stopped matters
     // more than the fact that it did.
     if (!r.ok) toast(r.error ?? `${key}: ${r.run?.outcome ?? 'failed'} — ${r.run?.reason ?? ''}`, 'error');
@@ -90,6 +107,15 @@
       toast(`${key}: ${t('ops.added')}`);
       void refresh();
     }}
+  />
+{/if}
+
+{#if asking}
+  <RunPrompt
+    pipelineKey={asking.key}
+    fields={asking.eventFields}
+    onclose={() => (asking = undefined)}
+    onrun={(input) => run(asking!.key, input)}
   />
 {/if}
 
@@ -151,7 +177,7 @@
           </span>
 
           <span class="actions">
-            <Button onclick={() => run(p.key)}>{t('ops.run')}</Button>
+            <Button onclick={() => start(p)}>{t('ops.run')}</Button>
             <button class="ghost" onclick={() => toggle(p.key, !p.enabled)}>
               {p.enabled ? t('ops.turnOff') : t('ops.turnOn')}
             </button>
