@@ -94,7 +94,9 @@ export async function dispatch(
     // ── Setup: this core's own config, secrets, draft, and host probes ──────────────
     case 'configGet':
       if (!deps.setup) return NO_SETUP;
-      return { exists: deps.setup.configExists(), yaml: deps.setup.configRead() };
+      // `config` is the parsed form, for a window that has no YAML parser of its own.
+      // `yaml` stays beside it: a config that will not parse still has text worth showing.
+      return { exists: deps.setup.configExists(), yaml: deps.setup.configRead(), config: deps.setup.configParsed() };
     case 'configSet':
       if (!deps.setup) return NO_SETUP;
       // Writes, then rebuilds the orchestrator in place — a remote core has no parent

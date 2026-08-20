@@ -12,6 +12,7 @@
     CORE_STATE_KEYS,
     loadDraft,
     OPTIONAL_STATE_KEYS,
+    stateFromConfig,
     type Provider,
     PROVIDERS,
     secretRefs,
@@ -48,12 +49,24 @@
   const acctState = (p: Provider) =>
     isSaved(serviceFor(p), 'default') || isSaved(serviceFor(p), 'oauth') ? t('account.set') : t('account.unset');
 
+  /**
+   * Where this screen's picture of the config comes from.
+   *
+   * The config file, first. The draft is what an unfinished wizard resumes from — it is
+   * allowed to be stale, and rendering the *settings* from it meant this screen showed
+   * something other than what the core is running. Worse, with no draft it showed nothing
+   * at all, even here, where the core-connection panel lives (CRL-76).
+   *
+   * The draft is still the fallback, for the one case it is the only thing there: a wizard
+   * that was started and not finished, so no config exists yet.
+   */
   async function refresh() {
-    const draft = await loadDraft();
-    s = draft;
-    if (draft && window.corral) {
+    const parsed = window.corral ? await window.corral.config.parsed().catch(() => undefined) : undefined;
+    const draft = parsed ? null : await loadDraft();
+    s = parsed ? stateFromConfig(parsed) : draft;
+    if (s && window.corral) {
       const found = new Set<string>();
-      for (const ref of secretRefs(draft)) {
+      for (const ref of secretRefs(s)) {
         if (await window.corral.secret.has(ref.service, ref.account)) found.add(`${ref.service}:${ref.account}`);
       }
       savedSecrets = found;
@@ -91,16 +104,18 @@
 {/snippet}
 
 <div class="view">
-  {#if configured === false}
-    <div class="card">
-      <p class="note">{t('settings.notConfigured')}</p>
-      <div class="actions"><button class="primary" onclick={() => (location.hash = '#/setup')}>{t('settings.setup')}</button></div>
-    </div>
-  {:else if s}
+  <!--
+    Outside every branch below, on purpose. This panel decides WHICH core the app is
+    looking at; the rest of the screen describes what that core is configured with. Having
+    it inside the "we could read the config" branch made it unreachable exactly when it was
+    needed — a fresh remote core has no config to show, and that is the moment you need to
+    point the app at it (CRL-76).
+  -->
+  <CoreConnection />
+
+  {#if s}
     <PipelineSummary {s} />
     <p class="hint">{t('settings.summaryHint')}</p>
-
-    <CoreConnection />
 
     <div class="card">
       {@render head(t('step.ai'), 'ai')}
@@ -192,6 +207,15 @@
         {@render row(t('field.language'), langLabel(s.language))}
         {@render row(t('field.stack'), s.stack)}
       {/if}
+    </div>
+  {:else if configured === undefined}
+    <!-- Still asking. Saying nothing here is how a slow answer looked identical to "there
+         is nothing to configure" — two different situations, one blank panel. -->
+    <p class="note">{t('settings.reading')}</p>
+  {:else}
+    <div class="card">
+      <p class="note">{t('settings.notConfigured')}</p>
+      <div class="actions"><button class="primary" onclick={() => (location.hash = '#/setup')}>{t('settings.setup')}</button></div>
     </div>
   {/if}
 

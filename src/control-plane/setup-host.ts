@@ -11,6 +11,8 @@
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { parseConfig } from '../config/loader.js';
+import type { Config } from '../config/schema.js';
 import type { CredentialStore } from '../credentials/types.js';
 
 /** Rebuild the orchestrator from the config now on disk. Resolves with what happened. */
@@ -42,6 +44,29 @@ export class SetupHost {
       return readFileSync(this.o.configPath, 'utf8');
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * The same config, parsed, with the schema's defaults filled in.
+   *
+   * The window asks for this because it has no YAML parser and no schema — the renderer
+   * ships with zero runtime dependencies on purpose, so "what does this config actually
+   * say" is a question only the core can answer. Before this, the settings screen could
+   * only render from the wizard draft, and deleting that file emptied the screen even
+   * though the core was configured and running (CRL-76).
+   *
+   * `undefined` for a config that will not parse. The raw text still goes back beside it,
+   * so a screen can show what is there and say it is unreadable — which is more use than
+   * an empty panel.
+   */
+  configParsed(): Config | undefined {
+    const raw = this.configRead();
+    if (raw === null) return undefined;
+    try {
+      return parseConfig(raw);
+    } catch {
+      return undefined;
     }
   }
 
