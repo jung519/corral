@@ -87,6 +87,7 @@ function registerIpc(): void {
   ipcMain.handle('app:version', () => app.getVersion());
   ipcMain.handle('config:exists', () => native.configExists());
   ipcMain.handle('config:read', () => native.configRead());
+  ipcMain.handle('config:parsed', () => native.configParsed());
   ipcMain.handle('config:write', (_e, yaml: string) => native.configWrite(yaml));
 
   ipcMain.handle('draft:read', () => native.draftRead());

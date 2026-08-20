@@ -44,7 +44,7 @@ const call = (method: string, args: Record<string, unknown> = {}): Promise<any> 
 
 describe('config over the control plane', () => {
   it('reports no config before setup', async () => {
-    expect(await call('configGet')).toEqual({ exists: false, yaml: null });
+    expect(await call('configGet')).toEqual({ exists: false, yaml: null, config: undefined });
   });
 
   it('writes the config and brings the orchestrator up in place', async () => {
@@ -53,7 +53,50 @@ describe('config over the control plane', () => {
     expect(res.ok).toBe(true);
     expect(reloads).toBe(1); // no respawn is possible on a remote core — it reloads itself
     expect(readFileSync(join(dir, 'corral.yaml'), 'utf8')).toBe('version: 1\n');
-    expect(await call('configGet')).toEqual({ exists: true, yaml: 'version: 1\n' });
+    // `version: 1` is not a config the schema accepts, so there is nothing to parse —
+    // the text still comes back, which is what lets a screen say it is unreadable.
+    expect(await call('configGet')).toEqual({ exists: true, yaml: 'version: 1\n', config: undefined });
+  });
+
+  it('hands back the parsed config, defaults filled in', async () => {
+    // The window has no YAML parser and no schema — it ships with zero runtime
+    // dependencies — so this is the only way a screen can render what the config says.
+    // Without it the settings screen could only draw from the wizard draft, and deleting
+    // that file emptied the screen on a configured, running core (CRL-76).
+    const yaml = `
+profile: { language: ko, stack: nestjs }
+tracker:
+  kind: notion
+  database_id: db-1
+  credential: { service: notion, account: default }
+  properties: { status: "Status", identifier: "ID" }
+  states: { planning: todo, in_progress: doing, done: done }
+repositories:
+  - kind: github
+    key: server
+    repo: owner/name
+    credential: { service: github, account: default }
+agent:
+  provider: claude
+  transport: cli
+  models: { planning: opus, implementation: sonnet, review: opus }
+workspace: { backend: docker }
+channel: { kind: web }
+`;
+    await call('configSet', { yaml });
+
+    const got = await call('configGet');
+
+    expect(got.exists).toBe(true);
+    expect(got.config).toMatchObject({
+      profile: { language: 'ko', stack: 'nestjs' },
+      tracker: { kind: 'notion', database_id: 'db-1' },
+      repositories: [{ key: 'server', repo: 'owner/name' }],
+      agent: { provider: 'claude', transport: 'cli' },
+      workspace: { backend: 'docker' },
+      // Never written down, and the screen needs the value that will actually be used.
+      max_active_issues: 3,
+    });
   });
 
   it('keeps the config but reports why it would not start', async () => {

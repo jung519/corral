@@ -58,6 +58,18 @@ export async function configRead(): Promise<string | null> {
 }
 
 /**
+ * The config, parsed, with the schema's defaults filled in.
+ *
+ * Always asked of the core, local or remote — the core is the only side with a YAML
+ * parser and the schema, and it is running in both modes. `undefined` when it is not up
+ * yet or the config does not parse; a screen that gets that has nothing to show and says
+ * so, rather than rendering half a config (CRL-76).
+ */
+export async function configParsed(): Promise<unknown> {
+  return readSafely(async () => ((await callCore('configGet')) as { config?: unknown }).config, undefined);
+}
+
+/**
  * Persist the config. Remotely this also brings the core up on it (there is no parent
  * process out there to respawn it), so the reload's verdict is what comes back — the
  * wizard shows it instead of claiming success.

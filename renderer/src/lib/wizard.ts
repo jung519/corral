@@ -490,6 +490,128 @@ export function buildConfigYaml(s: WizardState, uiLang: string): string {
   ].join('\n');
 }
 
+// ─────────────────────────────────────────────── the other direction: config → state
+
+/** A record, or an empty one. The config arrives as `unknown` — it crossed a bridge. */
+function obj(v: unknown): Record<string, unknown> {
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+const str = (v: unknown, fallback = ''): string => (typeof v === 'string' ? v : fallback);
+const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
+
+/**
+ * Fill a wizard state from a config the core parsed.
+ *
+ * The mirror of `buildConfigYaml`, and the reason the settings screen can render at all
+ * without a draft file. It used to have only the one direction, so the draft was the
+ * screen's only representation of the config — deleting that file emptied the screen even
+ * though the core was configured and running (CRL-76).
+ *
+ * **What this cannot carry, the screen does not show.** A config block with no field in
+ * `WizardState` — `limits`, `control_plane`, `review` — simply is not mapped, so it does
+ * not appear as something editable. That is on purpose while saving still rewrites the
+ * whole file: showing a value the next save would delete is worse than not showing it
+ * (CRL-77).
+ *
+ * Secrets are never here. The config holds credential *pointers*; the values live in the
+ * store, and the screen asks it separately whether each one is set.
+ */
+export function stateFromConfig(config: unknown): WizardState {
+  const c = obj(config);
+  const s = initialState();
+
+  const profile = obj(c.profile);
+  // A config always stores a concrete language; `auto` only ever exists in the wizard.
+  s.language = str(profile.language, s.language);
+  s.stack = str(profile.stack, s.stack);
+  s.referenceRepo = str(profile.reference_repo);
+
+  const agent = obj(c.agent);
+  s.provider = (str(agent.provider, s.provider) as Provider) ?? s.provider;
+  s.transport = agent.transport === 'api' ? 'api' : 'cli';
+  const models = obj(agent.models);
+  s.planningModel = str(models.planning, s.planningModel);
+  s.implementationModel = str(models.implementation, s.implementationModel);
+  s.reviewModel = str(models.review, s.reviewModel);
+
+  const stages = obj(agent.stages);
+  // Per-stage agents are on when the config actually names stages — the same test
+  // `stageAgentYaml` applies when writing them.
+  s.perStageAgents = Object.keys(stages).length > 0;
+  for (const key of ['planning', 'implementation', 'review'] as const) {
+    const stage = obj(stages[key]);
+    if (!Object.keys(stage).length) continue;
+    s.stages[key] = {
+      provider: (str(stage.provider, s.provider) as Provider) ?? s.provider,
+      model: str(obj(stage.models)[key], s.stages[key].model),
+    };
+  }
+
+  s.fallbacks = arr(agent.fallbacks).map((f) => {
+    const e = obj(f);
+    const m = obj(e.models);
+    const provider = (str(e.provider, 'gemini') as Provider) ?? 'gemini';
+    const base = newFallback(provider);
+    return {
+      ...base,
+      planningModel: str(m.planning, base.planningModel),
+      implementationModel: str(m.implementation, base.implementationModel),
+      reviewModel: str(m.review, base.reviewModel),
+    };
+  });
+
+  const repos = arr(c.repositories);
+  if (repos.length) {
+    s.repos = repos.map((r) => {
+      const e = obj(r);
+      const kind = str(e.kind, 'github');
+      return {
+        ...newRepo(),
+        provider: (kind === 'gitlab' || kind === 'bitbucket' ? kind : 'github') as RepoProvider,
+        repo: str(e.repo),
+        key: str(e.key),
+        description: str(e.description),
+        production: str(obj(e.branch_strategy).production, 'main'),
+        development: str(obj(e.branch_strategy).development, 'develop'),
+        gitlabHost: str(e.host, 'https://gitlab.com'),
+        bitbucketUser: str(e.username),
+      };
+    });
+  }
+
+  const tracker = obj(c.tracker);
+  const kind = str(tracker.kind, 'notion');
+  s.trackerKind = (kind === 'github_issues' || kind === 'jira' ? kind : 'notion') as TrackerKind;
+  s.notionDb = str(tracker.database_id);
+  const props = obj(tracker.properties);
+  s.statusProp = str(props.status, s.statusProp);
+  s.idProp = str(props.identifier, s.idProp);
+  s.repoProp = str(props.repo);
+  s.scopeProp = str(obj(tracker.scope).property);
+  s.issuesRepo = str(tracker.repo);
+  s.scopeLabel = str(tracker.scope_label, s.scopeLabel);
+  s.identifierPrefix = str(tracker.identifier_prefix, s.identifierPrefix);
+  s.jiraHost = str(tracker.host);
+  s.jiraProject = str(tracker.project);
+  s.jiraEmail = str(tracker.email);
+
+  const states = obj(tracker.states);
+  for (const key of ['planning', 'plan_review', 'in_progress', 'in_review', 'done'] as const) {
+    s.states[key] = str(states[key], s.states[key]);
+  }
+  // The optional two are only written when the operator asked for a detailed board, so
+  // finding them is how we know that switch was on.
+  s.detailedStates = !!str(states.plan_review) || !!str(states.in_review);
+
+  const workspace = obj(c.workspace);
+  s.backend = workspace.backend === 'docker' ? 'docker' : 'local';
+  const docker = obj(workspace.docker);
+  s.dockerMountLogin = docker.mount_host_login !== false;
+
+  if (typeof c.max_active_issues === 'number') s.maxActive = c.max_active_issues;
+  return s;
+}
+
 // ─────────────────────────────────────────────────── per-step draft persistence
 
 const DRAFT_KEY = 'corral.wizard.draft';
