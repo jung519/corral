@@ -55,7 +55,6 @@ describe('local mode', () => {
   it('never asks the core for anything the desktop already owns', async () => {
     await native.configExists();
     await native.configRead();
-    await native.configWrite('a: 1');
     await native.secretSet('notion', 'default', 'tok');
     await native.secretHas('notion', 'default');
     await native.draftRead();
@@ -64,6 +63,21 @@ describe('local mode', () => {
     expect(h.coreCalls).toEqual([]);
     expect(h.localCalls).toContain('configExists');
     expect(h.localCalls).toContain('setSecret(notion,default,tok)');
+  });
+
+  it('asks the core to merge before writing the config, and nothing else', async () => {
+    // The one thing the desktop does NOT own: what a config contains. The wizard renders
+    // a whole document from the fields it models, so writing it straight to disk erased
+    // every block it does not model (CRL-77). The file is still written here — a local
+    // core is respawned after setup to pick up freshly stored secrets, and reloading it
+    // in place beforehand would fail on credentials it cannot see yet.
+    h.coreResult = { yaml: 'merged: yaml' };
+
+    await native.configWrite('a: 1');
+
+    expect(h.coreCalls).toEqual([{ method: 'configMerge', args: { yaml: 'a: 1' } }]);
+    // What the core handed back is what lands on disk.
+    expect(h.localCalls).toContain('writeConfig(merged: yaml)');
   });
 
   it('reports a config save as done — there is no remote reload to fail', async () => {

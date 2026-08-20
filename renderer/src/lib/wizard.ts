@@ -23,6 +23,10 @@ export interface RepoEntry {
   provider: RepoProvider;
   repo: string; // owner/name (github/gitlab) or workspace/slug (bitbucket)
   key: string; // stable id (workspace subdir, per-repo PR tracking)
+  /** Which stored credential this repo uses. Blank = the key, which is what the wizard
+   *  creates. Kept so a config pointing somewhere else survives a save: rewriting it to
+   *  the key would aim the repo at a credential that does not exist (CRL-77). */
+  credentialAccount: string;
   description: string; // role — the agent uses this to pick which repo an issue touches
   production: string;
   development: string;
@@ -36,6 +40,7 @@ export function newRepo(): RepoEntry {
     provider: 'github',
     repo: '',
     key: '',
+    credentialAccount: '',
     description: '',
     production: 'main',
     development: 'develop',
@@ -107,7 +112,16 @@ export interface WizardState {
   backend: 'local' | 'docker';
   /** Docker: mount the host ~/.claude login so the CLI auths without an API key. */
   dockerMountLogin: boolean;
+  /** Docker: hard caps on one worker container. Blank = uncapped, which is what the
+   *  daemon does by default. Text rather than numbers because blank and 0 are different
+   *  answers and a number input cannot hold the first one. */
+  dockerMemory: string;
+  dockerCpus: string;
   maxActive: number;
+  /** Daily token ceiling, shared by the development and operational AI. Blank = no
+   *  ceiling; `0` would be a ceiling of zero, which is a different thing to say. */
+  dailyInputTokens: string;
+  dailyOutputTokens: string;
   /** Agent output language: `'auto'` (follow the UI language until explicitly pinned),
    *  or a concrete code like `'en'`/`'ko'`. `buildConfigYaml` resolves `'auto'` to the
    *  current UI language, so config always stores a concrete code. */
@@ -158,7 +172,11 @@ export function initialState(): WizardState {
     detailedStates: false,
     backend: 'local',
     dockerMountLogin: true,
+    dockerMemory: '',
+    dockerCpus: '',
     maxActive: 3,
+    dailyInputTokens: '',
+    dailyOutputTokens: '',
     language: 'auto',
     stack: 'generic',
     referenceRepo: '',
@@ -341,6 +359,25 @@ function yamlStr(v: string): string {
   return JSON.stringify(v);
 }
 
+/**
+ * The daily token ceiling, written only for the sides that have one.
+ *
+ * Counted in tokens rather than money on purpose (see `LimitsSchema`): a price table
+ * belongs to a vendor and the vendor changes it, while token counts come back from the
+ * response. An empty box means no ceiling, so nothing is emitted — writing `0` there
+ * would stop every call on the first request of the day.
+ */
+function limitsYaml(s: WizardState): string[] {
+  const lines: string[] = [];
+  // `String(...)` because these come off a text box that a browser is free to hand back
+  // as a number: a `.trim()` on one of those threw and failed the whole save.
+  const input = String(s.dailyInputTokens ?? '').trim();
+  const output = String(s.dailyOutputTokens ?? '').trim();
+  if (input) lines.push(`  daily_input_tokens: ${Number(input)}`);
+  if (output) lines.push(`  daily_output_tokens: ${Number(output)}`);
+  return lines.length ? ['limits:', ...lines, ''] : [];
+}
+
 function repoYaml(s: WizardState): string[] {
   const lines = ['repositories:'];
   for (const r of s.repos) {
@@ -349,7 +386,7 @@ function repoYaml(s: WizardState): string[] {
     if (r.provider === 'gitlab') lines.push(`    host: ${yamlStr(r.gitlabHost)}`);
     if (r.provider === 'bitbucket') lines.push(`    username: ${yamlStr(r.bitbucketUser)}`);
     lines.push(
-      `    credential: { service: ${r.provider}, account: ${yamlStr(r.key)} }`,
+      `    credential: { service: ${r.provider}, account: ${yamlStr(r.credentialAccount.trim() || r.key)} }`,
       '    branch_strategy:',
       `      production: ${yamlStr(r.production)}`,
       `      development: ${yamlStr(r.development)}`,
@@ -480,11 +517,21 @@ export function buildConfigYaml(s: WizardState, uiLang: string): string {
     '',
     'workspace:',
     `  backend: ${s.backend}`,
-    ...(s.backend === 'docker' ? ['  docker:', `    mount_host_login: ${s.dockerMountLogin}`] : []),
+    ...(s.backend === 'docker'
+      ? [
+          '  docker:',
+          `    mount_host_login: ${s.dockerMountLogin}`,
+          // Written only when set. An empty cap and a cap of zero are different, and the
+          // schema's "absent = uncapped" is the one an empty box means.
+          ...(s.dockerMemory.trim() ? [`    memory: ${yamlStr(s.dockerMemory.trim())}`] : []),
+          ...(s.dockerCpus.trim() ? [`    cpus: ${yamlStr(s.dockerCpus.trim())}`] : []),
+        ]
+      : []),
     '',
     'channel:',
     '  kind: web',
     '',
+    ...limitsYaml(s),
     `max_active_issues: ${s.maxActive}`,
     '',
   ].join('\n');
@@ -516,8 +563,11 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
  * Secrets are never here. The config holds credential *pointers*; the values live in the
  * store, and the screen asks it separately whether each one is set.
  */
-export function stateFromConfig(config: unknown): WizardState {
+export function stateFromConfig(config: unknown, written?: unknown): WizardState {
   const c = obj(config);
+  // What was actually in the file, for the fields where presence is the meaning. Falls
+  // back to the parsed form so a caller with only one of them still works.
+  const w = obj(written ?? config);
   const s = initialState();
 
   const profile = obj(c.profile);
@@ -571,6 +621,7 @@ export function stateFromConfig(config: unknown): WizardState {
         repo: str(e.repo),
         key: str(e.key),
         description: str(e.description),
+        credentialAccount: str(obj(e.credential).account),
         production: str(obj(e.branch_strategy).production, 'main'),
         development: str(obj(e.branch_strategy).development, 'develop'),
         gitlabHost: str(e.host, 'https://gitlab.com'),
@@ -599,14 +650,27 @@ export function stateFromConfig(config: unknown): WizardState {
   for (const key of ['planning', 'plan_review', 'in_progress', 'in_review', 'done'] as const) {
     s.states[key] = str(states[key], s.states[key]);
   }
-  // The optional two are only written when the operator asked for a detailed board, so
-  // finding them is how we know that switch was on.
-  s.detailedStates = !!str(states.plan_review) || !!str(states.in_review);
+  // Read from the file as written, not the parsed form: the schema defaults the optional
+  // two onto a core column, so every parsed config has them. Asking the parsed form would
+  // turn this switch on for everyone and then write those defaults back as choices.
+  const writtenStates = obj(obj(w.tracker).states);
+  s.detailedStates = !!str(writtenStates.plan_review) || !!str(writtenStates.in_review);
 
   const workspace = obj(c.workspace);
   s.backend = workspace.backend === 'docker' ? 'docker' : 'local';
   const docker = obj(workspace.docker);
   s.dockerMountLogin = docker.mount_host_login !== false;
+  s.dockerMemory = str(docker.memory);
+  s.dockerCpus = str(docker.cpus);
+  // Absent stays blank. `mount_host_login` has a schema default of true, so this one is
+  // read from the file: a config that says nothing must not start saying `false`.
+  const writtenDocker = obj(obj(w.workspace).docker);
+  if (writtenDocker.mount_host_login !== undefined) s.dockerMountLogin = writtenDocker.mount_host_login !== false;
+
+  const limits = obj(c.limits);
+  // Absent stays blank. `0` reads back as "0" — a ceiling somebody chose, not an empty box.
+  s.dailyInputTokens = typeof limits.daily_input_tokens === 'number' ? String(limits.daily_input_tokens) : '';
+  s.dailyOutputTokens = typeof limits.daily_output_tokens === 'number' ? String(limits.daily_output_tokens) : '';
 
   if (typeof c.max_active_issues === 'number') s.maxActive = c.max_active_issues;
   return s;

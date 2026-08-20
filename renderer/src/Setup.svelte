@@ -61,9 +61,11 @@
    * that was started and not finished, so no config exists yet.
    */
   async function refresh() {
-    const parsed = window.corral ? await window.corral.config.parsed().catch(() => undefined) : undefined;
-    const draft = parsed ? null : await loadDraft();
-    s = parsed ? stateFromConfig(parsed) : draft;
+    const got: { config?: unknown; raw?: unknown } = window.corral
+      ? await window.corral.config.parsed().catch(() => ({}))
+      : {};
+    const draft = got.config ? null : await loadDraft();
+    s = got.config ? stateFromConfig(got.config, got.raw) : draft;
     if (s && window.corral) {
       const found = new Set<string>();
       for (const ref of secretRefs(s)) {
@@ -194,7 +196,11 @@
         <Wizard embedded section="workspace" {onDone} />
       {:else}
         {@render row(t('workspace.backend'), s.backend === 'docker' ? t('workspace.docker') : t('workspace.local'))}
-        {#if s.backend === 'docker'}{@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}{/if}
+        {#if s.backend === 'docker'}
+          {@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}
+          {@render row(t('workspace.memory'), s.dockerMemory || t('field.noLimit'))}
+          {@render row(t('workspace.cpus'), s.dockerCpus || t('field.noLimit'))}
+        {/if}
       {/if}
     </div>
 
@@ -206,6 +212,8 @@
         {@render row(t('field.maxActive'), String(s.maxActive))}
         {@render row(t('field.language'), langLabel(s.language))}
         {@render row(t('field.stack'), s.stack)}
+        {@render row(t('field.dailyInput'), s.dailyInputTokens || t('field.noLimit'))}
+        {@render row(t('field.dailyOutput'), s.dailyOutputTokens || t('field.noLimit'))}
       {/if}
     </div>
   {:else if configured === undefined}

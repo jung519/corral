@@ -16,9 +16,10 @@ const api = {
   config: {
     exists: (): Promise<boolean> => ipcRenderer.invoke('config:exists'),
     read: (): Promise<string | null> => ipcRenderer.invoke('config:read'),
-    /** The config parsed by the core, defaults filled in. The window has no YAML parser
-     *  and no schema, so this is how a screen renders what the config actually says. */
-    parsed: (): Promise<unknown> => ipcRenderer.invoke('config:parsed'),
+    /** The config as the core reads it: `config` with the schema's defaults applied, and
+     *  `raw` exactly as written. The window has no YAML parser and no schema. Both are
+     *  needed — for some fields, being written down at all is the meaning. */
+    parsed: (): Promise<{ config?: unknown; raw?: unknown }> => ipcRenderer.invoke('config:parsed'),
     /** Save the config. Against a remote core this also restarts it on the new config,
      *  so the result carries why that failed (bad token, unreachable tracker). */
     write: (yaml: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('config:write', yaml),

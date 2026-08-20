@@ -13,6 +13,7 @@
     hasCred,
     initialState,
     loadDraft,
+    stateFromConfig,
     MODELS,
     newFallback,
     newRepo,
@@ -65,10 +66,27 @@
   const secretKey = (service: string, account: string) => `${service}:${account}`;
   const secretSaved = (service: string, account: string) => savedSecrets.has(secretKey(service, account));
 
-  // Restore the in-progress draft (non-secret fields) + mark which tokens are saved.
+  /**
+   * Where the form starts from.
+   *
+   * The config file, when there is one. The draft was documented as "the last-applied
+   * state so re-opening pre-fills" — a mirror of the config, kept by this component — and
+   * everything depended on that mirror existing. With no draft, an inline edit of one
+   * section started from `initialState()` and `buildConfigYaml` wrote the **whole**
+   * document from it, replacing a working config with defaults (CRL-77).
+   *
+   * Reading the config removes the dependence on the mirror. The draft is still the
+   * fallback, for the case it is the only thing there: a first run that was started and
+   * not finished, so no config exists yet.
+   */
   onMount(async () => {
-    const draft = await loadDraft();
-    if (draft) s = draft;
+    const got: { config?: unknown; raw?: unknown } = window.corral
+      ? await window.corral.config.parsed().catch(() => ({}))
+      : {};
+    const parsed = got.config;
+    const draft = parsed ? null : await loadDraft();
+    if (parsed) s = stateFromConfig(parsed, got.raw);
+    else if (draft) s = draft;
     // Coerce any still-gated provider a stale draft/config might hold back to a working one.
     if (providers.find((p) => p.id === s.provider)?.soon) setProvider('claude');
     // API transport only has a claude adapter — fall back to its CLI if a non-claude
@@ -76,7 +94,9 @@
     if (s.transport === 'api' && !apiSupported(s.provider)) s.transport = 'cli';
     // Host-login mount doesn't work on macOS (login is in the Keychain, not ~/.claude),
     // so a fresh macOS setup defaults to the API-key path instead.
-    if (!draft && window.corral?.platform === 'darwin') s.dockerMountLogin = false;
+    // Only for a genuinely fresh start. A config that says otherwise has already been
+    // decided by whoever wrote it.
+    if (!draft && !parsed && window.corral?.platform === 'darwin') s.dockerMountLogin = false;
     if (!window.corral) return;
     const found = new Set<string>();
     for (const ref of secretRefs(s)) {
@@ -779,6 +799,17 @@
           <span>{t('workspace.mountLogin')}</span>
         </label>
         <p class="hint">{s.dockerMountLogin ? t('workspace.mountLoginOn') : t('workspace.mountLoginOff')}</p>
+        <div class="two">
+          <label class="field"
+            ><span>{t('workspace.memory')}</span>
+            <input bind:value={s.dockerMemory} placeholder="1g" spellcheck="false" /></label
+          >
+          <label class="field"
+            ><span>{t('workspace.cpus')}</span>
+            <input bind:value={s.dockerCpus} placeholder="1.5" spellcheck="false" /></label
+          >
+        </div>
+        <p class="hint">{t('workspace.capsHint')}</p>
       {/if}
     {:else if step === 4}
       <h1>{t('step.channel')}</h1>
@@ -809,6 +840,21 @@
         >
       </div>
       <p class="hint">{t('field.stackDesc')}</p>
+
+      <h2 class="sub">{t('field.limits')}</h2>
+      <div class="two">
+        <!-- Text, not number. A number input binds a number, and blank has to stay
+             distinguishable from 0 — one means no ceiling, the other stops every call. -->
+        <label class="field"
+          ><span>{t('field.dailyInput')}</span>
+          <input inputmode="numeric" bind:value={s.dailyInputTokens} placeholder="2000000" spellcheck="false" /></label
+        >
+        <label class="field"
+          ><span>{t('field.dailyOutput')}</span>
+          <input inputmode="numeric" bind:value={s.dailyOutputTokens} placeholder="100000" spellcheck="false" /></label
+        >
+      </div>
+      <p class="hint">{t('field.limitsHint')}</p>
     {/if}
 
     {#if error}<p class="error">{error}</p>{/if}
@@ -831,6 +877,11 @@
 </div>
 
 <style>
+  .sub {
+    font-size: 13px;
+    font-weight: 600;
+    margin: 20px 0 8px;
+  }
   .wizard {
     display: grid;
     grid-template-columns: 240px 1fr;
