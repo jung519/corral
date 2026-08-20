@@ -12,8 +12,8 @@
  *   workspace   WorkspaceAdapter + WorkspaceIO     docker, local
  *   channel     ChannelAdapter                     web, slack
  *
- * These signatures are deliberately kept compatible with the upstream orchestrator
- * so the core logic can be lifted in one pass (see docs/development-plan.md §1.3).
+ * Each signature is the narrowest thing the orchestrator needs, so an adapter can be
+ * written against it without reading the core.
  */
 
 // ───────────────────────────────────────────────────────────── domain models

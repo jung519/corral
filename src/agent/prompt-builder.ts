@@ -3,9 +3,9 @@
  * short kickoff/turn prompts + orchestrator signals. The workflow guide is the
  * durable behavior contract; the prompt is the momentary instruction.
  *
- * Lifted from upstream. De-masil: the language-dependent signals (approve /
- * feedback / refine / resume) render from the configured language via the profile
- * Translator instead of hardcoded Korean; scratch paths come from core/paths.
+ * The language-dependent signals (approve / feedback / refine / resume) render from
+ * the configured language via the profile Translator rather than being written in
+ * one language here; scratch paths come from core/paths.
  */
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'node:fs';

@@ -3,8 +3,7 @@
 > 작성일: 2026-08-03
 > 목표: **"SDD 개념을 도입한 AI 오케스트레이션"으로 corral을 대외 홍보할 수 있는 상태**로 만든다.
 > 성격: 계획서(코드 없음). 확정/미결 구분 표기.
-> 선행 학습 노트: `docs/sdd-and-operational-ai-study.md`
-> 관련: `docs/development-plan.md`(로드맵), `docs/direction-injection-plan.md`(선례 형식)
+> 관련: `docs/direction-injection-plan.md`(선례 형식)
 
 ---
 
@@ -217,7 +216,7 @@ C1~C5 + P6(Bugfix 스펙).
   게이트 + 수용 기준 대조로 결정론 층을 확보한다. 홍보 문구에도 넣지 않는다.
 - **의존성 Wave 병렬 실행** — 태스크 그래프 분석·병렬 디스패치는 별건. S3의 순차 태스크
   루프까지만 한다.
-- 운영AI(refinery 이식) — 별도 계획(`docs/sdd-and-operational-ai-study.md` §5).
+- 운영 AI — 별도 계획(`docs/operational-ai-design.md`).
 - Kiro 기능 대조표·벤치마크.
 
 ## 15. 솔로 적합성

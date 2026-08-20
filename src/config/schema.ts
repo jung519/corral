@@ -3,8 +3,8 @@
  *
  * Every value is user-supplied — there are no project-specific defaults baked in.
  * Secrets are never inline: config holds a CredentialRef pointer; the secret lives
- * in a CredentialStore (see ../credentials/types.ts). Project/language specifics
- * live under `profile` (the de-masil seam), not in code.
+ * in a CredentialStore (see ../credentials/types.ts). Project and language specifics
+ * live under `profile`, never in code.
  *
  * `kind` discriminators line up with the per-axis registries (../core/registry.ts).
  */

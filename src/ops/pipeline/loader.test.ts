@@ -525,13 +525,13 @@ describe('the schema stays domain-neutral', () => {
   }
 
   it('names nothing that only makes sense for one kind of business', () => {
-    // The operational AI is generic infrastructure. A field called `festival` or `ticket`
-    // here would make every other user's pipeline read like someone else's product.
+    // The operational AI is generic infrastructure. A field named after one kind of
+    // business would make every other user's pipeline read like someone else's product.
     const names = fieldNames(PipelineSchema);
 
     expect(names.has('key')).toBe(true); // the walker actually found the fields
     expect(names.size).toBeGreaterThan(20);
-    for (const word of ['festival', 'tag', 'category', 'record', 'issue', 'ticket', 'product', 'article']) {
+    for (const word of ['invoice', 'tag', 'category', 'record', 'issue', 'ticket', 'product', 'article']) {
       expect([...names].filter((n) => n.includes(word))).toEqual([]);
     }
   });

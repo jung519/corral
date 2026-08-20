@@ -2,10 +2,10 @@
  * Review-round + plan-critique prompts. Each round is an INDEPENDENT fresh session
  * (no shared memory) so perspectives stay diverse; the validator merges them later.
  *
- * Lifted from upstream. De-masil: output language, the "no issues" / resolved /
- * unresolved phrasing, and the severity calibration examples all come from the
- * configured profile (language + stack) instead of hardcoded Korean + masil's stack.
- * The reference repo is generic (no design_system/masil_project subpaths).
+ * Output language, the "no issues" / resolved / unresolved phrasing, and the severity
+ * calibration examples all come from the configured profile (language + stack) rather
+ * than being written into the prompt. The reference repo is whatever the config names,
+ * with no assumed subpaths inside it.
  */
 import { SCRATCH } from '../core/paths.js';
 import type { Issue } from '../core/types.js';
