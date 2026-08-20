@@ -10,8 +10,10 @@ declare global {
       config: {
         exists(): Promise<boolean>;
         read(): Promise<string | null>;
-        /** Parsed by the core, defaults filled in — the window has no YAML parser. */
-        parsed(): Promise<unknown>;
+        /** As the core reads it: `config` with defaults applied, `raw` as written. The
+         *  window has no YAML parser; both are needed because for some fields, being
+         *  written down at all is the meaning. */
+        parsed(): Promise<{ config?: unknown; raw?: unknown }>;
         /** Saving against a remote core also restarts it on the new config, so failures
          *  (bad token, unreachable tracker) come back here instead of passing silently. */
         write(yaml: string): Promise<{ ok: boolean; error?: string }>;

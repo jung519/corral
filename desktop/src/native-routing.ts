@@ -65,8 +65,14 @@ export async function configRead(): Promise<string | null> {
  * yet or the config does not parse; a screen that gets that has nothing to show and says
  * so, rather than rendering half a config (CRL-76).
  */
-export async function configParsed(): Promise<unknown> {
-  return readSafely(async () => ((await callCore('configGet')) as { config?: unknown }).config, undefined);
+export async function configParsed(): Promise<{ config?: unknown; raw?: unknown }> {
+  return readSafely(
+    async () => {
+      const got = (await callCore('configGet')) as { config?: unknown; raw?: unknown };
+      return { config: got.config, raw: got.raw };
+    },
+    { config: undefined, raw: undefined },
+  );
 }
 
 /**
@@ -76,7 +82,13 @@ export async function configParsed(): Promise<unknown> {
  */
 export async function configWrite(yaml: string): Promise<{ ok: boolean; error?: string }> {
   if (!isRemote()) {
-    localConfigWrite(yaml);
+    // Ask the core to put back the blocks the wizard does not model, then write. The core
+    // is the only side that knows what a config contains; writing the wizard's document
+    // straight to disk is what erased them (CRL-77). If the core cannot answer, the write
+    // still happens — a save that refuses because the merge was unavailable would be a
+    // worse failure than the one being avoided.
+    const merged = await readSafely(async () => ((await callCore('configMerge', { yaml })) as { yaml: string }).yaml, yaml);
+    localConfigWrite(merged);
     return { ok: true };
   }
   return (await callCore('configSet', { yaml })) as { ok: boolean; error?: string };

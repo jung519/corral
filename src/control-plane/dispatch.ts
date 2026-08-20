@@ -96,7 +96,18 @@ export async function dispatch(
       if (!deps.setup) return NO_SETUP;
       // `config` is the parsed form, for a window that has no YAML parser of its own.
       // `yaml` stays beside it: a config that will not parse still has text worth showing.
-      return { exists: deps.setup.configExists(), yaml: deps.setup.configRead(), config: deps.setup.configParsed() };
+      // `config` is what applies (defaults filled in); `raw` is what was written down.
+      // A screen needs both — see `SetupHost.configRaw`.
+      return {
+        exists: deps.setup.configExists(),
+        yaml: deps.setup.configRead(),
+        config: deps.setup.configParsed(),
+        raw: deps.setup.configRaw(),
+      };
+    case 'configMerge':
+      if (!deps.setup) return NO_SETUP;
+      // For the app when it writes the file itself — see `SetupHost.configMerge`.
+      return { yaml: deps.setup.configMerge(String(a.yaml ?? '')) };
     case 'configSet':
       if (!deps.setup) return NO_SETUP;
       // Writes, then rebuilds the orchestrator in place — a remote core has no parent

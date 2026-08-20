@@ -44,7 +44,7 @@ const call = (method: string, args: Record<string, unknown> = {}): Promise<any> 
 
 describe('config over the control plane', () => {
   it('reports no config before setup', async () => {
-    expect(await call('configGet')).toEqual({ exists: false, yaml: null, config: undefined });
+    expect(await call('configGet')).toEqual({ exists: false, yaml: null, config: undefined, raw: undefined });
   });
 
   it('writes the config and brings the orchestrator up in place', async () => {
@@ -55,7 +55,7 @@ describe('config over the control plane', () => {
     expect(readFileSync(join(dir, 'corral.yaml'), 'utf8')).toBe('version: 1\n');
     // `version: 1` is not a config the schema accepts, so there is nothing to parse —
     // the text still comes back, which is what lets a screen say it is unreadable.
-    expect(await call('configGet')).toEqual({ exists: true, yaml: 'version: 1\n', config: undefined });
+    expect(await call('configGet')).toEqual({ exists: true, yaml: 'version: 1\n', config: undefined, raw: { version: 1 } });
   });
 
   it('hands back the parsed config, defaults filled in', async () => {
@@ -97,6 +97,56 @@ channel: { kind: web }
       // Never written down, and the screen needs the value that will actually be used.
       max_active_issues: 3,
     });
+  });
+
+  it('separates what applies from what was written down', async () => {
+    // The tracker's optional states default onto a core column, so a parsed config always
+    // has them. A screen reading only the parsed form would show "detailed board" as
+    // chosen and then write those defaults back as choices (CRL-77).
+    await call('configSet', {
+      yaml: `
+tracker:
+  kind: notion
+  database_id: db-1
+  credential: { service: notion, account: default }
+  properties: { status: "S", identifier: "ID" }
+  states: { planning: todo, in_progress: doing, done: done }
+repositories: [{ kind: github, key: k, repo: o/n, credential: { service: github, account: default } }]
+agent: { provider: claude, transport: cli, models: { planning: a, implementation: b, review: c } }
+workspace: { backend: local }
+channel: { kind: web }
+`,
+    });
+
+    const got = await call('configGet');
+
+    expect(got.config.tracker.states.plan_review).toBeDefined(); // the schema filled it in
+    expect(got.raw.tracker.states.plan_review).toBeUndefined(); // nobody wrote it
+  });
+
+  it('keeps a block the wizard cannot write when it saves', async () => {
+    // The wizard renders a whole document from the fields it models, so a hand-written
+    // ceiling used to vanish the next time somebody changed a model name (CRL-77).
+    await call('configSet', { yaml: 'agent: { provider: claude }\nreview:\n  rounds: 3\n' });
+
+    // A second save from the wizard — no `review` in it, because it has no field for one.
+    await call('configSet', { yaml: 'agent: { provider: gpt }\n' });
+
+    const yaml = readFileSync(join(dir, 'corral.yaml'), 'utf8');
+    expect(yaml).toContain('provider: gpt'); // the wizard's own change landed
+    expect(yaml).toContain('rounds: 3'); // and the block it does not model survived
+  });
+
+  it('hands back the merged text without writing, for the app to write itself', async () => {
+    // A local core is respawned after setup to pick up freshly stored secrets, so the app
+    // writes the file. It asks for the merge rather than knowing what a config contains.
+    await call('configSet', { yaml: 'agent: { provider: claude }\ncontrol_plane:\n  port: 4410\n' });
+
+    const merged = await call('configMerge', { yaml: 'agent: { provider: gpt }\n' });
+
+    expect(merged.yaml).toContain('port: 4410');
+    // Asked, not written: the file on disk is untouched by this call.
+    expect(readFileSync(join(dir, 'corral.yaml'), 'utf8')).toContain('provider: claude');
   });
 
   it('keeps the config but reports why it would not start', async () => {

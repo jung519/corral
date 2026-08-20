@@ -10,8 +10,10 @@
  * here, because only the entrypoint knows how the app was bootstrapped.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import YAML from 'yaml';
 import { dirname } from 'node:path';
 import { parseConfig } from '../config/loader.js';
+import { mergePreserved } from '../config/merge.js';
 import type { Config } from '../config/schema.js';
 import type { CredentialStore } from '../credentials/types.js';
 
@@ -71,14 +73,48 @@ export class SetupHost {
   }
 
   /**
+   * The document as written, with no schema defaults applied.
+   *
+   * Needed beside `configParsed` because for some fields **presence is the meaning**. The
+   * tracker's optional states default to a core column, so a parsed config always has
+   * them — and a screen that read only the parsed form would show "detailed board" as
+   * chosen, then write those defaults back as if somebody had chosen them (CRL-77). The
+   * parsed form answers "what value applies"; this one answers "was it written down".
+   */
+  configRaw(): unknown {
+    const text = this.configRead();
+    if (text === null) return undefined;
+    try {
+      return YAML.parse(text);
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
    * Persist the config and bring the orchestrator up on it. A reload failure is
    * returned, not thrown: the config IS on disk at that point, and the wizard needs to
    * show the reason (bad token, unreachable tracker) rather than a dead request.
    */
   async configWrite(yaml: string): Promise<{ ok: boolean; error?: string }> {
     mkdirSync(dirname(this.o.configPath), { recursive: true });
-    writeFileSync(this.o.configPath, yaml, 'utf8');
+    // The wizard renders a whole document from the fields it models, so a block it does
+    // not model was erased by every save. Put those back before this lands (CRL-77).
+    writeFileSync(this.o.configPath, this.configMerge(yaml), 'utf8');
     return this.o.reload();
+  }
+
+  /**
+   * The same merge, without writing.
+   *
+   * The desktop writes this file itself when the core runs on the same machine — it has
+   * to, because a local core is respawned afterwards to pick up freshly stored secrets,
+   * and reloading in place before that would fail on credentials it cannot see yet. So it
+   * asks for the merged text and writes that, and the knowledge of what a config contains
+   * stays here rather than being copied into the app.
+   */
+  configMerge(yaml: string): string {
+    return mergePreserved(yaml, this.configRead());
   }
 
   draftRead(): string | null {
