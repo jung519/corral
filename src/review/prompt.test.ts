@@ -15,7 +15,7 @@ const issue: Issue = {
   attachments: [],
 };
 
-describe('review prompts (de-masil)', () => {
+describe('review prompts', () => {
   const profileKo = resolveProfile(ProfileSchema.parse({ language: 'ko', stack: 'nestjs' }));
 
   it('reviewRoundPrompt renders language, calibration and phrases from the profile', () => {
@@ -25,7 +25,9 @@ describe('review prompts (de-masil)', () => {
     expect(p).toContain('해결됨');
     expect(p).toContain('git -C server diff abc123..HEAD');
     expect(p).toContain('provider injected with the wrong scope'); // nestjs calibration
-    expect(p).not.toMatch(/Mongoose|masil_project|design_system/); // no hardcoded masil
+    // Another stack's calibration must NOT be there. That is the whole claim: the
+    // examples come from the profile, so a prompt cannot carry a stack nobody chose.
+    expect(p).not.toContain('BuildContext used across an async gap'); // flutter calibration
   });
 
   it('reviewRoundPrompt lists every changed repo for a multi-repo issue', () => {

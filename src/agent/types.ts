@@ -1,8 +1,8 @@
 /**
  * Agent provider × transport abstraction.
  *
- * This is a NET-NEW boundary, designed from scratch — NOT lifted from upstream's
- * claude-only, CLI-only backend (see docs/development-plan.md §1.3). The
+ * Provider and transport are separate axes on purpose: a provider is a model family
+ * and a transport is how you reach it, and every pair is valid. The
  * orchestrator-facing interface stays `AgentAdapter` (../core/types.ts); a generic
  * adapter composes a provider × transport and aggregates the normalized event
  * stream into an AgentRunResult.

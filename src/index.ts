@@ -2,9 +2,8 @@
  * Corral public surface (S1 — skeleton).
  *
  * Exposes the 5-axis adapter interfaces, the registry, the net-new agent and
- * credential boundaries, and the config schema. The orchestrator core is lifted
- * from upstream in S2 (see docs/development-plan.md §1.3) — there is no runnable
- * entrypoint yet.
+ * credential boundaries, and the config schema. There is no runnable entrypoint
+ * here — the orchestrator has its own.
  */
 export * from './core/types.js';
 export * from './core/registry.js';
