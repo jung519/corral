@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
+  import ModelPicker from './lib/ModelPicker.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
     apiSupported,
@@ -14,7 +15,6 @@
     initialState,
     loadDraft,
     stateFromConfig,
-    MODELS,
     newFallback,
     newRepo,
     OPTIONAL_STATE_KEYS,
@@ -490,15 +490,15 @@
         <div class="three">
           <label class="field"
             ><span>{t('field.planningModel')}</span>
-            <select bind:value={s.planningModel}>{#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}</select></label
+            <ModelPicker bind:value={s.planningModel} provider={s.provider} transport={s.transport} id="plan" /></label
           >
           <label class="field"
             ><span>{t('field.implModel')}</span>
-            <select bind:value={s.implementationModel}>{#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}</select></label
+            <ModelPicker bind:value={s.implementationModel} provider={s.provider} transport={s.transport} id="impl" /></label
           >
           <label class="field"
             ><span>{t('field.reviewModel')}</span>
-            <select bind:value={s.reviewModel}>{#each MODELS[s.provider] as m}<option value={m}>{m}</option>{/each}</select></label
+            <ModelPicker bind:value={s.reviewModel} provider={s.provider} transport={s.transport} id="review" /></label
           >
         </div>
       {:else}
@@ -508,9 +508,12 @@
             <select value={s.stages[st.key].provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as Provider)}>
               {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
             </select>
-            <select bind:value={s.stages[st.key].model}>
-              {#each MODELS[s.stages[st.key].provider] as m}<option value={m}>{m}</option>{/each}
-            </select>
+            <ModelPicker
+              bind:value={s.stages[st.key].model}
+              provider={s.stages[st.key].provider}
+              transport={s.transport}
+              id={`stage-${st.key}`}
+            />
           </div>
         {/each}
       {/if}
@@ -542,15 +545,15 @@
             <div class="three">
               <label class="field"
                 ><span>{t('field.planningModel')}</span>
-                <select bind:value={f.planningModel}>{#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}</select></label
+                <ModelPicker bind:value={f.planningModel} provider={f.provider} transport={s.transport} id={`fb${i}-plan`} /></label
               >
               <label class="field"
                 ><span>{t('field.implModel')}</span>
-                <select bind:value={f.implementationModel}>{#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}</select></label
+                <ModelPicker bind:value={f.implementationModel} provider={f.provider} transport={s.transport} id={`fb${i}-impl`} /></label
               >
               <label class="field"
                 ><span>{t('field.reviewModel')}</span>
-                <select bind:value={f.reviewModel}>{#each MODELS[f.provider] as m}<option value={m}>{m}</option>{/each}</select></label
+                <ModelPicker bind:value={f.reviewModel} provider={f.provider} transport={s.transport} id={`fb${i}-review`} /></label
               >
             </div>
             {#if !runnableInBackend(s, f.provider)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
@@ -1087,7 +1090,10 @@
     font-size: 13px;
     color: var(--text-dim);
   }
-  .stage-row select {
+  /* `:global` because the model control moved into ModelPicker — scoped selectors do not
+     reach a child component's elements, and without this the row's widths went lopsided. */
+  .stage-row :global(select),
+  .stage-row :global(input) {
     flex: 1;
     min-width: 0;
   }
