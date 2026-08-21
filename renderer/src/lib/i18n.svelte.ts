@@ -18,6 +18,8 @@ const en: Dict = {
   'wizard.exit': 'Close',
   'wizard.browserPreview': 'Browser preview — saving requires the desktop app.',
   'validate.apiKeyApi': 'An API key is required for the API transport.',
+  'validate.agentCred': 'No credential for the assigned agent: {p}.',
+  'validate.agentCredDocker': 'No credential for the assigned agent: {p}. Under Docker the CLI runs inside the worker image, so a key or token is what authenticates it.',
   'validate.repoMin': 'Add at least one repository.',
   'validate.repoKeyNeeded': 'Every repository needs a key.',
   'validate.repoKeyDup': 'Duplicate repository key "{key}".',
@@ -73,6 +75,9 @@ const en: Dict = {
   'cli.check': 'Check CLI is installed',
   'cli.installed': 'Installed',
   'cli.notInstalled': 'Not found in PATH — install the CLI',
+  'cli.notInstalledCore': "Not in the core machine's PATH — the agents run there, so install it there",
+  'cli.inImage': 'The CLI is installed inside the worker image. What is needed here is a key or a token.',
+  'cli.inImageMount': "The CLI is installed inside the worker image, and the core host's ~/.claude login is mounted into it — no key needed.",
   'agent.fallbackLabel': 'Fallback agents (failover order)',
   'agent.fallbackHint':
     'Tried in order when the agent above runs out of capacity (usage/rate limit, account ended). Each keeps its own key and models.',
@@ -135,6 +140,7 @@ const en: Dict = {
   'workspace.backend': 'Workspace backend',
   'workspace.localNote': 'Runs on this machine with your installed toolchain & Claude CLI. Simplest; no isolation.',
   'workspace.dockerNote': 'Isolated container per issue. Corral auto-builds a worker image from your repos (analyze → Dockerfile → build). Requires Docker installed.',
+  'workspace.dockerCliNote': 'The agent CLIs are installed inside that image, so nothing has to be installed on the host — authentication comes from the key or token in step 1.',
   'workspace.mountLogin': 'Use my host Claude login in the container',
   'workspace.mountLoginOn': 'Mounts ~/.claude (read-only) so the agent authenticates like local — no API key needed. ⚠️ Linux hosts only: on macOS the Claude login lives in the Keychain, not ~/.claude, so turn this OFF and use an API key.',
   'workspace.mountLoginOff':
@@ -527,6 +533,8 @@ const ko: Dict = {
   'wizard.exit': '닫기',
   'wizard.browserPreview': '브라우저 미리보기 — 저장은 데스크톱 앱에서 가능합니다.',
   'validate.apiKeyApi': 'API 트랜스포트에는 API 키가 필요합니다.',
+  'validate.agentCred': '배치된 에이전트에 자격증명이 없습니다: {p}.',
+  'validate.agentCredDocker': '배치된 에이전트에 자격증명이 없습니다: {p}. Docker에서는 CLI가 워커 이미지 안에서 돌기 때문에 키나 토큰이 인증 수단입니다.',
   'validate.repoMin': '저장소를 하나 이상 추가하세요.',
   'validate.repoKeyNeeded': '모든 저장소에 키가 필요합니다.',
   'validate.repoKeyDup': '저장소 키 "{key}"가 중복됩니다.',
@@ -582,6 +590,9 @@ const ko: Dict = {
   'cli.check': 'CLI 설치 확인',
   'cli.installed': '설치됨',
   'cli.notInstalled': 'PATH에서 찾을 수 없음 — CLI를 설치하세요',
+  'cli.notInstalledCore': '코어 기계의 PATH에 없습니다 — 에이전트가 도는 곳이 거기라 거기에 설치해야 합니다',
+  'cli.inImage': 'CLI는 워커 이미지 안에 설치됩니다. 여기서 필요한 건 키 또는 토큰입니다.',
+  'cli.inImageMount': 'CLI는 워커 이미지 안에 설치되고, 코어 호스트의 ~/.claude 로그인을 마운트해 씁니다 — 키가 필요 없습니다.',
   'agent.fallbackLabel': '폴백 에이전트 (전환 순서)',
   'agent.fallbackHint':
     '위 에이전트의 사용량이 소진되면(사용량/요청 한도, 계정 종료) 순서대로 다음 에이전트를 시도합니다. 각자 키와 모델을 따로 가집니다.',
@@ -644,6 +655,7 @@ const ko: Dict = {
   'workspace.backend': '워크스페이스 백엔드',
   'workspace.localNote': '이 컴퓨터에서 설치된 툴체인·Claude CLI로 실행. 가장 단순, 격리 없음.',
   'workspace.dockerNote': '이슈마다 격리 컨테이너. Corral이 repo를 분석해 워커 이미지를 자동 생성(분석 → Dockerfile → 빌드). Docker 설치 필요.',
+  'workspace.dockerCliNote': '에이전트 CLI는 그 이미지 안에 설치되므로 호스트에는 따로 깔 것이 없습니다 — 인증은 1단계의 키·토큰으로 합니다.',
   'workspace.mountLogin': '호스트 Claude 로그인 사용',
   'workspace.mountLoginOn': '~/.claude를 읽기 전용으로 마운트해 local처럼 인증 — API 키 불필요. ⚠️ Linux 호스트 전용: macOS는 로그인이 키체인에 있어 ~/.claude로는 안 됩니다. macOS면 끄고 API 키를 쓰세요.',
   'workspace.mountLoginOff':
