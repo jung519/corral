@@ -19,6 +19,10 @@ export const OPTIONAL_STATE_KEYS = ['plan_review', 'in_review'] as const;
 
 export const PROVIDERS: Provider[] = ['claude', 'gemini', 'gpt'];
 
+/** How each provider is written for a reader. Lives here rather than beside the picker's
+ *  icons so a message built in this file can use the same words the screen does. */
+export const PROVIDER_NAMES: Record<Provider, string> = { claude: 'Claude', gemini: 'Gemini', gpt: 'GPT' };
+
 export interface RepoEntry {
   provider: RepoProvider;
   repo: string; // owner/name (github/gitlab) or workspace/slug (bitbucket)
@@ -78,9 +82,6 @@ export interface WizardState {
   transport: 'api' | 'cli';
   /** Independent per-provider accounts (credentials). Keyed by provider. */
   accounts: Record<Provider, AccountCred>;
-  /** Providers the user explicitly verified (CLI install/login check passed). Lets a
-   *  CLI agent count as "configured" without a stored token. Non-secret → kept in draft. */
-  cliVerified: Partial<Record<Provider, boolean>>;
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
@@ -142,7 +143,6 @@ export function initialState(): WizardState {
     provider: 'claude',
     transport: 'cli',
     accounts: emptyAccounts(),
-    cliVerified: {},
     planningModel: 'opus',
     implementationModel: 'sonnet',
     reviewModel: 'opus',
@@ -277,15 +277,20 @@ export function hasCred(s: WizardState, p: Provider, isSaved: SecretSavedFn = ()
 /** Does this provider have a usable auth path (so it may be assigned to a role)?
  *  - a stored/entered credential, or
  *  - cli transport on the local backend (the CLI brings its own login), or
- *  - claude with the docker host-login mount, or
- *  - the user verified the CLI (install/login check passed). */
+ *  - claude with the docker host-login mount.
+ *
+ * `cliVerified` is deliberately NOT an auth path under docker. The check it comes from
+ * looks at the **host's** PATH, and under docker the agent runs `docker exec … claude`
+ * against a CLI installed in the worker image — a logged-in CLI on the host is a
+ * different machine's login, invisible to the container. Counting it let the wizard
+ * finish with no credential at all and fail at the first agent turn instead (CRL-78).
+ * On the local backend it is the same CLI that will run, so there it still counts. */
 export function configured(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): boolean {
   // API mode needs an actual key, and only claude has an api adapter.
   if (s.transport === 'api') return apiSupported(p) && hasCred(s, p, isSaved);
   if (hasCred(s, p, isSaved)) return true;
   if (s.backend === 'local') return true;
-  if (p === 'claude' && s.backend === 'docker' && s.dockerMountLogin) return true;
-  return !!s.cliVerified[p];
+  return p === 'claude' && s.dockerMountLogin;
 }
 
 /** Distinct providers used in per-stage mode (plan/build/review). */
@@ -306,12 +311,22 @@ export function unrunnableAssigned(s: WizardState): Array<Provider> {
 
 export function validateStep(step: number, s: WizardState, isSaved: SecretSavedFn = () => false): string {
   switch (step) {
-    case 0:
+    case 0: {
       // Docker + Gemini is NOT blocked here — it can be configured; the run is cancelled
-      // at dispatch time with a clear message. Assignment dropdowns already disable
-      // providers that have no auth path at all (see `configured`).
-      if (s.transport === 'api' && !hasCred(s, s.provider, isSaved)) return vt('validate.apiKeyApi');
+      // at dispatch time with a clear message.
+      //
+      // An assigned agent with no auth path IS blocked. The dropdowns disable such an
+      // option, which stops you picking one but not from keeping the one already
+      // selected — so a docker setup could be finished with every stage reading
+      // "Claude · 미설정" and fail at the first agent turn, on the far side of an image
+      // build and a clone (CRL-78).
+      const unset = assignedProviders(s).filter((p) => !configured(s, p, isSaved));
+      if (unset.length) {
+        const names = unset.map((p) => PROVIDER_NAMES[p]).join(', ');
+        return vt(s.backend === 'docker' ? 'validate.agentCredDocker' : 'validate.agentCred', { p: names });
+      }
       return '';
+    }
     case 1: {
       if (s.repos.length === 0) return vt('validate.repoMin');
       const keys = new Set<string>();

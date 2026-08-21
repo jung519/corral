@@ -19,6 +19,7 @@
     newRepo,
     OPTIONAL_STATE_KEYS,
     type Provider,
+    PROVIDER_NAMES,
     type RepoProvider,
     runnableInBackend,
     saveDraft,
@@ -48,9 +49,9 @@
   // claude / gemini / gpt(codex) transports are all implemented. `soon` gates a provider
   // whose adapter isn't ready yet (none currently).
   const providers: Array<{ id: WizardState['provider']; name: string; icon: string; soon?: boolean }> = [
-    { id: 'claude', name: 'Claude', icon: '<path d="M12 3v18M3 12h18M6 6l12 12M18 6 6 18"/>' },
-    { id: 'gemini', name: 'Gemini', icon: '<path d="M12 3l7 9-7 9-7-9z"/>' },
-    { id: 'gpt', name: 'GPT', icon: '<circle cx="12" cy="12" r="8"/>' },
+    { id: 'claude', name: PROVIDER_NAMES.claude, icon: '<path d="M12 3v18M3 12h18M6 6l12 12M18 6 6 18"/>' },
+    { id: 'gemini', name: PROVIDER_NAMES.gemini, icon: '<path d="M12 3l7 9-7 9-7-9z"/>' },
+    { id: 'gpt', name: PROVIDER_NAMES.gpt, icon: '<circle cx="12" cy="12" r="8"/>' },
   ];
 
   let s: WizardState = $state(initialState());
@@ -65,6 +66,10 @@
   let savedSecrets = $state(new Set<string>());
   const secretKey = (service: string, account: string) => `${service}:${account}`;
   const secretSaved = (service: string, account: string) => savedSecrets.has(secretKey(service, account));
+
+  /** The core runs on another machine, so "installed" and "logged in" are answers about
+   *  that machine — worth saying out loud when a probe comes back empty. */
+  let remoteCore = $state(false);
 
   /**
    * Where the form starts from.
@@ -98,6 +103,7 @@
     // decided by whoever wrote it.
     if (!draft && !parsed && window.corral?.platform === 'darwin') s.dockerMountLogin = false;
     if (!window.corral) return;
+    remoteCore = (await window.corral.remote.get().catch(() => ({ mode: 'local' as const }))).mode === 'remote';
     const found = new Set<string>();
     for (const ref of secretRefs(s)) {
       if (await window.corral.secret.has(ref.service, ref.account)) found.add(secretKey(ref.service, ref.account));
@@ -224,19 +230,26 @@
     }
   }
 
-  // Check a provider's official CLI is installed (transport: cli). Marks the provider
-  // verified so it counts as configured without a stored token. Install-only — login is
-  // provider-specific and not reliably checkable without a billed turn.
+  /**
+   * Is the provider's official CLI installed where the agent will run?
+   *
+   * Asked only on the local backend — that is the one place a PATH is the answer. Under
+   * docker the CLI comes from the worker image and the turn is `docker exec … claude`, so
+   * the button is not offered at all (see the account card).
+   *
+   * Install-only: login is provider-specific and not reliably checkable without a billed
+   * turn. Nothing is granted by passing — under docker a logged-in host CLI belongs to a
+   * machine the container cannot see, and counting it let a credential-less setup through
+   * (CRL-78).
+   */
   async function testCli(p: Provider) {
     if (!window.corral) return;
     acctMsg[p] = t('status.testing');
     const r = await window.corral.detectCli(p);
-    if (r.installed) {
-      s.cliVerified = { ...s.cliVerified, [p]: true };
-      acctMsg[p] = `✓ ${r.version ?? t('cli.installed')}`;
-    } else {
-      acctMsg[p] = `✗ ${t('cli.notInstalled')}`;
-    }
+    // Which machine's PATH this was — the core's disk is not this one's in remote mode.
+    acctMsg[p] = r.installed
+      ? `✓ ${r.version ?? t('cli.installed')}`
+      : `✗ ${t(remoteCore ? 'cli.notInstalledCore' : 'cli.notInstalled')}`;
   }
   // Full connection test for one repo (checks the actual repo is reachable, not just the token).
   async function testRepo(i: number) {
@@ -457,7 +470,11 @@
             />
             {#if hasBridge && s.transport === 'cli'}
               <div class="acct-btns">
-                <Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>
+                <!-- No install check under docker. The CLI that runs comes from the worker
+                     image, so a host probe answers about the wrong machine — and a button
+                     that can only ever say "not found, install it" about a machine nothing
+                     runs on is worse than no button (CRL-78). -->
+                {#if s.backend !== 'docker'}<Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>{/if}
                 {#if p.id === 'claude'}<Button onclick={() => importOauth('claude')}>{t('oauth.setupBtn')}</Button>{/if}
                 {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
               </div>
@@ -468,7 +485,11 @@
               {#if (p.id === 'claude' || p.id === 'gpt') && !s.accounts[p.id].oauth && secretSaved(serviceFor(p.id), 'oauth')}
                 <p class="helper">{t('account.oauthSaved')}</p>
               {/if}
-              {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
+              {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>
+              {:else if s.backend === 'docker' && s.transport === 'cli'}
+                <!-- Where this agent's credential comes from once it runs in a container. -->
+                <p class="helper">{t(p.id === 'claude' && s.dockerMountLogin ? 'cli.inImageMount' : 'cli.inImage')}</p>
+              {/if}
               {#if acctMsg[p.id]}<p class="helper">{acctMsg[p.id]}</p>{/if}
             {/if}
           </div>
@@ -794,6 +815,9 @@
       </div>
       <p class="hint">{s.backend === 'docker' ? t('workspace.dockerNote') : t('workspace.localNote')}</p>
       {#if s.backend === 'docker'}
+        <!-- Said here because step 1 came first: whoever passed the agent cards was still
+             on the local default and read advice about a host that will not run them. -->
+        <p class="hint">{t('workspace.dockerCliNote')}</p>
         <label class="check">
           <input type="checkbox" bind:checked={s.dockerMountLogin} />
           <span>{t('workspace.mountLogin')}</span>
