@@ -454,12 +454,16 @@ function credLines(provider: Provider, indent: string): string[] {
 }
 
 /** YAML for agent.fallbacks (one ordered entry each). Credentials come from the
- *  provider's shared account (service:default / :oauth). */
+ *  provider's shared account (service:default / :oauth).
+ *
+ *  Transport follows the one chosen in step 1. It used to be hardcoded `cli`, which made
+ *  the API choice a lie for every setup that had a fallback or per-stage agents: the
+ *  screen said api, the file said cli, and the file wins (CRL-79). */
 function fallbackYaml(s: WizardState): string[] {
   if (s.fallbacks.length === 0) return [];
   const lines = ['  fallbacks:'];
   for (const f of s.fallbacks) {
-    lines.push(`    - provider: ${f.provider}`, '      transport: cli', ...credLines(f.provider, '      '));
+    lines.push(`    - provider: ${f.provider}`, `      transport: ${s.transport}`, ...credLines(f.provider, '      '));
     lines.push(
       '      models:',
       `        planning: ${yamlStr(f.planningModel)}`,
@@ -471,13 +475,18 @@ function fallbackYaml(s: WizardState): string[] {
 }
 
 /** YAML for agent.stages (per-stage provider/model overrides). Credentials come from
- *  the provider's shared account (service:default / :oauth). */
+ *  the provider's shared account (service:default / :oauth).
+ *
+ *  A stage override replaces the routing whole (`bootstrap.ts`), so its transport is the
+ *  one that runs — hardcoding `cli` here silently overrode the API choice for all three
+ *  stages (CRL-79). The wizard applies one transport to every stage; the schema allows a
+ *  mix, and a hand-written mix collapses to the step-1 choice on the next save. */
 function stageAgentYaml(s: WizardState): string[] {
   if (!s.perStageAgents) return [];
   const lines = ['  stages:'];
   for (const stage of ['planning', 'implementation', 'review'] as const) {
     const a = s.stages[stage];
-    lines.push(`    ${stage}:`, `      provider: ${a.provider}`, '      transport: cli', ...credLines(a.provider, '      '));
+    lines.push(`    ${stage}:`, `      provider: ${a.provider}`, `      transport: ${s.transport}`, ...credLines(a.provider, '      '));
     lines.push('      models:', `        ${stage}: ${yamlStr(a.model)}`);
   }
   return lines;
