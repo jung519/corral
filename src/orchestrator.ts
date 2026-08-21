@@ -19,6 +19,7 @@
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
 import { TimingAgent } from './agent/timing-agent.js';
+import { unrunnableProvider } from './agent/backend-compat.js';
 import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 import { CostTracker } from './core/cost-tracker.js';
@@ -844,14 +845,16 @@ export class Orchestrator {
   // ───────────────────────────────────────────────────── dispatch helper
 
   /** The provider that can't execute under the current backend for `stage`, or null.
-   *  gemini has no in-container auth under docker, so a stage routed to it is cancelled
-   *  at dispatch (it may be *configured*, just not runnable). Fallbacks are for capacity
-   *  exhaustion, not backend incompatibility, so only the stage's primary provider counts. */
+   *  A stage routed to one is cancelled at dispatch (it may be *configured*, just not
+   *  runnable). Fallbacks are for capacity exhaustion, not backend incompatibility, so
+   *  only the stage's own routing counts.
+   *
+   *  Provider AND transport come from the same place, the way bootstrap resolves it: a
+   *  stage override replaces the routing whole, so reading the provider from the override
+   *  and the transport from the base would judge a pair that never runs. */
   private unrunnableStageProvider(stage: AgentStage): string | null {
-    if (this.config.workspace.backend !== 'docker') return null;
-    const a = this.config.agent;
-    const provider = a.stages?.[stage]?.provider ?? a.provider;
-    return provider === 'gemini' ? provider : null;
+    const routing = this.config.agent.stages?.[stage] ?? this.config.agent;
+    return unrunnableProvider(routing, this.config.workspace.backend);
   }
 
   private async dispatch(
@@ -900,7 +903,9 @@ export class Orchestrator {
       // instead of failing cryptically mid-build. Configurable in setup, blocked at run.
       const blocked = this.unrunnableStageProvider(stage);
       if (blocked) {
-        const msg = `${blocked}는 현재 Docker 백엔드에서 실행할 수 없습니다 — 워크스페이스를 로컬로 바꾸거나 이 단계를 다른 provider로 배치하세요.`;
+        // Names the transport, because that is what makes it impossible — and it is the
+        // cheapest of the three ways out (the container needs no gemini login on `api`).
+        const msg = `${blocked}는 Docker 백엔드에서 CLI로 실행할 수 없습니다 — 이 단계를 API 트랜스포트로 바꾸거나, 다른 provider로 배치하거나, 워크스페이스를 로컬로 바꾸세요.`;
         rt.phase = 'auth_error_waiting';
         rt.stuck = true;
         this.store.upsert(rt);
