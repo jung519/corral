@@ -243,10 +243,13 @@ export type SecretSavedFn = (service: string, account: string) => boolean;
 //                 this is enforced at RUN time (warned in the UI, blocked in the core),
 //                 never by hiding the option.
 
-/** Gemini cannot run under the docker backend (no in-container token / ~/.gemini mount).
- *  claude (oauth/mount) and gpt (codex auth import / API key) are supported. */
-export function dockerBlocked(provider: Provider): boolean {
-  return provider === 'gemini';
+/** Gemini's CLI cannot run under the docker backend: nothing collected here ends up as a
+ *  gemini login inside the image (claude has the oauth token / mount, gpt the imported
+ *  codex auth). The API transport never enters the container — the core holds the key and
+ *  calls out over HTTPS — so `gemini:api` is fine there, and blocking it left Gemini
+ *  unusable on every VM setup (CRL-80). Mirror of `src/agent/backend-compat.ts`. */
+export function dockerBlocked(provider: Provider, transport: WizardState['transport']): boolean {
+  return provider === 'gemini' && transport === 'cli';
 }
 
 /** Providers with a working API (BYOK) transport. All three run the shared agentic loop
@@ -260,9 +263,9 @@ export function firstApiProvider(): Provider {
   return PROVIDERS.find((p) => apiSupported(p)) ?? 'claude';
 }
 
-/** Whether this provider can execute under the current backend. */
+/** Whether this provider can execute under the current backend + transport. */
 export function runnableInBackend(s: WizardState, provider: Provider): boolean {
-  return !(s.backend === 'docker' && dockerBlocked(provider));
+  return !(s.backend === 'docker' && dockerBlocked(provider, s.transport));
 }
 
 /** A stored or freshly-entered credential exists for this provider. */
