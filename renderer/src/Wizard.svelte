@@ -33,7 +33,9 @@
     secretsFor,
     serviceFor,
     slotComplaint,
+    type StageAgent,
     type TrackerKind,
+    type Transport,
     unrunnableAssigned,
     validateStep,
     type WizardState,
@@ -147,8 +149,10 @@
 
   // ── Fallback agents (failover order) ──────────────────────────────────────
   function addFallback() {
-    // Default a new fallback to a provider valid for the current backend.
-    s.fallbacks = [...s.fallbacks, newFallback(s.backend === 'docker' ? 'claude' : 'gemini')];
+    // Default a new fallback to a provider valid for the current backend, on the same
+    // transport the primary runs — a fallback added without a thought behaves the way it
+    // did before entries could differ (CRL-94).
+    s.fallbacks = [...s.fallbacks, newFallback(s.backend === 'docker' ? 'claude' : 'gemini', s.transport)];
   }
   function removeFallback(i: number) {
     s.fallbacks = s.fallbacks.filter((_, j) => j !== i);
@@ -166,6 +170,25 @@
     f.planningModel = d.planning;
     f.implementationModel = d.implementation;
     f.reviewModel = d.review;
+  }
+
+  /**
+   * Switch one entry (a fallback or a stage) between CLI and API.
+   *
+   * The models go back to that provider's defaults. The two transports name models
+   * differently — CLI takes version-agnostic aliases (`opus`), the API wants a concrete id
+   * — so a value carried across the switch is one the other side does not accept
+   * (CRL-81). Resetting says so by doing it rather than leaving a stale name in the box.
+   */
+  function setEntryTransport(entry: FallbackEntry | StageAgent, transport: Transport) {
+    entry.transport = transport;
+    const d = defaultModels(entry.provider);
+    if ('model' in entry) entry.model = d.planning;
+    else {
+      entry.planningModel = d.planning;
+      entry.implementationModel = d.implementation;
+      entry.reviewModel = d.review;
+    }
   }
 
   // Non-sequential: jump to any step freely; validation is per-item (sidebar ✓) and
@@ -197,7 +220,9 @@
   ] as const;
   const providerName = (p: Provider) => providers.find((x) => x.id === p)?.name ?? p;
   // A provider may be assigned to a role only if it has a usable auth path.
-  const isConfigured = (p: Provider) => configured(s, p, secretSaved);
+  /** Configured *for the transport that entry runs on*. The account cards ask about the
+   *  primary; a fallback or a stage asks about its own (CRL-94). */
+  const isConfigured = (p: Provider, transport: Transport = s.transport) => configured(s, p, secretSaved, transport);
 
   function setStageProvider(stage: (typeof STAGES)[number]['key'], p: Provider) {
     s.stages[stage].provider = p;
@@ -607,18 +632,21 @@
         </div>
       {:else}
         {#each STAGES as st}
+          {@const a = s.stages[st.key]}
           <div class="stage-row">
             <span class="stage-name">{t(st.label)}</span>
-            <select value={s.stages[st.key].provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as Provider)}>
-              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
+            <select value={a.provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as Provider)}>
+              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id, a.transport)}
+                  >{p.name}{isConfigured(p.id, a.transport) ? '' : ` · ${t('account.unset')}`}</option
+                >{/each}
             </select>
-            <ModelPicker
-              bind:value={s.stages[st.key].model}
-              provider={s.stages[st.key].provider}
-              transport={s.transport}
-              id={`stage-${st.key}`}
-            />
+            <select value={a.transport} onchange={(e) => setEntryTransport(a, e.currentTarget.value as Transport)}>
+              <option value="cli">{t('transport.cli')}</option>
+              <option value="api">{t('transport.api')}</option>
+            </select>
+            <ModelPicker bind:value={a.model} provider={a.provider} transport={a.transport} id={`stage-${st.key}`} />
           </div>
+          {#if !runnableInBackend(s, a.provider, a.transport)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
         {/each}
       {/if}
 
@@ -626,45 +654,53 @@
         <p class="run-warn">⚠ {t('assign.runWarn').replace('{p}', unrunnableAssigned(s).map(providerName).join(', '))}</p>
       {/if}
 
-      {#if s.transport === 'cli'}
-        <!-- ── 4 · fallbacks ── -->
-        <div class="sec-head"><span class="sec-no">4</span> {t('agent.fallbackLabel')}</div>
-        <p class="hint">{t('agent.fallbackHint')}</p>
-        {#each s.fallbacks as f, i (i)}
-          <div class="repo-card">
-            <div class="repo-head">
-              <span class="repo-num">#{i + 2} · {providerName(f.provider)}</span>
-              <div class="reorder">
-                <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
-                <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
-                <button class="ghost-x" onclick={() => removeFallback(i)} title={t('repo.remove')}>✕</button>
-              </div>
+      <!-- ── 4 · fallbacks ──
+           No longer gated on the primary being `cli`. That gate meant an API-first setup
+           could not have failover at all, and it was the same mistake as the transport
+           itself: one global answer deciding something that belongs to each entry
+           (CRL-94). -->
+      <div class="sec-head"><span class="sec-no">4</span> {t('agent.fallbackLabel')}</div>
+      <p class="hint">{t('agent.fallbackHint')}</p>
+      {#each s.fallbacks as f, i (i)}
+        <div class="repo-card">
+          <div class="repo-head">
+            <span class="repo-num">#{i + 2} · {providerName(f.provider)}</span>
+            <div class="reorder">
+              <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
+              <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
+              <button class="ghost-x" onclick={() => removeFallback(i)} title={t('repo.remove')}>✕</button>
             </div>
-            <div class="stage-row">
-              <span class="stage-name">{t('assign.agent')}</span>
-              <select value={f.provider} onchange={(e) => setFallbackProvider(f, e.currentTarget.value as Provider)}>
-                {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
-              </select>
-            </div>
-            <div class="three">
-              <label class="field"
-                ><span>{t('field.planningModel')}</span>
-                <ModelPicker bind:value={f.planningModel} provider={f.provider} transport={s.transport} id={`fb${i}-plan`} /></label
-              >
-              <label class="field"
-                ><span>{t('field.implModel')}</span>
-                <ModelPicker bind:value={f.implementationModel} provider={f.provider} transport={s.transport} id={`fb${i}-impl`} /></label
-              >
-              <label class="field"
-                ><span>{t('field.reviewModel')}</span>
-                <ModelPicker bind:value={f.reviewModel} provider={f.provider} transport={s.transport} id={`fb${i}-review`} /></label
-              >
-            </div>
-            {#if !runnableInBackend(s, f.provider)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
           </div>
-        {/each}
-        <button class="add-repo" onclick={addFallback}>{t('agent.fallbackAdd')}</button>
-      {/if}
+          <div class="stage-row">
+            <span class="stage-name">{t('assign.agent')}</span>
+            <select value={f.provider} onchange={(e) => setFallbackProvider(f, e.currentTarget.value as Provider)}>
+              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id, f.transport)}
+                  >{p.name}{isConfigured(p.id, f.transport) ? '' : ` · ${t('account.unset')}`}</option
+                >{/each}
+            </select>
+            <select value={f.transport} onchange={(e) => setEntryTransport(f, e.currentTarget.value as Transport)}>
+              <option value="cli">{t('transport.cli')}</option>
+              <option value="api">{t('transport.api')}</option>
+            </select>
+          </div>
+          <div class="three">
+            <label class="field"
+              ><span>{t('field.planningModel')}</span>
+              <ModelPicker bind:value={f.planningModel} provider={f.provider} transport={f.transport} id={`fb${i}-plan`} /></label
+            >
+            <label class="field"
+              ><span>{t('field.implModel')}</span>
+              <ModelPicker bind:value={f.implementationModel} provider={f.provider} transport={f.transport} id={`fb${i}-impl`} /></label
+            >
+            <label class="field"
+              ><span>{t('field.reviewModel')}</span>
+              <ModelPicker bind:value={f.reviewModel} provider={f.provider} transport={f.transport} id={`fb${i}-review`} /></label
+            >
+          </div>
+          {#if !runnableInBackend(s, f.provider, f.transport)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
+        </div>
+      {/each}
+      <button class="add-repo" onclick={addFallback}>{t('agent.fallbackAdd')}</button>
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
       <p class="subtitle">{t('repo.multiHint')}</p>
