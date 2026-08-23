@@ -1,6 +1,6 @@
 # 작업계획서 — SDD 도입 (Spec-Driven Orchestration)
 
-> 작성일: 2026-08-03
+> 작성일: 2026-08-03 · 개정: 2026-08-24 (코드 대조 — §5 T2, §9, §13)
 > 목표: **"SDD 개념을 도입한 AI 오케스트레이션"으로 corral을 대외 홍보할 수 있는 상태**로 만든다.
 > 성격: 계획서(코드 없음). 확정/미결 구분 표기.
 > 관련: `docs/direction-injection-plan.md`(선례 형식)
@@ -70,7 +70,7 @@ SDD 자체는 차별점이 아니다. **SDD를 어디에 놓았는가**가 차�
 | # | 작업 | 대상 파일 | 규모 |
 |---|---|---|---|
 | T1 | 스펙 파일 레이아웃 `.corral/spec/{requirements,design,tasks}.md` | `src/core/paths.ts` | S |
-| T2 | **`wipeOutputs` 예외** — 스펙은 dispatch마다 지워지면 안 됨 | `src/orchestrator.ts` | S |
+| ~~T2~~ | ~~`wipeOutputs` 예외~~ — **불필요.** 아래 확인 | — | — |
 | T3 | 브랜치 A → A1(요구사항)/A2(설계)/A3(태스크) 분할 | `WORKFLOW.md` | M |
 | T4 | `IssuePhase` 추가: `requirements_sent` · `design_sent` · `tasks_sent` | `src/core/types.ts` | S |
 | T5 | `ApprovalKind` 추가: `requirements` · `design` · `tasks` | `src/core/types.ts` | S |
@@ -82,10 +82,24 @@ SDD 자체는 차별점이 아니다. **SDD를 어디에 놓았는가**가 차�
 | T11 | `spec_mode: split \| single` 설정 (§10) | `src/config/schema.ts` | S |
 | T12 | 새 프롬프트 상수(consolidateRequirements 등) | `src/agent/prompt-builder.ts` | S |
 
-**⚠️ T2가 함정이다.** 현재 `dispatch()`는 실행 전 `wipeOutputs(handle)`로 `.corral/` 산출물을
-지운다(그래서 통합 직전 초안을 `plan_draft.md`로 복사하는 코드가 있다 — `orchestrator.ts:733`).
-스펙 3문서는 여러 dispatch에 걸쳐 살아남아야 하므로 **wipe 대상에서 명시적으로 빼야 한다.**
-빠뜨리면 태스크 2번을 구현할 때 `tasks.md`가 사라져 있다.
+**~~T2가 함정이다~~ — 확인해 보니 할 일이 없다 (2026-08-24).** 이 항목은 *"`dispatch()`가
+`.corral/` 산출물을 지운다"* 를 전제로 썼는데, 코드는 디렉터리를 지우지 않는다. 이름 붙인
+파일 셋만 빈 문자열로 덮는다.
+
+```javascript
+// src/orchestrator.ts — wipeOutputs
+writeFile(handle, SCRATCH.pendingPlan, '')
+writeFile(handle, SCRATCH.pendingReview, '')
+writeFile(handle, SCRATCH.reply, '')
+```
+
+지정 목록이지 디렉터리 청소가 아니므로 `.corral/spec/` 아래 파일은 애초에 대상이 아니다.
+`SCRATCH`에는 이미 `staticQa`·`semgrep`·`planDraft`·`planOptions`·`prevReview`가 있고 **전부
+wipe를 안 탄다** — 여러 dispatch에 걸쳐 사는 파일이 이미 다섯이다. 스펙 3문서도 같은 자리에
+놓이면 된다.
+
+(초안을 `plan_draft.md`로 복사하는 코드는 그대로 있다. 통합 dispatch가 `pending_plan.md`를
+비우기 때문이고, 그건 위 셋에 들어 있어서다.)
 
 **T9/T10이 진짜 신규 엔진이다.** 나머지는 기존 구조의 재배치에 가깝다.
 
@@ -128,6 +142,12 @@ P1~P4는 **코드 수정 없이 프롬프트만 바꾸면 된다.** 여기부터
 정적 게이트를 맨 앞에 둔 기존 근거(*"LLM 리뷰어가 합리화로 무마할 수 없는 객관적 사실"*)가
 수용 기준에도 그대로 적용된다.
 
+**이 층이 잡지 않는 것 (2026-08-24 추가).** 수용 기준 대조는 *"무엇이 동작해야 하는가"* 를
+확인한다. 실제 운영에서 반복해 나온 결함 둘은 그 축에 없다 — **주석·설계서가 코드와 어긋난
+채 남는 것**(CRL-57, CRL-62에서 두 번), 그리고 **같은 파일을 연달아 고친 변경들이 서로를 안
+보는 것**(CRL-49 ↔ CRL-60). 둘 다 수용 기준을 전부 충족해도 남는다. SDD가 이것까지 잡는다고
+기대하지 않는다.
+
 > **비범위**: property-based testing 자동 생성(Kiro 기능). 명시적으로 하지 않는다 — §14 참조.
 
 ## 9. ⚠️ 비용 영향 (반드시 먼저 검토할 것)
@@ -142,6 +162,29 @@ P1~P4는 **코드 수정 없이 프롬프트만 바꾸면 된다.** 여기부터
 | **합계** | **7회** | **12회 + 태스크 수** |
 
 태스크 5개면 **7 → 17회, 약 2.4배.** BYOK라 이 비용은 사용자가 직접 부담한다.
+
+표는 `rounds=1` 기준이다. 리뷰 라운드는 설정값(`config/schema.ts`의 `rounds`)이므로 이 값을
+올리면 배수도 같이 커진다 — 라운드는 SDD 전후 모두 붙지만, 늘어난 계획 단계 위에 곱해진다.
+
+### ⚠️ 돈보다 먼저 걸리는 것 — 상한은 운영 AI와 공유한다
+
+**계획서 작성(8/3) 뒤에 생긴 사실이다.** CRL-16(8/16)이 하루 토큰 상한을 개발·운영 **한 통으로**
+합쳤다.
+
+```
+src/core/token-budget.ts   One daily token ceiling, shared by both pillars.
+src/core-host.ts           ops.useBudget(budget)
+```
+
+선착순이고 한쪽이 소진하면 둘 다 멈춘다(D11/D12). 그리고 CRL-49 이후 운영 쪽 큐 트리거는
+**상한이 차면 pull 자체를 멈춘다** — 일감을 안 가져가므로 유실은 없지만, 그동안 파이프라인은
+아무것도 처리하지 않는다.
+
+즉 SDD가 개발 쪽 호출을 2.4배로 늘리면 **그만큼 운영 파이프라인이 조용히 멈추고 큐가 쌓인다.**
+개발자 한 사람이 이슈 몇 건을 돌리는 동안 하루 수천 건짜리 운영 흐름이 서는 그림이다.
+
+경량 모드가 필요한 이유는 "비용이 는다"보다 이쪽이 무겁다. §17 미결 1번(`spec_mode` 기본값)의
+근거도 여기로 옮긴다.
 
 **대응(필수)**: Kiro가 Quick Spec을 만든 이유가 이것이다. corral도 **경량 모드**가 필요하다.
 
@@ -202,13 +245,14 @@ C1~C5 + P6(Bugfix 스펙).
 
 | 리스크 | 완화 |
 |---|---|
-| **비용 2.4배** (§9) | `spec_mode` 경량 모드. split은 옵트인으로 시작 |
+| **개발 AI가 공유 상한을 먹어 운영 AI가 멈춤** (§9) | `spec_mode` 경량 모드. split은 옵트인. 상한을 나눠 쓸지는 별건으로 검토 |
+| **비용 2.4배** (§9) | 같은 완화. `rounds`를 올려 쓰면 배수가 더 커진다 |
 | **게이트 3배 → 승인 피로** | 라벨 기반 자동 모드 선택. 작은 이슈는 single |
 | **AI가 EARS를 제대로 못 씀** | S1에서 먼저 검증. 실패하면 형식 완화(템플릿→가이드) |
 | **tasks 파서가 형식 이탈에 깨짐** | 고정 형식 + 파싱 실패 시 single로 안전 강등 |
 | **Kiro와 비교당함** | 기능 대조 대신 §4 축(무인·BYOK·트래커·멀티레포)으로 대화 이동 |
 | **과장 표기** | §3 표 + C5 릴리스 게이트 |
-| **스펙 wipe 사고** (T2) | S2 착수 즉시 처리. 통합 테스트로 고정 |
+| ~~**스펙 wipe 사고** (T2)~~ | ~~S2 착수 즉시 처리~~ — 해당 없음. §5 T2 참조 |
 
 ## 14. 비범위
 
@@ -243,7 +287,7 @@ C1~C5 + P6(Bugfix 스펙).
 
 | # | 항목 | 비고 |
 |---|---|---|
-| 1 | `spec_mode` 기본값 — `single` vs `split` | 비용(§9) 때문에 `single` 권장 |
+| 1 | `spec_mode` 기본값 — `single` vs `split` | **공유 상한(§9)** 때문에 `single` 권장. 비용보다 이쪽이 근거로 무겁다 |
 | 2 | 3게이트를 항상 둘 것인가, 설계 게이트만 생략 가능하게 할 것인가 | Kiro는 Quick Spec으로 전부 생략 |
 | 3 | 구현을 태스크당 1 dispatch로 할 것인가, 묶을 것인가 | 비용 대 관측성 트레이드오프 |
 | 4 | EARS를 강제할 것인가 권장할 것인가 | S1 검증 결과로 결정 |
