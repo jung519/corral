@@ -86,25 +86,21 @@ export const ScheduleTriggerSchema = z.object({
 /**
  * What talking to Pub/Sub needs, and why it is a refinement rather than a required field.
  *
- * `pubsubClient` looks at `PUBSUB_EMULATOR_HOST` *before* it looks at the credential: with
- * the emulator there is no auth at all. So a credential is required by the environment, not
- * by the format — making the field itself mandatory would force someone trying corral out
- * against the emulator to invent one, and that is the first thing anybody does.
+ * Optional, and no longer checked here.
  *
- * Left optional and unchecked, though, a pipeline saved cleanly, loaded cleanly, showed a
- * lit dot on the dashboard and received nothing, forever — the loop logged one line and
- * returned (CRL-46). The check sits on the field rather than the object because a
- * discriminated union cannot hold a refined member, and the field is where the editor wants
- * the message anyway.
+ * There are three ways to reach Pub/Sub and only one of them is a credential: the emulator
+ * needs none, and a core on a GCE VM has an identity of its own (CRL-95). Whether a machine
+ * has one cannot be known from a definition — and this schema runs in two places, the core
+ * that will do the pulling and the desktop that may be nowhere near it, so a probe here
+ * would answer about the wrong machine.
+ *
+ * It used to be checked, because unchecked it produced the failure CRL-46 was about: a
+ * pipeline that saved cleanly, loaded cleanly, showed a lit dot and received nothing,
+ * forever. That is now answered where it belongs — `pubsubClient` throws with the three
+ * ways named, and the trigger turns it into a `blocked` state carrying that sentence. The
+ * dot is not lit when nothing is listening.
  */
-const PubSubCredentialSchema = CredentialRefSchema.optional().superRefine((credential, ctx) => {
-  if (credential || process.env.PUBSUB_EMULATOR_HOST) return;
-  ctx.addIssue({
-    code: z.ZodIssueCode.custom,
-    message:
-      'talking to Pub/Sub needs a credential (a service-account JSON key) — or set PUBSUB_EMULATOR_HOST to use the emulator',
-  });
-});
+const PubSubCredentialSchema = CredentialRefSchema.optional();
 
 export const PubSubTriggerSchema = z.object({
   kind: z.literal('pubsub'),

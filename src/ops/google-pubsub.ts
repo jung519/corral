@@ -10,7 +10,12 @@
  */
 import { fetchJson } from '../core/fetch-retry.js';
 import type { CredentialRef, CredentialStore } from '../credentials/types.js';
-import { GoogleTokenSource, parseServiceAccountKey } from './trigger/google-auth.js';
+import {
+  GoogleTokenSource,
+  machineTokenSource,
+  parseServiceAccountKey,
+  type TokenSource,
+} from './trigger/google-auth.js';
 
 export const PUBSUB_SCOPE = 'https://www.googleapis.com/auth/pubsub';
 const PRODUCTION_BASE = 'https://pubsub.googleapis.com';
@@ -29,7 +34,7 @@ export interface OutgoingMessage {
 export class PubSubClient {
   constructor(
     private readonly base: string,
-    private readonly tokens?: GoogleTokenSource,
+    private readonly tokens?: TokenSource,
   ) {}
 
   private async post<T>(resource: string, action: string, body: unknown): Promise<T> {
@@ -66,8 +71,19 @@ export class PubSubClient {
 /**
  * A client for whatever Pub/Sub this core should talk to.
  *
- * `PUBSUB_EMULATOR_HOST` is the emulator's entire contract: that variable set, plain HTTP,
- * no auth. Same code path otherwise — what runs locally is what runs in production.
+ * Three ways in, in the order they are looked for.
+ *
+ *   1. `PUBSUB_EMULATOR_HOST` — the emulator's entire contract: that variable set, plain
+ *      HTTP, no auth. Same code path otherwise, so what runs locally is what runs live.
+ *   2. A named credential — a service-account key from the store. First because it is
+ *      explicit: a core on a VM that is told to use a particular account should, and that
+ *      is how a desktop reaches a project the machine it sits on has nothing to do with.
+ *   3. The machine's own identity. A core on a GCE VM already is somebody; asking it to
+ *      mint a key for itself is asking for a long-lived secret nobody needed (CRL-95).
+ *
+ * Nothing left to try is an error here, and the trigger turns it into a `blocked` state
+ * with this sentence attached — which is the answer to the failure CRL-46 was about: a
+ * pipeline that looked subscribed and received nothing, forever.
  */
 export async function pubsubClient(
   credential: CredentialRef | undefined,
@@ -79,11 +95,16 @@ export async function pubsubClient(
     return new PubSubClient(emulator.startsWith('http') ? emulator : `http://${emulator}`);
   }
 
-  if (!credential || !credentials) {
-    throw new Error('talking to Pub/Sub needs a credential (a service-account JSON key)');
+  if (credential && credentials) {
+    const raw = await credentials.get(credential);
+    if (!raw) throw new Error(`no secret stored for ${credential.service}:${credential.account}`);
+    return new PubSubClient(PRODUCTION_BASE, new GoogleTokenSource(parseServiceAccountKey(raw), PUBSUB_SCOPE, now));
   }
-  const raw = await credentials.get(credential);
-  if (!raw) throw new Error(`no secret stored for ${credential.service}:${credential.account}`);
 
-  return new PubSubClient(PRODUCTION_BASE, new GoogleTokenSource(parseServiceAccountKey(raw), PUBSUB_SCOPE, now));
+  const machine = await machineTokenSource(now);
+  if (machine) return new PubSubClient(PRODUCTION_BASE, machine);
+
+  throw new Error(
+    'talking to Pub/Sub needs either a credential (a service-account JSON key) or a machine with an identity of its own (a GCE VM) — this is neither',
+  );
 }
