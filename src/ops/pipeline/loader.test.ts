@@ -389,26 +389,20 @@ agent:
 output: { kind: none }
 `;
 
-    it('is refused, and says what is missing', async () => {
-      // It used to load, appear in `running()`, and light the dashboard — while the loop
-      // had already stopped on `talking to Pub/Sub needs a credential` (CRL-46).
+    it('loads with no credential — the machine it runs on may be somebody', async () => {
+      // This used to be refused here (CRL-46: a pipeline that looked subscribed and
+      // received nothing). It cannot be any more: a core on a GCE VM reaches Pub/Sub with
+      // no credential at all, and whether a machine has an identity is not knowable from a
+      // definition — least of all by a desktop saving one for a core somewhere else
+      // (CRL-95).
+      //
+      // The protection moved rather than went away. `pubsubClient` throws with all three
+      // ways named, and the trigger turns that into `blocked` carrying the sentence — see
+      // google-pubsub.test.ts and pubsub.test.ts.
       delete process.env.PUBSUB_EMULATOR_HOST;
+      write('queue.yaml', queuePipeline);
 
-      const err = await load(queuePipeline);
-
-      expect(err.issues).toContainEqual(
-        expect.objectContaining({ path: 'trigger.credential', message: expect.stringContaining('needs a credential') }),
-      );
-    });
-
-    it('names the emulator as the other way out', async () => {
-      delete process.env.PUBSUB_EMULATOR_HOST;
-
-      const err = await load(queuePipeline);
-
-      // Two ways to proceed, and the message has to carry both — the second one is how
-      // anybody tries corral out for the first time.
-      expect(err.issues[0]?.message).toContain('PUBSUB_EMULATOR_HOST');
+      await expect(loadPipelines(dir)).resolves.toHaveLength(1);
     });
 
     it('loads with no credential at all when the emulator is set', async () => {
