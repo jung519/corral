@@ -72,11 +72,13 @@ const api = {
   /** Detect a provider's official agent CLI (claude/gemini/codex) — install check. */
   detectCli: (provider: string): Promise<{ installed: boolean; version?: string }> =>
     ipcRenderer.invoke('cli:detect', provider),
-  /** Run `claude setup-token` to obtain a subscription OAuth token at save time
-   *  (opens the browser; returns the token or an error/URL tail). */
-  claudeSetupToken: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
-    ipcRenderer.invoke('claude:setup-token'),
-  /** Import the host codex login (~/.codex/auth.json, base64) for docker injection. */
+  /** `claude setup-token`, in three steps: the code only exists after the browser
+   *  sign-in, so one call could never carry it (CRL-83). */
+  claudeTokenStart: (): Promise<{ ok: boolean; url?: string; reason?: string; error?: string }> =>
+    ipcRenderer.invoke('claude:token-start'),
+  claudeTokenCode: (code: string): Promise<{ ok: boolean; token?: string; reason?: string }> =>
+    ipcRenderer.invoke('claude:token-code', code),
+  claudeTokenCancel: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('claude:token-cancel'),
   codexImportAuth: (): Promise<{ ok: boolean; b64?: string; error?: string }> =>
     ipcRenderer.invoke('codex:import-auth'),
   /** Show an OS notification (human action needed). No-op while the window is focused. */

@@ -201,33 +201,99 @@
   // Per-account status line (CLI check result / oauth import result), keyed by provider.
   let acctMsg = $state<Record<string, string>>({});
 
-  // Import an oauth-style credential into a provider's account (claude setup-token /
-  // codex login). Stored to <service>:oauth on save.
-  async function importOauth(p: 'claude' | 'gpt') {
+  // Import codex's existing login (~/.codex/auth.json) into the gpt account. No CLI is
+  // driven here — the file is already on disk — so this one is a single call.
+  async function importOauth(p: 'gpt') {
     if (!window.corral) return;
-    acctMsg[p] = t(p === 'claude' ? 'oauth.setupRunning' : 'codex.importing');
+    acctMsg[p] = t('codex.importing');
     try {
-      let ok = false;
-      let val: string | undefined;
-      let error: string | undefined;
-      if (p === 'claude') {
-        const r = await window.corral.claudeSetupToken();
-        ({ ok, error } = r);
-        val = r.token;
+      const r = await window.corral.codexImportAuth();
+      if (r.ok && r.b64) {
+        s.accounts[p].oauth = r.b64;
+        acctMsg[p] = t('codex.importOk');
       } else {
-        const r = await window.corral.codexImportAuth();
-        ({ ok, error } = r);
-        val = r.b64;
-      }
-      if (ok && val) {
-        s.accounts[p].oauth = val;
-        acctMsg[p] = t(p === 'claude' ? 'oauth.setupOk' : 'codex.importOk');
-      } else {
-        acctMsg[p] = `✗ ${error ?? ''}`.trim();
+        acctMsg[p] = `✗ ${r.error ?? ''}`.trim();
       }
     } catch (e) {
       acctMsg[p] = `✗ ${String(e)}`.trim();
     }
+  }
+
+  /**
+   * Getting Claude's subscription token, the two ways there are.
+   *
+   * **Driven** — corral runs `claude setup-token` under a pty, shows the sign-in URL, and
+   * takes the code from the page. Needs `expect`, which is base-system on macOS and
+   * usually absent elsewhere.
+   *
+   * **By hand** — the user runs the command in a terminal and pastes the token here.
+   * Works everywhere, and is where every failure of the driven route lands: no pty, no
+   * URL, a rejected code, a timeout. The old button had no such landing place — it span
+   * for five minutes and said nothing (CRL-83).
+   */
+  let tokenPhase = $state<'idle' | 'starting' | 'code' | 'submitting' | 'manual'>('idle');
+  let tokenUrl = $state('');
+  let tokenCode = $state('');
+  let tokenPaste = $state('');
+  let tokenNote = $state('');
+
+  function toManual(reason?: string): void {
+    tokenPhase = 'manual';
+    tokenUrl = '';
+    tokenCode = '';
+    tokenNote = reason ? t(`oauth.reason.${reason}`) : '';
+  }
+
+  async function startClaudeToken(): Promise<void> {
+    if (!window.corral) return;
+    tokenPhase = 'starting';
+    tokenNote = '';
+    try {
+      const r = await window.corral.claudeTokenStart();
+      if (r.ok && r.url) {
+        tokenUrl = r.url;
+        tokenPhase = 'code';
+      } else {
+        toManual(r.reason ?? 'unknown');
+      }
+    } catch {
+      toManual('unknown');
+    }
+  }
+
+  async function submitClaudeCode(): Promise<void> {
+    if (!window.corral || !tokenCode.trim()) return;
+    tokenPhase = 'submitting';
+    try {
+      const r = await window.corral.claudeTokenCode(tokenCode.trim());
+      if (r.ok && r.token) {
+        s.accounts.claude.oauth = r.token;
+        tokenPhase = 'idle';
+        tokenCode = '';
+        acctMsg.claude = t('oauth.setupOk');
+      } else {
+        toManual(r.reason ?? 'unknown');
+      }
+    } catch {
+      toManual('unknown');
+    }
+  }
+
+  async function cancelClaudeToken(): Promise<void> {
+    await window.corral?.claudeTokenCancel().catch(() => undefined);
+    tokenPhase = 'idle';
+    tokenUrl = '';
+    tokenCode = '';
+  }
+
+  /** A token pasted from a terminal run — same destination as the driven route. */
+  function useManualToken(): void {
+    const v = tokenPaste.trim();
+    if (!v) return;
+    s.accounts.claude.oauth = v;
+    tokenPaste = '';
+    tokenPhase = 'idle';
+    acctMsg.claude = t('oauth.setupOk');
   }
 
   /**
@@ -387,6 +453,45 @@
   {/if}
 {/snippet}
 
+<!--
+  The subscription-token flow, both routes.
+
+  Nothing here can leave the user waiting: every driven step ends in a token, a named
+  failure, or a cancel, and each failure lands on the manual panel with the reason spelled
+  out. The panel is a peer of the button, not a punishment for its failure.
+-->
+{#snippet claudeToken()}
+  {#if tokenPhase === 'starting'}
+    <p class="helper">{t('oauth.starting')}</p>
+    <Button onclick={cancelClaudeToken}>{t('editor.cancel')}</Button>
+  {:else if tokenPhase === 'code' || tokenPhase === 'submitting'}
+    <div class="tokbox">
+      <p class="helper">{t('oauth.codeHint')}</p>
+      <!-- Shown because the CLI's own browser launch can miss (a headless session, a
+           default browser that never opened) and then the URL is the only way through. -->
+      <p class="mono url">{tokenUrl}</p>
+      <div class="row">
+        <input bind:value={tokenCode} spellcheck="false" placeholder={t('oauth.codePlaceholder')} />
+        <Button class="primary" onclick={submitClaudeCode} disabled={tokenPhase === 'submitting' || !tokenCode.trim()}>
+          {t('oauth.codeSubmit')}
+        </Button>
+        <Button onclick={cancelClaudeToken}>{t('editor.cancel')}</Button>
+      </div>
+    </div>
+  {:else if tokenPhase === 'manual'}
+    <div class="tokbox">
+      {#if tokenNote}<p class="helper warn-text">{tokenNote}</p>{/if}
+      <p class="helper">{t('oauth.manualHint')}</p>
+      <p class="mono cmd">claude setup-token</p>
+      <div class="row">
+        <input type="password" bind:value={tokenPaste} spellcheck="false" placeholder="sk-ant-oat…" />
+        <Button class="primary" onclick={useManualToken} disabled={!tokenPaste.trim()}>{t('oauth.manualSave')}</Button>
+        <Button onclick={() => (tokenPhase = 'idle')}>{t('editor.cancel')}</Button>
+      </div>
+    </div>
+  {/if}
+{/snippet}
+
 <div class="wizard" class:embedded>
   {#if !embedded}
   <aside>
@@ -475,9 +580,17 @@
                      that can only ever say "not found, install it" about a machine nothing
                      runs on is worse than no button (CRL-78). -->
                 {#if s.backend !== 'docker'}<Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>{/if}
-                {#if p.id === 'claude'}<Button onclick={() => importOauth('claude')}>{t('oauth.setupBtn')}</Button>{/if}
+                {#if p.id === 'claude'}
+                  <Button onclick={startClaudeToken} disabled={tokenPhase !== 'idle' && tokenPhase !== 'manual'}>
+                    {t('oauth.setupBtn')}
+                  </Button>
+                  <!-- Always reachable, not only after a failure: someone who knows the
+                       command should not have to fail their way to it. -->
+                  <Button onclick={() => toManual()}>{t('oauth.manualBtn')}</Button>
+                {/if}
                 {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
               </div>
+              {#if p.id === 'claude'}{@render claudeToken()}{/if}
             {/if}
             {#if apiUnsupported}
               <p class="helper warn-text">{t('account.apiNoHint')}</p>
@@ -1176,6 +1289,44 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+  /* The token flow's panel. Inside a provider card, so it stays narrow — the URL wraps
+     rather than widening the row. */
+  .tokbox {
+    margin-top: 8px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+  /* Inside a provider card, which is a third of the row wide. The input takes its own
+     line and the buttons share the next one — side by side they were squeezed until their
+     labels broke one character per line. */
+  .tokbox .row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    align-items: center;
+  }
+  .tokbox .row input {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .mono {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    margin: 0 0 8px;
+    word-break: break-all;
+    user-select: text;
+  }
+  .url {
+    color: var(--accent);
+  }
+  .cmd {
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 6px 8px;
   }
   .tag {
     font-size: 11px;
