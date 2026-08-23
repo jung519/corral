@@ -268,6 +268,64 @@ export function runnableInBackend(s: WizardState, provider: Provider): boolean {
   return !(s.backend === 'docker' && dockerBlocked(provider, s.transport));
 }
 
+/**
+ * The second credential slot, when a provider has one.
+ *
+ * Every provider stores an API key at `<service>:default`. Two of them also have a
+ * *subscription* credential at `<service>:oauth`, and it is a different kind of thing:
+ * claude's is a token the CLI prints (`claude setup-token`) and a person pastes; gpt's is
+ * codex's own `auth.json`, imported wholesale rather than typed. Gemini has no second
+ * slot, so its card stays one field.
+ *
+ * The card has to know this, because a provider with two slots and one visible field is
+ * what made the screen unusable — the visible field was the API key, and a subscription
+ * token typed into it saved fine and then failed at the first agent turn (CRL-85).
+ */
+export function oauthSlot(p: Provider): 'subscription' | 'codex' | null {
+  if (p === 'claude') return 'subscription';
+  if (p === 'gpt') return 'codex';
+  return null;
+}
+
+/**
+ * Which of the two slots the configured run will actually read.
+ *
+ * Read off the runtime rather than guessed: the API transport sends the key as
+ * `x-api-key` and never looks at the OAuth slot (`claude-api.ts`), while the CLI transport
+ * prefers the OAuth token when there is one and falls back to the key (`claude-cli.ts`,
+ * resolved in `bootstrap.ts`). Marking the live slot on the card is the point — two
+ * password fields with nothing to tell them apart is the problem being fixed.
+ */
+export function activeSlot(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): 'key' | 'oauth' {
+  if (s.transport === 'api' || !oauthSlot(p)) return 'key';
+  const svc = serviceFor(p);
+  return !!s.accounts[p].oauth.trim() || isSaved(svc, 'oauth') ? 'oauth' : 'key';
+}
+
+/** What is wrong with a value, when it is decidable from the value alone. */
+export type SlotComplaint = 'oauthInKey' | 'keyInOauth' | 'oauthShape';
+
+/**
+ * A value that plainly belongs in the other slot, or in neither.
+ *
+ * Only claude has two fields a person types into, and its two credentials are told apart
+ * by prefix: `sk-ant-api…` is a console key, `sk-ant-oat…` is a subscription token. That
+ * makes both directions of the mix-up decidable before saving, and it makes a third case
+ * decidable too — a token that starts with neither, which is what a truncated paste looks
+ * like. One of those (92 characters, no prefix) authenticated nowhere and cost a 43-minute
+ * container build before anything said so.
+ *
+ * Silent whenever the answer is not certain: this warns, it does not block, and a wrong
+ * warning on a format that later changes is worse than no warning.
+ */
+export function slotComplaint(p: Provider, kind: 'key' | 'oauth', value: string): SlotComplaint | null {
+  const v = value.trim();
+  if (!v || p !== 'claude') return null;
+  if (kind === 'key') return v.startsWith('sk-ant-oat') ? 'oauthInKey' : null;
+  if (v.startsWith('sk-ant-api')) return 'keyInOauth';
+  return v.startsWith('sk-ant-oat') ? null : 'oauthShape';
+}
+
 /** A stored or freshly-entered credential exists for this provider. */
 export function hasCred(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): boolean {
   const a = s.accounts[p];
