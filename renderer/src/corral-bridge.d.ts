@@ -48,8 +48,12 @@ declare global {
       };
       detectDocker(): Promise<{ available: boolean; version?: string }>;
       detectCli(provider: string): Promise<{ installed: boolean; version?: string }>;
+      clipboard: {
+        write(text: string): Promise<{ ok: boolean }>;
+        read(): Promise<{ ok: boolean; text: string }>;
+      };
       claudeTokenStart(): Promise<{ ok: boolean; url?: string; reason?: string; error?: string }>;
-      claudeTokenCode(code: string): Promise<{ ok: boolean; token?: string; reason?: string }>;
+      claudeTokenCode(code: string): Promise<{ ok: boolean; token?: string; reason?: string; error?: string }>;
       claudeTokenCancel(): Promise<{ ok: boolean }>;
       codexImportAuth(): Promise<{ ok: boolean; b64?: string; error?: string }>;
       notify(title: string, body: string): Promise<void>;
