@@ -142,7 +142,10 @@ function registerIpc(): void {
   // Login capture stays on THIS machine in both modes — it opens a browser, and a VM has
   // none. The token it returns is saved through `secret:set`, so it still lands on the core.
   ipcMain.handle('claude:token-start', () => startClaudeSetupToken());
+  ipcMain.handle('claude:token-wait', () => awaitClaudeToken());
   ipcMain.handle('claude:token-code', (_e, code: string) => submitClaudeCode(code));
+  // A window closed mid-flow must not leave a CLI attached to a pty nobody reads.
+  app.on('will-quit', endSession);
   ipcMain.handle('claude:token-cancel', () => {
     endSession();
     return { ok: true };
@@ -205,21 +208,38 @@ type TokenStep = { ok: true; url?: string; token?: string } | { ok: false; reaso
 
 /** Nothing here ever waits forever. Sign-in is slow, a rejected code is not. */
 const URL_WAIT_MS = 20_000;
-const TOKEN_WAIT_MS = 60_000;
+/** Signing in is a human at a browser — slow. Long, but not forever: it ends, and the end
+ *  lands on the manual route rather than on a spinner. */
+const SIGN_IN_WAIT_MS = 8 * 60_000;
 
 let session: { child: ChildProcess; out: string } | undefined;
 
 function endSession(): void {
   const s = session;
   session = undefined;
-  if (!s) return;
+  const pid = s?.child.pid;
+  if (!s || !pid) return;
+
   // Negative pid = the whole group. `expect` is the child; `claude` is *its* child, and
   // killing only the parent is what left a stray CLI behind before.
-  try {
-    if (s.child.pid) process.kill(-s.child.pid, 'SIGTERM');
-  } catch {
-    s.child.kill('SIGTERM');
-  }
+  const signal = (sig: NodeJS.Signals): void => {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+      try {
+        s.child.kill(sig);
+      } catch {
+        /* already gone */
+      }
+    }
+  };
+
+  signal('SIGTERM');
+  // `expect` ignores SIGTERM — measured, not assumed: the polite signal left it running and
+  // holding the pty open. So escalate. A second is long enough for a process that does
+  // listen, and short enough that nobody notices.
+  const kill = setTimeout(() => signal('SIGKILL'), 1_000);
+  s.child.once('close', () => clearTimeout(kill));
 }
 
 /** Watch the CLI's screen until `read` finds something, the process dies, or time runs out. */
@@ -283,14 +303,23 @@ async function startClaudeSetupToken(): Promise<TokenStep> {
   return { ok: true, url: found };
 }
 
-/** Hand the code from the sign-in page to the waiting CLI, and read back the token. */
-async function submitClaudeCode(code: string): Promise<TokenStep> {
+/**
+ * Wait for the outcome, however it arrives.
+ *
+ * The CLI's own prompt says "Paste code here **if prompted**" — so a sign-in can finish
+ * without a code, and then the token appears while the screen is still showing the box
+ * asking for one. Watching only *after* a code was submitted left that case sitting there
+ * with nothing said either way, which is the same "am I stuck?" the old bug caused.
+ *
+ * So one watcher, started as soon as the URL is out, resolving on whichever comes first:
+ * the token, a rejection, or the end of patience. `submitCode` only types into the pty.
+ */
+async function awaitClaudeToken(): Promise<TokenStep> {
   if (!session) return { ok: false, reason: 'gone' };
-  session.child.stdin?.write(`${code.trim()}\n`);
-  const found = await watch(TOKEN_WAIT_MS, (out) => (findToken(out) ?? (invalidCode(out) ? 'rejected' : null)));
+  const found = await watch(SIGN_IN_WAIT_MS, (out) => findToken(out) ?? (invalidCode(out) ? 'rejected' : null));
   if (found === 'rejected') {
-    // Recoverable in the CLI, but only by pressing Enter into a screen we would then have
-    // to keep reading. Ending here and starting over is the honest shape.
+    // The CLI offers a retry, but only into a screen we would have to keep reading. Ending
+    // here and starting over is the honest shape.
     endSession();
     return { ok: false, reason: 'invalid-code' };
   }
@@ -301,6 +330,14 @@ async function submitClaudeCode(code: string): Promise<TokenStep> {
   }
   endSession();
   return { ok: true, token: found };
+}
+
+/** Type the code from the sign-in page into the waiting CLI. The outcome comes back
+ *  through `awaitClaudeToken`, which has been watching since the URL appeared. */
+function submitClaudeCode(code: string): { ok: boolean; reason?: string } {
+  if (!session) return { ok: false, reason: 'gone' };
+  session.child.stdin?.write(`${code.trim()}\n`);
+  return { ok: true };
 }
 
 // App name (menu bar, About, dock tooltip).

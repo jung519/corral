@@ -250,22 +250,28 @@
     tokenNote = '';
     try {
       const r = await window.corral.claudeTokenStart();
-      if (r.ok && r.url) {
-        tokenUrl = r.url;
-        tokenPhase = 'code';
-      } else {
+      if (!r.ok || !r.url) {
         toManual(r.reason ?? 'unknown');
+        return;
       }
+      tokenUrl = r.url;
+      tokenPhase = 'code';
+      // Start listening now, not when a code is submitted. The CLI's prompt says "if
+      // prompted" — a sign-in can finish on its own, and then the token is already there
+      // while this screen is still asking for a code (CRL-83).
+      void finishClaudeToken();
     } catch {
       toManual('unknown');
     }
   }
 
-  async function submitClaudeCode(): Promise<void> {
-    if (!window.corral || !tokenCode.trim()) return;
-    tokenPhase = 'submitting';
+  /** The one outcome, whether it came from the sign-in alone or from a pasted code. */
+  async function finishClaudeToken(): Promise<void> {
+    if (!window.corral) return;
     try {
-      const r = await window.corral.claudeTokenCode(tokenCode.trim());
+      const r = await window.corral.claudeTokenWait();
+      // A cancel already reset the panel; a late answer must not reopen it.
+      if (tokenPhase !== 'code' && tokenPhase !== 'submitting') return;
       if (r.ok && r.token) {
         s.accounts.claude.oauth = r.token;
         tokenPhase = 'idle';
@@ -275,8 +281,16 @@
         toManual(r.reason ?? 'unknown');
       }
     } catch {
-      toManual('unknown');
+      if (tokenPhase === 'code' || tokenPhase === 'submitting') toManual('unknown');
     }
+  }
+
+  /** Type the code in. The answer arrives through the watcher above. */
+  async function submitClaudeCode(): Promise<void> {
+    if (!window.corral || !tokenCode.trim()) return;
+    tokenPhase = 'submitting';
+    const r = await window.corral.claudeTokenCode(tokenCode.trim()).catch(() => ({ ok: false, reason: 'unknown' }));
+    if (!r.ok) toManual(r.reason ?? 'unknown');
   }
 
   async function cancelClaudeToken(): Promise<void> {
@@ -466,10 +480,11 @@
     <Button onclick={cancelClaudeToken}>{t('editor.cancel')}</Button>
   {:else if tokenPhase === 'code' || tokenPhase === 'submitting'}
     <div class="tokbox">
+      <!-- What is being waited for, said out loud. Neither this screen nor the CLI can
+           know whether the browser sign-in worked until it produces something, so the one
+           honest thing to show is which step the user is on. -->
+      <p class="step">{t(tokenPhase === 'submitting' ? 'oauth.checking' : 'oauth.waiting')}</p>
       <p class="helper">{t('oauth.codeHint')}</p>
-      <!-- Shown because the CLI's own browser launch can miss (a headless session, a
-           default browser that never opened) and then the URL is the only way through. -->
-      <p class="mono url">{tokenUrl}</p>
       <div class="row">
         <input bind:value={tokenCode} spellcheck="false" placeholder={t('oauth.codePlaceholder')} />
         <Button class="primary" onclick={submitClaudeCode} disabled={tokenPhase === 'submitting' || !tokenCode.trim()}>
@@ -477,6 +492,12 @@
         </Button>
         <Button onclick={cancelClaudeToken}>{t('editor.cancel')}</Button>
       </div>
+      <!-- Behind a summary: needed only when the CLI's own browser launch missed, and as a
+           block of URL it otherwise dominates a card this narrow. -->
+      <details>
+        <summary>{t('oauth.noBrowser')}</summary>
+        <p class="mono url">{tokenUrl}</p>
+      </details>
     </div>
   {:else if tokenPhase === 'manual'}
     <div class="tokbox">
@@ -1320,6 +1341,19 @@
   }
   .url {
     color: var(--accent);
+    margin-top: 6px;
+  }
+  /* The current step: the one line that says whether anything is happening. */
+  .step {
+    margin: 0 0 6px;
+    font-size: 12px;
+    color: var(--text);
+  }
+  .tokbox summary {
+    font-size: 12px;
+    color: var(--text-dim);
+    cursor: pointer;
+    margin-top: 8px;
   }
   .cmd {
     color: var(--text);

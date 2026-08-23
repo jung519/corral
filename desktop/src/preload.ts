@@ -76,7 +76,11 @@ const api = {
    *  sign-in, so one call could never carry it (CRL-83). */
   claudeTokenStart: (): Promise<{ ok: boolean; url?: string; reason?: string; error?: string }> =>
     ipcRenderer.invoke('claude:token-start'),
-  claudeTokenCode: (code: string): Promise<{ ok: boolean; token?: string; reason?: string }> =>
+  /** Resolves when the flow ends — with the token, or with a named reason. Started as
+   *  soon as the URL is shown, because a sign-in can complete without a code. */
+  claudeTokenWait: (): Promise<{ ok: boolean; token?: string; reason?: string }> =>
+    ipcRenderer.invoke('claude:token-wait'),
+  claudeTokenCode: (code: string): Promise<{ ok: boolean; reason?: string }> =>
     ipcRenderer.invoke('claude:token-code', code),
   claudeTokenCancel: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('claude:token-cancel'),
   codexImportAuth: (): Promise<{ ok: boolean; b64?: string; error?: string }> =>
