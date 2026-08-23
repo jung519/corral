@@ -124,11 +124,37 @@
   let inputUrl = $state('');
   let inputMethod = $state<'GET' | 'POST'>('GET');
 
-  // How the fetch authenticates: a header, like every other tool that calls an API. The
-  // file format also accepts a `credential` reference into the store the wizard uses, but
-  // that is for hand-written pipelines — offering both here would be two ways to do one
-  // thing, and the header is the one people reach for.
+  // Headers for everything that is not authentication — `Accept`, a tenant id, a request
+  // id. Authentication has its own box below, because a secret typed here would be written
+  // into the pipeline file in plain text and this is the only place a user could put one
+  // (CRL-82).
   let inputHeaders = $state<Array<{ name: string; value: string }>>([]);
+
+  /**
+   * How a request authenticates: a named secret in the store, and where it goes on the
+   * wire. The definition carries the *name*; the value goes to the store the wizard
+   * already uses — the OS keychain locally, the core's 0600 file when the core is
+   * elsewhere. `value` is only ever what someone just typed; it is cleared after a save
+   * and never read back out of the store.
+   *
+   * One per block, not one shared: a pipeline that reads from one API and writes to
+   * another authenticates twice, with two different secrets.
+   */
+  interface HttpAuth {
+    service: string;
+    account: string;
+    value: string;
+    saved: boolean;
+    header: string;
+    prefix: string;
+  }
+  const AUTH_HEADER = 'authorization';
+  const AUTH_PREFIX = 'Bearer ';
+  function newAuth(): HttpAuth {
+    return { service: '', account: 'default', value: '', saved: false, header: AUTH_HEADER, prefix: AUTH_PREFIX };
+  }
+  let inputAuth = $state<HttpAuth>(newAuth());
+  let outputAuth = $state<HttpAuth>(newAuth());
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
@@ -243,6 +269,50 @@
   async function refreshPubCredSaved(): Promise<void> {
     pubCredSaved = await secretExists(pubCredService, pubCredAccount);
   }
+
+  /** Read one request's credential + auth placement into editor state. */
+  function loadAuth(request: Record<string, unknown>): HttpAuth {
+    const a = newAuth();
+    const cred = obj(request.credential);
+    if (cred.service) {
+      a.service = String(cred.service);
+      a.account = String(cred.account ?? 'default');
+    }
+    const auth = obj(request.auth);
+    if (auth.header !== undefined) a.header = String(auth.header);
+    if (auth.prefix !== undefined) a.prefix = String(auth.prefix);
+    return a;
+  }
+
+  async function refreshAuthSaved(a: HttpAuth): Promise<void> {
+    a.saved = await secretExists(a.service, a.account);
+  }
+
+  /**
+   * The credential + auth leaves of a request, or nothing.
+   *
+   * `auth` is written only when it differs from the default. Most APIs want
+   * `Authorization: Bearer`, and a file that repeats the default everywhere is a file
+   * where the one line that matters does not stand out.
+   */
+  function authFields(a: HttpAuth): Record<string, unknown> {
+    const out: Record<string, unknown> = {};
+    if (!a.service.trim()) return out;
+    out.credential = { service: a.service.trim(), account: a.account.trim() || 'default' };
+    if (a.header.trim().toLowerCase() !== AUTH_HEADER || a.prefix !== AUTH_PREFIX) {
+      out.auth = { header: a.header.trim() || AUTH_HEADER, prefix: a.prefix };
+    }
+    return out;
+  }
+
+  /** A secret typed into the auth box goes to the store — never into the definition. */
+  async function persistAuth(a: HttpAuth): Promise<void> {
+    if (!hasBridge || !a.service.trim() || !a.value) return;
+    await window.corral!.secret.set(a.service.trim(), a.account.trim() || 'default', a.value);
+    a.value = '';
+    await refreshAuthSaved(a);
+  }
+
   let selectText = $state('');
   let requireText = $state('');
   let inputTimeout = $state(15000);
@@ -360,6 +430,16 @@
   let pubCredAccount = $state('default');
   let pubCredValue = $state('');
   let pubCredSaved = $state(false);
+
+  /** An auth header written by hand wins over the credential (the `??=` in http.ts), and
+   *  does it silently — so say so where both boxes are visible. Declared here because it
+   *  reads both header lists, which are state declared above. */
+  const inputAuthShadowed = $derived(
+    !!inputAuth.service.trim() && inputHeaders.some((h) => h.name.trim().toLowerCase() === inputAuth.header.trim().toLowerCase()),
+  );
+  const outputAuthShadowed = $derived(
+    !!outputAuth.service.trim() && outputHeaders.some((h) => h.name.trim().toLowerCase() === outputAuth.header.trim().toLowerCase()),
+  );
 
   /**
    * What happens to a doubtful answer (D14). `report` is the default because an answer the
@@ -527,6 +607,8 @@
       inputUrl = String(request.url ?? '');
       inputHeaders = headerRows(request.headers);
       inputTimeout = Number(request.timeout_ms ?? 15000);
+      inputAuth = loadAuth(request);
+      void refreshAuthSaved(inputAuth);
     }
 
     const agent = obj(d.agent);
@@ -569,6 +651,8 @@
       outputHeaders = headerRows(request.headers);
       outputBody = formatPairs(request.body);
       outputTimeout = Number(request.timeout_ms ?? 15000);
+      outputAuth = loadAuth(request);
+      void refreshAuthSaved(outputAuth);
     } else if (output.kind === 'pubsub') {
       outputTopic = String(output.topic ?? '');
       outputMessage = formatPairs(output.message);
@@ -592,28 +676,29 @@
   /**
    * What the opened definition keeps that this editor has no field for.
    *
-   * A request can name a credential in the store and say how to put it on the wire, and an
-   * input request can carry a body (a GraphQL query, per D7). The editor offers a header
-   * instead, deliberately — but "not offered" must not mean "deleted", so those leaves go
-   * back out exactly as they came in. `enabled` is the same: a pipeline turned off in its
-   * file must not come back on because someone fixed a typo in its prompt.
+   * An input request can carry a body (a GraphQL query, per D7), which the editor does not
+   * offer — and "not offered" must not mean "deleted", so it goes back out exactly as it
+   * came in. `enabled` is the same: a pipeline turned off in its file must not come back on
+   * because someone fixed a typo in its prompt.
+   *
+   * `credential` and `auth` used to be carried this way too. They are edited here now
+   * (CRL-82), so carrying them would put a stale copy underneath the live one.
    */
   function carriedOver(block: 'input' | 'output'): Record<string, unknown> {
     const request = obj(obj(obj(original)[block]).request);
     const kept: Record<string, unknown> = {};
-    for (const field of ['credential', 'auth', 'body'] as const) {
-      if (request[field] !== undefined) kept[field] = request[field];
-    }
+    if (request.body !== undefined) kept.body = request.body;
     return kept;
   }
 
   function inputRequest(): Record<string, unknown> {
     const request: Record<string, unknown> = {
-      // What the editor does not own comes first, so the four fields it does own win.
+      // What the editor does not own comes first, so the fields it does own win.
       ...carriedOver('input'),
       method: inputMethod,
       url: inputUrl,
       headers: headerMap(inputHeaders),
+      ...authFields(inputAuth),
       timeout_ms: inputTimeout,
     };
     return request;
@@ -688,6 +773,7 @@
       method: outputMethod,
       url: outputUrl,
       headers: headerMap(outputHeaders),
+      ...authFields(outputAuth),
       body: parsePairs(outputBody),
       timeout_ms: outputTimeout,
     };
@@ -741,6 +827,9 @@
         pubCredValue = '';
         await refreshPubCredSaved();
       }
+      // The same split for the HTTP steps: the store gets the secret, the file gets the name.
+      if (inputKind === 'http') await persistAuth(inputAuth);
+      if (outputKind === 'http') await persistAuth(outputAuth);
       // Overwrite only when editing. Creating still refuses to land on an existing key —
       // that check is what stops a new pipeline from replacing one that is running.
       const result = await api.savePipeline(buildDefinition(), !!original);
@@ -785,6 +874,52 @@
         <span>{t('editor.credValue')}{#if pubCredSaved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
         <textarea bind:value={pubCredValue} rows="2" spellcheck="false" placeholder={pubCredSaved ? '••••••••' : t('editor.credPubPlaceholder')}></textarea>
       </label>
+    {/if}
+  </div>
+{/snippet}
+
+<!--
+  How an HTTP step authenticates.
+
+  Same split as the Pub/Sub box above and for the same reason: the **name** goes in the
+  file, the **value** goes to the store. Before this, the only place a user could put an
+  API secret was the header box, which writes it into the pipeline definition in plain
+  text — while the runtime and the schema both say a definition never holds one (CRL-82).
+
+  The placement fields are here because "Bearer in Authorization" is a convention, not a
+  rule; an internal API asking for `X-API-Key` should not send anybody back to the file.
+-->
+{#snippet httpAuth(a: HttpAuth, shadowed: boolean)}
+  <div class="block">
+    <p class="blockTitle">{t('editor.auth')}</p>
+    <p class="hint">{t('editor.authHint')}</p>
+    <div class="row">
+      <label class="field"
+        ><span>{t('editor.credService')}</span>
+        <input bind:value={a.service} spellcheck="false" placeholder="my-api" onblur={() => refreshAuthSaved(a)} /></label
+      >
+      <label class="field narrow"
+        ><span>{t('editor.credAccount')}</span>
+        <input bind:value={a.account} spellcheck="false" placeholder="default" onblur={() => refreshAuthSaved(a)} /></label
+      >
+    </div>
+    {#if a.service.trim()}
+      <label class="field">
+        <span>{t('editor.credValue')}{#if a.saved}<span class="saved">{t('editor.credSaved')}</span>{/if}</span>
+        <input type="password" bind:value={a.value} spellcheck="false" placeholder={a.saved ? '••••••••' : t('editor.authValuePlaceholder')} />
+      </label>
+      <div class="row">
+        <label class="field"
+          ><span>{t('editor.authHeader')}</span>
+          <input bind:value={a.header} spellcheck="false" placeholder="authorization" /></label
+        >
+        <label class="field narrow"
+          ><span>{t('editor.authPrefix')}</span>
+          <input bind:value={a.prefix} spellcheck="false" placeholder="Bearer " /></label
+        >
+      </div>
+      <p class="hint">{t('editor.authPlacementHint')}</p>
+      {#if shadowed}<p class="hint warn">{t('editor.authShadowed')}</p>{/if}
     {/if}
   </div>
 {/snippet}
@@ -944,6 +1079,7 @@
             <button class="plus" onclick={addHeader}>{t('editor.headerAdd')}</button>
             <p class="hint">{t('editor.headersHint')}</p>
           </div>
+          {@render httpAuth(inputAuth, inputAuthShadowed)}
 
         {:else}
           <p class="hint">{t('editor.input.noneHint')}</p>
@@ -1175,8 +1311,9 @@
           </label>
           <label class="field narrow"><span>{t('editor.timeout')}</span><input type="number" bind:value={outputTimeout} min="1" /></label>
 
-          <!-- Same as the fetch. This one writes, so if either side needs a key it is
-               this one. -->
+          <!-- Same as the fetch: headers for everything that is not authentication,
+               and the auth box below for what is. This one writes, so if either side
+               needs a key it is this one. -->
           <div class="block">
             <p class="blockTitle">{t('editor.headers')}</p>
             {#each outputHeaders as header, i}
@@ -1189,6 +1326,7 @@
             <button class="plus" onclick={addOutputHeader}>{t('editor.headerAdd')}</button>
             <p class="hint">{t('editor.headersHint')}</p>
           </div>
+          {@render httpAuth(outputAuth, outputAuthShadowed)}
         {:else if outputKind === 'pubsub'}
           <label class="field"><span>topic</span><input bind:value={outputTopic} spellcheck="false" placeholder="projects/p/topics/results" /></label>
           <label class="field">
@@ -1475,6 +1613,10 @@
     color: var(--text-dim);
     font-size: 12px;
     margin: 0 0 10px;
+  }
+  /* A hint that is a caution — the header shadowing the credential is silent otherwise. */
+  .hint.warn {
+    color: var(--warning);
   }
   .issue {
     color: var(--red, #f85149);
