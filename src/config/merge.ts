@@ -49,9 +49,6 @@ export const UNMODELLED = [
   'agent.max_budget_usd',
   'agent.turn_timeout_ms',
   'agent.allowed_tools',
-  // Written, but only ever as one value: the wizard has a single transport picker, so a
-  // hand-written mix (cli to plan, api to review) collapses to that one on the next save.
-  'agent.stages.*.transport (a per-stage mix)',
   'workspace.root',
   'workspace.docker.image',
   'workspace.docker.auto_build',
