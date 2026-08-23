@@ -66,6 +66,7 @@
   let codeComplaint = $state(false);
 
   function toManual(why: string, httpStatus = ''): void {
+    clearInterval(liveness);
     reason = why;
     status = httpStatus;
     phase = 'manual';
@@ -80,10 +81,30 @@
       if (!r.ok || !r.url) return toManual(r.reason ?? 'unknown');
       url = r.url;
       phase = 'code';
+      watchSession();
     } catch {
       toManual('unknown');
     }
   }
+
+  /**
+   * Is the CLI still there while the user is off signing in?
+   *
+   * Signing in takes minutes, and the session can end underneath it. Discovering that on
+   * submit means the user completed a browser login, copied a code, came back — and only
+   * then learned it was for nothing. Asking every few seconds costs nothing and turns that
+   * into a sentence they see while it still matters (CRL-84).
+   */
+  let liveness: ReturnType<typeof setInterval> | undefined;
+  function watchSession(): void {
+    clearInterval(liveness);
+    liveness = setInterval(async () => {
+      if (phase !== 'code') return;
+      const r = await window.corral?.claudeTokenAlive().catch(() => ({ alive: true }));
+      if (r && !r.alive) toManual('gone');
+    }, 4000);
+  }
+  $effect(() => () => clearInterval(liveness));
 
   async function submit(): Promise<void> {
     codeComplaint = false;
@@ -105,6 +126,7 @@
   }
 
   function finish(value: string): void {
+    clearInterval(liveness);
     token = value;
     phase = 'done';
     ontoken(value);
@@ -119,7 +141,21 @@
     onclose();
   }
 
+  /** Failures a second attempt can fix, as opposed to "this machine cannot do it". */
+  const RETRYABLE = new Set(['gone', 'timeout', 'invalid-code', 'refused', 'partial-code', 'unknown']);
+
+  /** Fresh session, fresh address — the old code is bound to the run that issued it. */
+  async function restart(): Promise<void> {
+    await window.corral?.claudeTokenCancel().catch(() => undefined);
+    reason = '';
+    status = '';
+    token = '';
+    code = '';
+    phase = 'opening';
+  }
+
   async function cancel(): Promise<void> {
+    clearInterval(liveness);
     await window.corral?.claudeTokenCancel().catch(() => undefined);
     onclose();
   }
@@ -189,6 +225,10 @@
         <PasteButton onpaste={(v) => (token = v)} />
       </div>
       <div class="actions">
+        <!-- Retrying is the shorter road for anything that was a timing accident — an
+             expired code, a session that ended while the browser was open. Offered as a
+             button so it is not a paragraph telling someone to press the other button. -->
+        {#if RETRYABLE.has(reason)}<Button onclick={restart}>{t('oauth.restart')}</Button>{/if}
         <Button class="primary" onclick={useManualToken} disabled={!token.trim()}>{t('oauth.manualSave')}</Button>
         <Button onclick={cancel}>{t('editor.cancel')}</Button>
       </div>

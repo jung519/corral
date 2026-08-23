@@ -216,7 +216,10 @@ export function spawnFailureReason(code: string | undefined): 'no-pty' | 'spawn-
  */
 export const EXPECT_SCRIPT = `
 log_user 1
-set timeout 600
+# Half an hour: a human signing in through a browser is slow, and cutting the session
+# short is what made a completed login arrive at a dead process. Not unbounded — a crash
+# that skipped cleanup should not leave this running forever.
+set timeout 1800
 spawn -noecho claude setup-token
 # A wide, tall pty. Ink wraps to the terminal width, and a wrapped token would reach the
 # app in pieces; at 400 columns nothing it prints wraps.

@@ -84,6 +84,7 @@ const api = {
     ipcRenderer.invoke('claude:token-start'),
   claudeTokenCode: (code: string): Promise<{ ok: boolean; token?: string; reason?: string; error?: string }> =>
     ipcRenderer.invoke('claude:token-code', code),
+  claudeTokenAlive: (): Promise<{ alive: boolean }> => ipcRenderer.invoke('claude:token-alive'),
   claudeTokenCancel: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('claude:token-cancel'),
   codexImportAuth: (): Promise<{ ok: boolean; b64?: string; error?: string }> =>
     ipcRenderer.invoke('codex:import-auth'),

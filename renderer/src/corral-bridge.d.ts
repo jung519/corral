@@ -54,6 +54,7 @@ declare global {
       };
       claudeTokenStart(): Promise<{ ok: boolean; url?: string; reason?: string; error?: string }>;
       claudeTokenCode(code: string): Promise<{ ok: boolean; token?: string; reason?: string; error?: string }>;
+      claudeTokenAlive(): Promise<{ alive: boolean }>;
       claudeTokenCancel(): Promise<{ ok: boolean }>;
       codexImportAuth(): Promise<{ ok: boolean; b64?: string; error?: string }>;
       notify(title: string, body: string): Promise<void>;

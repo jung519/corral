@@ -154,6 +154,9 @@ function registerIpc(): void {
   ipcMain.handle('claude:token-code', (_e, code: string) => submitClaudeCode(code));
   // A quit mid-flow must not leave a CLI attached to a pty nobody reads.
   app.on('will-quit', endSession);
+  // Asked while the dialog waits on a browser sign-in. A session that ended in the
+  // meantime should be said out loud there and then, not discovered on submit.
+  ipcMain.handle('claude:token-alive', () => ({ alive: !!session }));
   ipcMain.handle('claude:token-cancel', () => {
     endSession();
     return { ok: true };
@@ -269,7 +272,11 @@ function watch<T>(ms: number, read: (out: string) => T | null): Promise<T | 'tim
       s.out += d.toString();
       check();
     };
-    const onClose = (): void => done('gone');
+    // Look once more before giving up: the answer may have arrived in the same breath as
+    // the exit, and the CLI exits right after printing the token.
+    const onClose = (): void => {
+      if (!check()) done('gone');
+    };
     const timer = setTimeout(() => done('timeout'), ms);
     s.child.stdout?.on('data', onData);
     s.child.on('close', onClose);
@@ -288,6 +295,13 @@ async function startClaudeSetupToken(): Promise<TokenStep> {
   });
   session = { child, out: '' };
   child.stderr?.on('data', (d: Buffer) => session && (session.out += d.toString()));
+  // A child that exits on its own must not leave `session` pointing at a corpse. Without
+  // this, a submitted code was written to a dead pipe and the watcher then waited for a
+  // `close` that had already fired — a full minute of nothing, ending in "unknown"
+  // (CRL-84). Now the next call says plainly that the session is over.
+  child.once('close', () => {
+    if (session?.child === child) session = undefined;
+  });
 
   const spawnFailed = new Promise<TokenStep>((resolve) =>
     child.once('error', (err: NodeJS.ErrnoException) =>
