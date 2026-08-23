@@ -5,7 +5,7 @@
  * config exists it starts the orchestrator child and loads the dashboard. All
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -26,9 +26,10 @@ import {
   failureReason,
   findAuthUrl,
   findToken,
-  invalidCode,
+  oauthError,
   spawnFailureReason,
-  stripAnsi,
+  splitAuthCode,
+  renderText,
 } from './claude-token.js';
 import { clearRemoteToken, readRemote, writeRemote } from './remote-store.js';
 import { decideGate, fetchManifest, type GateDecision } from './update-gate.js';
@@ -141,8 +142,21 @@ function registerIpc(): void {
   ipcMain.handle('cli:detect', (_e, provider: string) => native.detectCli(provider));
   // Login capture stays on THIS machine in both modes — it opens a browser, and a VM has
   // none. The token it returns is saved through `secret:set`, so it still lands on the core.
+  // Clipboard through the main process, not `navigator.clipboard`: the window is loaded
+  // from a `file://` URL, which is not a secure context, so the web API is unavailable.
+  // Every value a user would otherwise select by hand goes through here.
+  ipcMain.handle('clipboard:write', (_e, text: string) => {
+    clipboard.writeText(String(text ?? ''));
+    return { ok: true };
+  });
+  ipcMain.handle('clipboard:read', () => ({ ok: true, text: clipboard.readText() }));
   ipcMain.handle('claude:token-start', () => startClaudeSetupToken());
   ipcMain.handle('claude:token-code', (_e, code: string) => submitClaudeCode(code));
+  // A quit mid-flow must not leave a CLI attached to a pty nobody reads.
+  app.on('will-quit', endSession);
+  // Asked while the dialog waits on a browser sign-in. A session that ended in the
+  // meantime should be said out loud there and then, not discovered on submit.
+  ipcMain.handle('claude:token-alive', () => ({ alive: !!session }));
   ipcMain.handle('claude:token-cancel', () => {
     endSession();
     return { ok: true };
@@ -212,14 +226,29 @@ let session: { child: ChildProcess; out: string } | undefined;
 function endSession(): void {
   const s = session;
   session = undefined;
-  if (!s) return;
+  const pid = s?.child.pid;
+  if (!s || !pid) return;
+
   // Negative pid = the whole group. `expect` is the child; `claude` is *its* child, and
-  // killing only the parent is what left a stray CLI behind before.
-  try {
-    if (s.child.pid) process.kill(-s.child.pid, 'SIGTERM');
-  } catch {
-    s.child.kill('SIGTERM');
-  }
+  // killing only the parent leaves a stray CLI holding the pty.
+  const signal = (sig: NodeJS.Signals): void => {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+      try {
+        s.child.kill(sig);
+      } catch {
+        /* already gone */
+      }
+    }
+  };
+
+  signal('SIGTERM');
+  // `expect` ignores SIGTERM — measured, not assumed: after `kill -TERM` it was still
+  // running, and only `kill -KILL` ended it. So escalate. A second is long enough for a
+  // process that does listen, and short enough that nobody notices.
+  const kill = setTimeout(() => signal('SIGKILL'), 1_000);
+  s.child.once('close', () => clearTimeout(kill));
 }
 
 /** Watch the CLI's screen until `read` finds something, the process dies, or time runs out. */
@@ -243,7 +272,11 @@ function watch<T>(ms: number, read: (out: string) => T | null): Promise<T | 'tim
       s.out += d.toString();
       check();
     };
-    const onClose = (): void => done('gone');
+    // Look once more before giving up: the answer may have arrived in the same breath as
+    // the exit, and the CLI exits right after printing the token.
+    const onClose = (): void => {
+      if (!check()) done('gone');
+    };
     const timer = setTimeout(() => done('timeout'), ms);
     s.child.stdout?.on('data', onData);
     s.child.on('close', onClose);
@@ -262,6 +295,13 @@ async function startClaudeSetupToken(): Promise<TokenStep> {
   });
   session = { child, out: '' };
   child.stderr?.on('data', (d: Buffer) => session && (session.out += d.toString()));
+  // A child that exits on its own must not leave `session` pointing at a corpse. Without
+  // this, a submitted code was written to a dead pipe and the watcher then waited for a
+  // `close` that had already fired — a full minute of nothing, ending in "unknown"
+  // (CRL-84). Now the next call says plainly that the session is over.
+  child.once('close', () => {
+    if (session?.child === child) session = undefined;
+  });
 
   const spawnFailed = new Promise<TokenStep>((resolve) =>
     child.once('error', (err: NodeJS.ErrnoException) =>
@@ -276,7 +316,7 @@ async function startClaudeSetupToken(): Promise<TokenStep> {
     return found;
   }
   if (found === 'timeout' || found === 'gone') {
-    const reason = session && stripAnsi(session.out).trim().length === 0 ? 'no-pty' : found;
+    const reason = session && renderText(session.out).trim().length === 0 ? 'no-pty' : found;
     endSession();
     return { ok: false, reason };
   }
@@ -286,13 +326,31 @@ async function startClaudeSetupToken(): Promise<TokenStep> {
 /** Hand the code from the sign-in page to the waiting CLI, and read back the token. */
 async function submitClaudeCode(code: string): Promise<TokenStep> {
   if (!session) return { ok: false, reason: 'gone' };
-  session.child.stdin?.write(`${code.trim()}\n`);
-  const found = await watch(TOKEN_WAIT_MS, (out) => (findToken(out) ?? (invalidCode(out) ? 'rejected' : null)));
-  if (found === 'rejected') {
+  // The screen checks this too; here it is a guarantee rather than a courtesy — the CLI
+  // would reject it and end the session, costing the user the whole flow again.
+  const split = splitAuthCode(code);
+  if (!split.ok) return { ok: false, reason: 'partial-code' };
+  session.child.stdin?.write(`${split.code}\n`);
+  // Either outcome, whichever the screen shows first. The refusal carries the CLI's own
+  // words — "Invalid code" and "Request failed with status code 400" are different
+  // problems and the user can only tell them apart if we pass the message along.
+  const found = await watch(TOKEN_WAIT_MS, (out) => {
+    const token = findToken(out);
+    if (token) return { kind: 'token' as const, token };
+    const refusal = oauthError(out);
+    return refusal ? { kind: 'refused' as const, refusal } : null;
+  });
+  if (typeof found === 'object' && found.kind === 'refused') {
     // Recoverable in the CLI, but only by pressing Enter into a screen we would then have
     // to keep reading. Ending here and starting over is the honest shape.
     endSession();
-    return { ok: false, reason: 'invalid-code' };
+    // The status, when there was one, is the difference between "you copied half of it"
+    // and "the server would not take it" — different advice, so it travels with the reason.
+    return {
+      ok: false,
+      reason: found.refusal.kind,
+      error: found.refusal.status ? String(found.refusal.status) : undefined,
+    };
   }
   if (found === 'timeout' || found === 'gone') {
     const reason = session ? failureReason(session.out) : 'gone';
@@ -300,7 +358,7 @@ async function submitClaudeCode(code: string): Promise<TokenStep> {
     return { ok: false, reason };
   }
   endSession();
-  return { ok: true, token: found };
+  return { ok: true, token: found.token };
 }
 
 // App name (menu bar, About, dock tooltip).

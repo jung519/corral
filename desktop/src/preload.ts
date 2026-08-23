@@ -72,12 +72,19 @@ const api = {
   /** Detect a provider's official agent CLI (claude/gemini/codex) — install check. */
   detectCli: (provider: string): Promise<{ installed: boolean; version?: string }> =>
     ipcRenderer.invoke('cli:detect', provider),
+  /** The window is a `file://` page — not a secure context — so `navigator.clipboard`
+   *  does not exist here. Anything a user would hand-copy goes through the main process. */
+  clipboard: {
+    write: (text: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('clipboard:write', text),
+    read: (): Promise<{ ok: boolean; text: string }> => ipcRenderer.invoke('clipboard:read'),
+  },
   /** `claude setup-token`, in three steps: the code only exists after the browser
    *  sign-in, so one call could never carry it (CRL-83). */
   claudeTokenStart: (): Promise<{ ok: boolean; url?: string; reason?: string; error?: string }> =>
     ipcRenderer.invoke('claude:token-start'),
-  claudeTokenCode: (code: string): Promise<{ ok: boolean; token?: string; reason?: string }> =>
+  claudeTokenCode: (code: string): Promise<{ ok: boolean; token?: string; reason?: string; error?: string }> =>
     ipcRenderer.invoke('claude:token-code', code),
+  claudeTokenAlive: (): Promise<{ alive: boolean }> => ipcRenderer.invoke('claude:token-alive'),
   claudeTokenCancel: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('claude:token-cancel'),
   codexImportAuth: (): Promise<{ ok: boolean; b64?: string; error?: string }> =>
     ipcRenderer.invoke('codex:import-auth'),

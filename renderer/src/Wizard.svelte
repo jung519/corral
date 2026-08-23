@@ -2,6 +2,9 @@
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
   import ModelPicker from './lib/ModelPicker.svelte';
+  import ClaudeTokenDialog from './ClaudeTokenDialog.svelte';
+  import CopyButton from './lib/CopyButton.svelte';
+  import PasteButton from './lib/PasteButton.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
     apiSupported,
@@ -200,6 +203,8 @@
   // ── Per-account credentials ───────────────────────────────────────────────
   // Per-account status line (CLI check result / oauth import result), keyed by provider.
   let acctMsg = $state<Record<string, string>>({});
+  /** The codex login could not be read — offer the command that creates it. */
+  let codexMissing = $state(false);
 
   // Import codex's existing login (~/.codex/auth.json) into the gpt account. No CLI is
   // driven here — the file is already on disk — so this one is a single call.
@@ -211,8 +216,11 @@
       if (r.ok && r.b64) {
         s.accounts[p].oauth = r.b64;
         acctMsg[p] = t('codex.importOk');
+        codexMissing = false;
       } else {
         acctMsg[p] = `✗ ${r.error ?? ''}`.trim();
+        // Nothing to import means nothing is logged in yet — say what to run.
+        codexMissing = true;
       }
     } catch (e) {
       acctMsg[p] = `✗ ${String(e)}`.trim();
@@ -220,79 +228,17 @@
   }
 
   /**
-   * Getting Claude's subscription token, the two ways there are.
+   * The subscription-token flow lives in its own dialog (`ClaudeTokenDialog`).
    *
-   * **Driven** — corral runs `claude setup-token` under a pty, shows the sign-in URL, and
-   * takes the code from the page. Needs `expect`, which is base-system on macOS and
-   * usually absent elsewhere.
-   *
-   * **By hand** — the user runs the command in a terminal and pastes the token here.
-   * Works everywhere, and is where every failure of the driven route lands: no pty, no
-   * URL, a rejected code, a timeout. The old button had no such landing place — it span
-   * for five minutes and said nothing (CRL-83).
+   * It used to be inline in this card, which is a third of a row wide — too narrow for a
+   * three-step task, and the reason its buttons broke and its URL buried the instruction.
+   * The card keeps one button; the dialog holds the steps and every failure route
+   * (CRL-84).
    */
-  let tokenPhase = $state<'idle' | 'starting' | 'code' | 'submitting' | 'manual'>('idle');
-  let tokenUrl = $state('');
-  let tokenCode = $state('');
-  let tokenPaste = $state('');
-  let tokenNote = $state('');
+  let tokenDialog = $state<'off' | 'auto' | 'manual'>('off');
 
-  function toManual(reason?: string): void {
-    tokenPhase = 'manual';
-    tokenUrl = '';
-    tokenCode = '';
-    tokenNote = reason ? t(`oauth.reason.${reason}`) : '';
-  }
-
-  async function startClaudeToken(): Promise<void> {
-    if (!window.corral) return;
-    tokenPhase = 'starting';
-    tokenNote = '';
-    try {
-      const r = await window.corral.claudeTokenStart();
-      if (r.ok && r.url) {
-        tokenUrl = r.url;
-        tokenPhase = 'code';
-      } else {
-        toManual(r.reason ?? 'unknown');
-      }
-    } catch {
-      toManual('unknown');
-    }
-  }
-
-  async function submitClaudeCode(): Promise<void> {
-    if (!window.corral || !tokenCode.trim()) return;
-    tokenPhase = 'submitting';
-    try {
-      const r = await window.corral.claudeTokenCode(tokenCode.trim());
-      if (r.ok && r.token) {
-        s.accounts.claude.oauth = r.token;
-        tokenPhase = 'idle';
-        tokenCode = '';
-        acctMsg.claude = t('oauth.setupOk');
-      } else {
-        toManual(r.reason ?? 'unknown');
-      }
-    } catch {
-      toManual('unknown');
-    }
-  }
-
-  async function cancelClaudeToken(): Promise<void> {
-    await window.corral?.claudeTokenCancel().catch(() => undefined);
-    tokenPhase = 'idle';
-    tokenUrl = '';
-    tokenCode = '';
-  }
-
-  /** A token pasted from a terminal run — same destination as the driven route. */
-  function useManualToken(): void {
-    const v = tokenPaste.trim();
-    if (!v) return;
-    s.accounts.claude.oauth = v;
-    tokenPaste = '';
-    tokenPhase = 'idle';
+  function tokenReceived(token: string): void {
+    s.accounts.claude.oauth = token;
     acctMsg.claude = t('oauth.setupOk');
   }
 
@@ -311,12 +257,23 @@
   async function testCli(p: Provider) {
     if (!window.corral) return;
     acctMsg[p] = t('status.testing');
+    cliMissing = { ...cliMissing, [p]: false };
     const r = await window.corral.detectCli(p);
     // Which machine's PATH this was — the core's disk is not this one's in remote mode.
     acctMsg[p] = r.installed
       ? `✓ ${r.version ?? t('cli.installed')}`
       : `✗ ${t(remoteCore ? 'cli.notInstalledCore' : 'cli.notInstalled')}`;
+    // "Install it" is not an instruction without the command. Offer it to the clipboard.
+    if (!r.installed) cliMissing = { ...cliMissing, [p]: true };
   }
+
+  /** npm package per provider — the install command the failure message needs. */
+  const CLI_PACKAGE: Record<Provider, string> = {
+    claude: '@anthropic-ai/claude-code',
+    gemini: '@google/gemini-cli',
+    gpt: '@openai/codex',
+  };
+  let cliMissing = $state<Partial<Record<Provider, boolean>>>({});
   // Full connection test for one repo (checks the actual repo is reachable, not just the token).
   async function testRepo(i: number) {
     const r = s.repos[i];
@@ -453,45 +410,6 @@
   {/if}
 {/snippet}
 
-<!--
-  The subscription-token flow, both routes.
-
-  Nothing here can leave the user waiting: every driven step ends in a token, a named
-  failure, or a cancel, and each failure lands on the manual panel with the reason spelled
-  out. The panel is a peer of the button, not a punishment for its failure.
--->
-{#snippet claudeToken()}
-  {#if tokenPhase === 'starting'}
-    <p class="helper">{t('oauth.starting')}</p>
-    <Button onclick={cancelClaudeToken}>{t('editor.cancel')}</Button>
-  {:else if tokenPhase === 'code' || tokenPhase === 'submitting'}
-    <div class="tokbox">
-      <p class="helper">{t('oauth.codeHint')}</p>
-      <!-- Shown because the CLI's own browser launch can miss (a headless session, a
-           default browser that never opened) and then the URL is the only way through. -->
-      <p class="mono url">{tokenUrl}</p>
-      <div class="row">
-        <input bind:value={tokenCode} spellcheck="false" placeholder={t('oauth.codePlaceholder')} />
-        <Button class="primary" onclick={submitClaudeCode} disabled={tokenPhase === 'submitting' || !tokenCode.trim()}>
-          {t('oauth.codeSubmit')}
-        </Button>
-        <Button onclick={cancelClaudeToken}>{t('editor.cancel')}</Button>
-      </div>
-    </div>
-  {:else if tokenPhase === 'manual'}
-    <div class="tokbox">
-      {#if tokenNote}<p class="helper warn-text">{tokenNote}</p>{/if}
-      <p class="helper">{t('oauth.manualHint')}</p>
-      <p class="mono cmd">claude setup-token</p>
-      <div class="row">
-        <input type="password" bind:value={tokenPaste} spellcheck="false" placeholder="sk-ant-oat…" />
-        <Button class="primary" onclick={useManualToken} disabled={!tokenPaste.trim()}>{t('oauth.manualSave')}</Button>
-        <Button onclick={() => (tokenPhase = 'idle')}>{t('editor.cancel')}</Button>
-      </div>
-    </div>
-  {/if}
-{/snippet}
-
 <div class="wizard" class:embedded>
   {#if !embedded}
   <aside>
@@ -566,13 +484,18 @@
                 <span class="tag muted">{t('account.unset')}</span>
               {/if}
             </div>
-            <input
-              class="acct-key"
-              type="password"
-              disabled={apiUnsupported}
-              bind:value={s.accounts[p.id].key}
-              placeholder={!s.accounts[p.id].key && secretSaved(serviceFor(p.id), 'default') ? t('field.secretSaved') : keyHint(p.id)}
-            />
+            <!-- Every secret here arrives by copy from somewhere else — a console page, a
+                 terminal. A paste button is the whole interaction. -->
+            <div class="keyrow">
+              <input
+                class="acct-key"
+                type="password"
+                disabled={apiUnsupported}
+                bind:value={s.accounts[p.id].key}
+                placeholder={!s.accounts[p.id].key && secretSaved(serviceFor(p.id), 'default') ? t('field.secretSaved') : keyHint(p.id)}
+              />
+              {#if hasBridge && !apiUnsupported}<PasteButton onpaste={(v) => (s.accounts[p.id].key = v)} />{/if}
+            </div>
             {#if hasBridge && s.transport === 'cli'}
               <div class="acct-btns">
                 <!-- No install check under docker. The CLI that runs comes from the worker
@@ -580,17 +503,11 @@
                      that can only ever say "not found, install it" about a machine nothing
                      runs on is worse than no button (CRL-78). -->
                 {#if s.backend !== 'docker'}<Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>{/if}
-                {#if p.id === 'claude'}
-                  <Button onclick={startClaudeToken} disabled={tokenPhase !== 'idle' && tokenPhase !== 'manual'}>
-                    {t('oauth.setupBtn')}
-                  </Button>
-                  <!-- Always reachable, not only after a failure: someone who knows the
-                       command should not have to fail their way to it. -->
-                  <Button onclick={() => toManual()}>{t('oauth.manualBtn')}</Button>
-                {/if}
+                <!-- One button. The dialog carries the steps, and the manual route is a
+                     line inside it — reachable without having to fail into it first. -->
+                {#if p.id === 'claude'}<Button onclick={() => (tokenDialog = 'auto')}>{t('oauth.setupBtn')}</Button>{/if}
                 {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
               </div>
-              {#if p.id === 'claude'}{@render claudeToken()}{/if}
             {/if}
             {#if apiUnsupported}
               <p class="helper warn-text">{t('account.apiNoHint')}</p>
@@ -604,6 +521,20 @@
                 <p class="helper">{t(p.id === 'claude' && s.dockerMountLogin ? 'cli.inImageMount' : 'cli.inImage')}</p>
               {/if}
               {#if acctMsg[p.id]}<p class="helper">{acctMsg[p.id]}</p>{/if}
+              <!-- A failure that names no next step is a dead end. Both of these hand over
+                   the command that fixes it, one click away. -->
+              {#if cliMissing[p.id]}
+                <div class="fallback">
+                  <p class="helper">{t('cli.installHint')}</p>
+                  <CopyButton value={`npm install -g ${CLI_PACKAGE[p.id]}`} label={t('cli.copyInstall')} />
+                </div>
+              {/if}
+              {#if p.id === 'gpt' && codexMissing}
+                <div class="fallback">
+                  <p class="helper">{t('codex.loginHint')}</p>
+                  <CopyButton value="codex login" label={t('oauth.copyCommand')} reveal />
+                </div>
+              {/if}
             {/if}
           </div>
         {/each}
@@ -731,11 +662,14 @@
           >
           <label class="field"
             ><span>{t('field.repoToken')}</span>
-            <input
-              type="password"
-              bind:value={r.token}
-              placeholder={!r.token && secretSaved(r.provider, r.key) ? t('field.secretSaved') : ''}
-            /></label
+            <div class="keyrow">
+              <input
+                type="password"
+                bind:value={r.token}
+                placeholder={!r.token && secretSaved(r.provider, r.key) ? t('field.secretSaved') : ''}
+              />
+              {#if hasBridge}<PasteButton onpaste={(v) => (r.token = v)} />{/if}
+            </div></label
           >
           <div class="two">
             <label class="field"><span>{t('field.prodBranch')}</span><input bind:value={r.production} /></label>
@@ -759,11 +693,14 @@
       {#if s.referenceRepo.trim()}
         <label class="field"
           ><span>{t('field.referenceRepo.token')}</span>
-          <input
-            type="password"
-            bind:value={s.referenceToken}
-            placeholder={!s.referenceToken && secretSaved('reference', 'default') ? t('field.secretSaved') : ''}
-          /></label
+          <div class="keyrow">
+            <input
+              type="password"
+              bind:value={s.referenceToken}
+              placeholder={!s.referenceToken && secretSaved('reference', 'default') ? t('field.secretSaved') : ''}
+            />
+            {#if hasBridge}<PasteButton onpaste={(v) => (s.referenceToken = v)} />{/if}
+          </div></label
         >
         {#if hasBridge}
           <div class="testrow">
@@ -803,6 +740,7 @@
               placeholder={!s.notionToken && secretSaved('notion', 'default') ? t('field.secretSaved') : ''}
               onblur={testNotion}
             />
+            {#if hasBridge}<PasteButton onpaste={(v) => ((s.notionToken = v), testNotion())} />{/if}
             {@render badge(test.notion)}
           </div></label
         >
@@ -868,11 +806,15 @@
           <label class="field"><span>{t('field.jiraEmail')}</span><input bind:value={s.jiraEmail} /></label>
         </div>
         <label class="field"
-          ><span>{t('field.jiraToken')}</span><input
-            type="password"
-            bind:value={s.jiraToken}
-            placeholder={!s.jiraToken && secretSaved('jira', 'default') ? t('field.secretSaved') : ''}
-          /></label
+          ><span>{t('field.jiraToken')}</span>
+          <div class="keyrow">
+            <input
+              type="password"
+              bind:value={s.jiraToken}
+              placeholder={!s.jiraToken && secretSaved('jira', 'default') ? t('field.secretSaved') : ''}
+            />
+            {#if hasBridge}<PasteButton onpaste={(v) => (s.jiraToken = v)} />{/if}
+          </div></label
         >
       {/if}
 
@@ -1015,6 +957,14 @@
     </footer>
   </section>
 </div>
+
+{#if tokenDialog !== 'off'}
+  <ClaudeTokenDialog
+    manual={tokenDialog === 'manual'}
+    ontoken={tokenReceived}
+    onclose={() => (tokenDialog = 'off')}
+  />
+{/if}
 
 <style>
   .sub {
@@ -1189,6 +1139,11 @@
     align-items: center;
     gap: 12px;
   }
+  /* The field takes the room; the paste button keeps its label. */
+  .keyrow input {
+    flex: 1;
+    min-width: 0;
+  }
   .keyrow input {
     flex: 1;
   }
@@ -1290,43 +1245,8 @@
     flex-wrap: wrap;
     gap: 6px;
   }
-  /* The token flow's panel. Inside a provider card, so it stays narrow — the URL wraps
-     rather than widening the row. */
-  .tokbox {
-    margin-top: 8px;
-    padding: 8px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-  }
-  /* Inside a provider card, which is a third of the row wide. The input takes its own
-     line and the buttons share the next one — side by side they were squeezed until their
-     labels broke one character per line. */
-  .tokbox .row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    align-items: center;
-  }
-  .tokbox .row input {
-    flex: 1 1 100%;
-    min-width: 0;
-  }
-  .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 11px;
-    margin: 0 0 8px;
-    word-break: break-all;
-    user-select: text;
-  }
-  .url {
-    color: var(--accent);
-  }
-  .cmd {
-    color: var(--text);
-    background: var(--bg);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 6px 8px;
+  .fallback {
+    margin-top: 6px;
   }
   .tag {
     font-size: 11px;

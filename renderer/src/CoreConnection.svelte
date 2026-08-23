@@ -1,7 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Button from './lib/Button.svelte';
+  import CopyButton from './lib/CopyButton.svelte';
+  import PasteButton from './lib/PasteButton.svelte';
   import { t } from './lib/i18n.svelte';
+
+  /** What to run on the machine that will host the engine, to get a pairing code. */
+  const PAIR_COMMAND = 'node dist/main.js corral.yaml --control-plane 4410 --pair';
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
@@ -144,14 +149,26 @@
               spellcheck="false"
               disabled={busy}
             />
+            <PasteButton onpaste={(v) => (code = v.replace(/\D/g, '').slice(0, 6))} />
             <Button class="primary" onclick={pair} disabled={busy || !url.trim() || !code.trim()}>
               {busy ? t('link.pairing') : t('link.pair')}
             </Button>
           </div>
+          <!-- The code comes from a command on the *other* machine. Printing that command
+               in full and leaving the reader to select it is work handed back; a copy
+               button is the whole interaction. -->
+          <details>
+            <summary>{t('link.howToPair')}</summary>
+            <p class="hint">{t('link.howToPairHint')}</p>
+            <CopyButton value={PAIR_COMMAND} label={t('link.copyPairCommand')} reveal />
+          </details>
         {/if}
 
         {#if error}<p class="hint err">{error}</p>{/if}
         {#if denial && !error}<p class="hint err">{denial}</p>{/if}
+        <!-- A refusal that only says "failed" leaves nowhere to go. Name the three things
+             that are actually wrong when pairing fails. -->
+        {#if error || denial}<p class="hint">{t('link.pairFailHint')}</p>{/if}
       </div>
     {/if}
   {/if}
