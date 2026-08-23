@@ -4,9 +4,11 @@
   import ModelPicker from './lib/ModelPicker.svelte';
   import ClaudeTokenDialog from './ClaudeTokenDialog.svelte';
   import CopyButton from './lib/CopyButton.svelte';
+  import CredentialField from './lib/CredentialField.svelte';
   import PasteButton from './lib/PasteButton.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
+    activeSlot,
     apiSupported,
     buildConfigYaml,
     configured,
@@ -20,6 +22,7 @@
     stateFromConfig,
     newFallback,
     newRepo,
+    oauthSlot,
     OPTIONAL_STATE_KEYS,
     type Provider,
     PROVIDER_NAMES,
@@ -29,6 +32,7 @@
     secretRefs,
     secretsFor,
     serviceFor,
+    slotComplaint,
     type TrackerKind,
     unrunnableAssigned,
     validateStep,
@@ -323,7 +327,22 @@
     test.notion = await window.corral.validate.notion(s.notionToken);
   }
 
-  const keyHint = (p: Provider) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-…');
+  const keyHint = (p: Provider) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-api…');
+
+  /**
+   * What is wrong with what was just pasted, in a sentence, or nothing.
+   *
+   * Checked as it is typed rather than on save: the two claude credentials differ by
+   * prefix, so a token in the wrong box is knowable immediately, and knowing it later
+   * costs a container build and an agent turn to find out (CRL-85).
+   */
+  function complaint(p: Provider, kind: 'key' | 'oauth'): string {
+    const c = slotComplaint(p, kind, kind === 'key' ? s.accounts[p].key : s.accounts[p].oauth);
+    return c ? t(`account.${c}`) : '';
+  }
+
+  /** codex's login is present — imported this session or already in the store. */
+  const codexHeld = $derived(!!s.accounts.gpt.oauth.trim() || secretSaved(serviceFor('gpt'), 'oauth'));
 
   // Notion schema → property/option dropdowns (no manual name typing).
   type NotionProp = { name: string; type: string; options: string[] };
@@ -484,37 +503,57 @@
                 <span class="tag muted">{t('account.unset')}</span>
               {/if}
             </div>
-            <!-- Every secret here arrives by copy from somewhere else — a console page, a
-                 terminal. A paste button is the whole interaction. -->
-            <div class="keyrow">
-              <input
-                class="acct-key"
-                type="password"
-                disabled={apiUnsupported}
-                bind:value={s.accounts[p.id].key}
-                placeholder={!s.accounts[p.id].key && secretSaved(serviceFor(p.id), 'default') ? t('field.secretSaved') : keyHint(p.id)}
-              />
-              {#if hasBridge && !apiUnsupported}<PasteButton onpaste={(v) => (s.accounts[p.id].key = v)} />{/if}
-            </div>
-            {#if hasBridge && s.transport === 'cli'}
-              <div class="acct-btns">
-                <!-- No install check under docker. The CLI that runs comes from the worker
-                     image, so a host probe answers about the wrong machine — and a button
-                     that can only ever say "not found, install it" about a machine nothing
-                     runs on is worse than no button (CRL-78). -->
-                {#if s.backend !== 'docker'}<Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>{/if}
-                <!-- One button. The dialog carries the steps, and the manual route is a
-                     line inside it — reachable without having to fail into it first. -->
-                {#if p.id === 'claude'}<Button onclick={() => (tokenDialog = 'auto')}>{t('oauth.setupBtn')}</Button>{/if}
-                {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
+            <!-- Both slots the config has, each with its name on it, and the one this
+                 configuration will actually read marked. A single unlabelled box over two
+                 slots is what made this card unusable (CRL-85). -->
+            <CredentialField
+              label={t('account.slotKey')}
+              bind:value={s.accounts[p.id].key}
+              placeholder={keyHint(p.id)}
+              active={activeSlot(s, p.id, secretSaved) === 'key'}
+              saved={secretSaved(serviceFor(p.id), 'default')}
+              disabled={apiUnsupported}
+              warning={complaint(p.id, 'key')}
+            />
+
+            {#if oauthSlot(p.id) === 'subscription'}
+              <CredentialField
+                label={t('account.slotOauth')}
+                bind:value={s.accounts[p.id].oauth}
+                placeholder="sk-ant-oat…"
+                active={activeSlot(s, p.id, secretSaved) === 'oauth'}
+                saved={secretSaved(serviceFor(p.id), 'oauth')}
+                warning={complaint(p.id, 'oauth')}
+              >
+                {#if hasBridge}
+                  <!-- The attempt sits beside the field it fills rather than in place of
+                       it. However it ends, the box is already there and the command that
+                       prints the token is one click from the clipboard — nobody has to
+                       fail into the manual route to find it (CRL-85). -->
+                  <Button onclick={() => (tokenDialog = 'auto')}>{t('oauth.setupBtn')}</Button>
+                  <CopyButton value="claude setup-token" label={t('oauth.copyCommand')} />
+                {/if}
+              </CredentialField>
+            {:else if oauthSlot(p.id) === 'codex'}
+              <!-- Not a field: codex's auth.json is a base64 blob, imported whole. Nobody
+                   types it, so offering a box to type it in would be a lie. -->
+              <div class="slot-import">
+                <span class="slot-label">{t('account.slotCodex')}</span>
+                {#if codexHeld}<span class="tag ok">✓ {t('account.set')}</span>{/if}
+                {#if hasBridge}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
               </div>
+            {/if}
+
+            <!-- No install check under docker. The CLI that runs comes from the worker
+                 image, so a host probe answers about the wrong machine — and a button
+                 that can only ever say "not found, install it" about a machine nothing
+                 runs on is worse than no button (CRL-78). -->
+            {#if hasBridge && s.transport === 'cli' && s.backend !== 'docker'}
+              <div class="acct-btns"><Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button></div>
             {/if}
             {#if apiUnsupported}
               <p class="helper warn-text">{t('account.apiNoHint')}</p>
             {:else}
-              {#if (p.id === 'claude' || p.id === 'gpt') && !s.accounts[p.id].oauth && secretSaved(serviceFor(p.id), 'oauth')}
-                <p class="helper">{t('account.oauthSaved')}</p>
-              {/if}
               {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>
               {:else if s.backend === 'docker' && s.transport === 'cli'}
                 <!-- Where this agent's credential comes from once it runs in a container. -->
@@ -1236,9 +1275,18 @@
     gap: 6px;
     font-weight: 500;
   }
-  .acct-key {
-    width: 100%;
-    margin-bottom: 8px;
+  /* codex's slot: a label, whether it is held, and the button that fetches it. No input,
+     because the value is a base64 blob nobody types (CRL-85). */
+  .slot-import {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .slot-label {
+    font-size: 12px;
+    color: var(--text-dim);
   }
   .acct-btns {
     display: flex;
