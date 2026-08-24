@@ -18,6 +18,7 @@
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
+import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, type SpecStage } from './agent/prompt-builder.js';
 import { TimingAgent } from './agent/timing-agent.js';
 import { unrunnableProvider } from './agent/backend-compat.js';
 import type { Config } from './config/schema.js';
@@ -55,6 +56,7 @@ import {
 } from './core/types.js';
 import type { ApprovalDetail,
   ApprovalKind,
+  IssuePhase,
 } from './core/types.js';
 import type { ResolvedProfile } from './profile/index.js';
 import type { RepositoryRouter } from './repository/router.js';
@@ -717,6 +719,10 @@ export class Orchestrator {
     const handle = this.handles.get(rt.identifier)!;
     // Direction validation gate (§15) — blocks the issue if a Direction text is rejected.
     if (!(await this.runDirectionCheck(rt, issue, handle))) return;
+    if (this.config.spec_mode === 'split') {
+      await this.runSpecStage(rt, issue, handle, 'requirements');
+      return;
+    }
     const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning', [SCRATCH.pendingPlan]);
     if (!draft.ok) return;
     if (await this.handleQuestion(rt, handle)) return;
@@ -767,16 +773,129 @@ export class Orchestrator {
     await this.afterPlanProduced(rt, issue, 'plan');
   }
 
+  /**
+   * One spec stage: draft the document, vet it, then park on its approval gate.
+   *
+   * Deliberately the same shape as the single-plan flow above — draft, critique rounds,
+   * consolidate, card — so the two modes do not drift into separate code paths. What
+   * changes per stage is only which document is written and which card kind is raised.
+   *
+   * The spec files are never named in `produces`. A dispatch clears what it declares
+   * (CRL-88), and these are the *input* of every later stage; the "did this turn produce
+   * anything" check reads the file directly instead.
+   */
+  private async runSpecStage(
+    rt: IssueRuntime,
+    issue: Issue,
+    handle: WorkspaceHandle,
+    stage: SpecStage,
+  ): Promise<void> {
+    const log = logger.child(rt.identifier);
+    const doc = specDoc(stage);
+    rt.specStage = stage;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'plan_reviewing', label: `📐 Drafting ${stage}` });
+
+    // First stage only: a fresh session. The later ones continue so the agent still has the
+    // repository it just inspected, and they read the approved documents off disk anyway.
+    const fresh = stage === 'requirements';
+    const draft = await this.dispatch(rt, issue, specStagePrompt(issue, stage), !fresh, 'planning');
+    if (!draft.ok) return;
+    if (await this.handleQuestion(rt, handle)) return;
+    if (!(await this.readOutput(handle, doc))) {
+      await this.surfaceStuck(rt, `The ${stage} document (${doc}) is empty — please retry.`, true);
+      return;
+    }
+    await this.vetAndSendSpec(rt, issue, handle, stage);
+    log.info(`spec stage ${stage} awaiting approval`);
+  }
+
+  /** Critique + consolidate one spec document, then raise its approval card. */
+  private async vetAndSendSpec(
+    rt: IssueRuntime,
+    issue: Issue,
+    handle: WorkspaceHandle,
+    stage: SpecStage,
+    resume = false,
+  ): Promise<void> {
+    const doc = specDoc(stage);
+    rt.phase = 'plan_reviewing';
+    rt.specStage = stage;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'plan_reviewing', label: `🔍 Vetting ${stage}` });
+
+    await this.planCritique.run(
+      handle,
+      issue,
+      this.planningModel(),
+      this.referencePath(),
+      (r) => this.cost.add(rt.identifier, r),
+      undefined,
+      this.buildDirection(),
+      resume,
+      doc,
+    );
+    // Same guard the single flow uses: consolidation rewrites the document, so keep a copy
+    // to fall back on if the turn produces nothing.
+    await this.workspace.io.exec(handle, `cp ${doc} ${SCRATCH.planDraft} 2>/dev/null || true`);
+    const consolidate = await this.dispatch(rt, issue, consolidateSpecPrompt(stage), true, 'planning');
+    if (!consolidate.ok) return;
+    await this.workspace.io.exec(handle, `test -s ${doc} || cp ${SCRATCH.planDraft} ${doc} 2>/dev/null || true`);
+
+    const body = await this.readOutput(handle, doc);
+    if (!body) {
+      await this.surfaceStuck(rt, `The ${stage} document (${doc}) is empty after consolidation — please retry.`, true);
+      return;
+    }
+    const phase = `${stage}_sent` as IssuePhase;
+    rt.approvalId = await this.channel.sendApproval({
+      identifier: rt.identifier,
+      kind: stage,
+      title: issue.title,
+      body,
+      options: await this.planOptionsFor(handle),
+    });
+    rt.phase = phase;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase, label: `🔔 Action needed — review the ${stage}` });
+    await this.tracker.transitionIssue(issue, 'plan_review').catch(() => {});
+  }
+
+  /**
+   * A spec gate was approved: run the next stage, or start implementing after the last one.
+   *
+   * `specStage` is cleared on the way into implementation — from there on the run is no
+   * longer inside the planning ladder, and a stale value would make a later restart try to
+   * resume vetting a stage that is already approved.
+   */
+  private async specGateApproved(rt: IssueRuntime, issue: Issue, detail?: ApprovalDetail): Promise<void> {
+    const handle = this.handles.get(rt.identifier)!;
+    const stage = (rt.specStage ?? 'requirements') as SpecStage;
+    const next = nextSpecStage(stage);
+    if (next) {
+      await this.runSpecStage(rt, issue, handle, next);
+      return;
+    }
+    rt.specStage = undefined;
+    this.store.upsert(rt);
+    await this.implementAndReview(rt, issue, detail);
+  }
+
   /** Resume plan vetting interrupted by a restart (phase stuck at plan_reviewing). */
   private async resumeVetting(rt: IssueRuntime, handle: WorkspaceHandle): Promise<void> {
     const issue = await this.tracker.fetchIssueByIdentifier(rt.identifier).catch(() => null);
     if (!issue) return;
+    // `plan_reviewing` is shared by both modes; `specStage` is what says which document was
+    // being vetted. Absent means the single-plan flow — including every state file written
+    // before spec mode existed (plan doc §10).
+    const stage = rt.specStage as SpecStage | undefined;
+    const doc = stage ? specDoc(stage) : SCRATCH.pendingPlan;
     await this.workspace.io.exec(
       handle,
-      `test -s ${SCRATCH.pendingPlan} || cp ${SCRATCH.planDraft} ${SCRATCH.pendingPlan} 2>/dev/null || true`,
+      `test -s ${doc} || cp ${SCRATCH.planDraft} ${doc} 2>/dev/null || true`,
     );
-    if (!(await this.readOutput(handle, SCRATCH.pendingPlan))) {
-      await this.surfaceStuck(rt, 'Failed to resume plan vetting — no draft left. Restart the issue.');
+    if (!(await this.readOutput(handle, doc))) {
+      await this.surfaceStuck(rt, `Failed to resume ${stage ?? 'plan'} vetting — no draft left. Restart the issue.`);
       return;
     }
     // Say which rounds survived. A restart that reuses them and a restart that re-runs them
@@ -791,7 +910,10 @@ export class Orchestrator {
           : '↻ Auto-resuming interrupted plan vetting',
     });
     void this.serialize(rt.identifier, () =>
-      this.vetAndSendPlan(rt, issue, handle, undefined, true).catch((err) => {
+      (stage
+        ? this.vetAndSendSpec(rt, issue, handle, stage, true)
+        : this.vetAndSendPlan(rt, issue, handle, undefined, true)
+      ).catch((err) => {
         logger.child(rt.identifier).error('resumeVetting failed', String(err));
         bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: `❌ Plan vetting resume failed: ${oneLineErr(err)}` });
       }),
@@ -1086,6 +1208,9 @@ export class Orchestrator {
       plan_sent: '✅ Plan approved — starting implementation.',
       pr_plan_sent: '✅ Fix plan approved — starting PR fixes.',
       review_sent: '✅ Review approved — preparing the PR.',
+      requirements_sent: '✅ Requirements approved — drafting the design.',
+      design_sent: '✅ Design approved — breaking it into tasks.',
+      tasks_sent: '✅ Tasks approved — starting implementation.',
     };
     if (ack[rt.phase]) await this.channel.notify(identifier, ack[rt.phase]!);
     bus.emitEvent({ identifier, kind: 'approval', phase: rt.phase, label: '✅ Approved' });
@@ -1099,6 +1224,11 @@ export class Orchestrator {
         break;
       case 'review_sent':
         await this.reviewApproved(rt, issue);
+        break;
+      case 'requirements_sent':
+      case 'design_sent':
+      case 'tasks_sent':
+        await this.specGateApproved(rt, issue, detail);
         break;
       default:
         logger.child(identifier).warn(`approve ignored in phase ${rt.phase}`);
@@ -1136,6 +1266,14 @@ export class Orchestrator {
     }
 
     const signal = this.signals.feedback(text);
+    const specGate = SPEC_GATE_PHASE[rt.phase];
+    if (specGate) {
+      // Revises the spec document in place, so — like plan feedback — the turn declares no
+      // outputs: asking an agent to revise a file that was just blanked is not a revision.
+      const result = await this.dispatch(rt, issue, signal, true, 'planning');
+      if (result.ok) await this.resendApproval(rt, issue, specGate, specDoc(specGate));
+      return;
+    }
     if (rt.phase === 'plan_sent' || rt.phase === 'pr_plan_sent') {
       // Revises the existing plan in place (WORKFLOW.md branch B), so it must survive.
       // The cost: if the agent edits nothing, the unchanged plan goes back to the human
@@ -1317,6 +1455,9 @@ export class Orchestrator {
         verifyCommands,
         diffStats,
         this.buildDirection(),
+        // In split mode the criteria live in requirements.md, not the single plan. CRL-99's
+        // escape hatch covers the rest: no REQ ids found, no criteria section.
+        this.config.spec_mode === 'split' ? SPEC.requirements : undefined,
       );
       await this.uploadDiff(rt, issue, changed);
       const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review', [
@@ -1511,7 +1652,12 @@ export class Orchestrator {
 
   // ─────────────────────────────────────────────────────────── helpers
 
-  private async resendApproval(rt: IssueRuntime, issue: Issue, kind: 'plan' | 'review' | 'pr_plan', file: string): Promise<void> {
+  private async resendApproval(
+    rt: IssueRuntime,
+    issue: Issue,
+    kind: 'plan' | 'review' | 'pr_plan' | SpecStage,
+    file: string,
+  ): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
     const body = await this.readOutput(handle, file);
     if (!body) {
@@ -1523,7 +1669,7 @@ export class Orchestrator {
       kind,
       title: issue.title,
       body,
-      options: kind === 'plan' ? await this.planOptionsFor(handle) : undefined,
+      options: kind === 'review' || kind === 'pr_plan' ? undefined : await this.planOptionsFor(handle),
     });
     rt.approvalId = approvalId;
     this.store.upsert(rt);
@@ -1621,6 +1767,13 @@ export class Orchestrator {
 
 /** Compact one-line error for UI messages. */
 /** Phases whose awaited step `redispatchPhase` can re-run in place (others need a Restart). */
+/** Approval phase → the spec stage whose document it gates. */
+const SPEC_GATE_PHASE: Record<string, SpecStage | undefined> = {
+  requirements_sent: 'requirements',
+  design_sent: 'design',
+  tasks_sent: 'tasks',
+};
+
 const RETRYABLE_PHASES = new Set<string>([
   'plan_sent',
   'pr_plan_sent',

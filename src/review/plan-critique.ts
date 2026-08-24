@@ -45,6 +45,8 @@ export class PlanCritiqueOrchestrator {
      * human is entitled to fresh critiques.
      */
     resume = false,
+    /** The document to critique — a spec stage's file in split mode (CRL-103). */
+    target?: string,
   ): Promise<string[]> {
     const log = logger.child(issue.identifier);
     if (!this.cfg.enabled) return [];
@@ -82,7 +84,7 @@ export class PlanCritiqueOrchestrator {
     log.info(`plan critique rounds = ${rounds}${done.size ? ` (running ${todo.join(', ')})` : ''}${focus ? ` (focus: ${focus.slice(0, 40)})` : ''}`);
 
     const results = await Promise.all(
-      todo.map((r) => this.runRound(handle, issue, r, model, referencePath, onRoundCost, focus, direction)),
+      todo.map((r) => this.runRound(handle, issue, r, model, referencePath, onRoundCost, focus, direction, target)),
     );
     const files = [...[...done].map((r) => SCRATCH.planCritique(r)), ...results.filter((f): f is string => f !== null)];
     log.info(`plan critique complete: ${files.length} file(s)`);
@@ -124,13 +126,14 @@ export class PlanCritiqueOrchestrator {
     onRoundCost?: RoundCostFn,
     focus?: string,
     direction = '',
+    target?: string,
   ): Promise<string | null> {
     const log = logger.child(issue.identifier);
     try {
       const result = await this.agent.run(handle, issue, {
         stage: 'planning',
         workflow: '',
-        prompt: planCritiquePrompt(issue, round, this.profile, referencePath, focus, direction),
+        prompt: planCritiquePrompt(issue, round, this.profile, referencePath, focus, direction, target),
         continueSession: false,
         model,
         turnTimeoutMs: this.turnTimeoutMs,

@@ -22,11 +22,13 @@ export function planCritiquePrompt(
   referencePath?: string,
   focus?: string,
   direction = '',
+  /** The document under critique — a spec stage's file in split mode (CRL-103). */
+  target: string = SCRATCH.pendingPlan,
 ): string {
   const out = SCRATCH.planCritique(round);
   const lines = [
     `You are an independent, SKEPTICAL plan reviewer for issue ${issue.identifier} (round ${round}).`,
-    `Read the DRAFT plan at \`${SCRATCH.pendingPlan}\` and the issue. Critique it BEFORE any code is written.`,
+    `Read the DRAFT at \`${target}\` and the issue. Critique it BEFORE any code is written.`,
     `Inspect the ACTUAL repositories (each subdirectory of the workspace is a repo) to verify the plan's assumptions — do not trust the plan's claims.`,
     `Hunt for:`,
     `- Underspecified / ambiguous steps; unquantified words that cannot be tested ("large volume", "fast response", "most users"); missing edge cases, failure modes, concurrency, data migration.`,
@@ -86,6 +88,8 @@ export function reviewRoundPrompt(
   profile: ResolvedProfile,
   referencePath?: string,
   direction = '',
+  /** Where the acceptance criteria live — `requirements.md` in split mode (CRL-103). */
+  criteriaFrom: string = SCRATCH.pendingPlan,
 ): string {
   const out = SCRATCH.reviewRound(round);
   const examples = profile.stack.calibrationExamples.map((e) => `  - ${e}`).join('\n');
@@ -103,7 +107,7 @@ export function reviewRoundPrompt(
     // Mirrors the re-review block below: read the input first, then rule on each item with
     // evidence. The criteria are only here to be read because the implementation dispatch
     // stopped blanking pending_plan.md (CRL-88).
-    `BEFORE judging, read the approved plan at \`${SCRATCH.pendingPlan}\` and find its acceptance criteria (\`REQ-1\`, \`REQ-2\`, …):`,
+    `BEFORE judging, read the approved plan at \`${criteriaFrom}\` and find its acceptance criteria (\`REQ-1\`, \`REQ-2\`, …):`,
     `- For EACH \`REQ-n\`, inspect the actual diff and state explicitly "${profile.t('review.reqMet')}" with the \`file:line\` that satisfies it, or "${profile.t('review.reqUnmet')}" naming what is missing.`,
     `- Judge the code, not the plan's own claim that it was done. A criterion the diff does not implement is UNMET however confidently the plan states it.`,
     `- An unmet criterion is a finding in its own right — report it with the others.`,
