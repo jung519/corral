@@ -62,6 +62,12 @@ export interface IssueRuntime {
    * resumed; cleared once a resume dispatch starts.
    */
   stuck?: boolean;
+  /**
+   * The last check found edits sitting in a work tree with no commit. Persisted because a
+   * resume can follow a restart, and the resume prompt has to tell the agent to commit what
+   * is already there instead of re-deriving it (CRL-89/91).
+   */
+  uncommitted?: boolean;
 }
 
 export class IssueStateStore {

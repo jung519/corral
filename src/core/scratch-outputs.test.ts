@@ -67,7 +67,7 @@ describe('dispatch call sites', () => {
   it('the turns that read a plan or review declare no outputs at all', () => {
     // WORKFLOW.md branch C reads pending_plan.md; the auto-fix turn reads pending_review.md;
     // a resumed run continues either. Each used to start with its own input blanked.
-    const consumers = ['planApprovalPrompt', 'PROMPTS.applyReviewFixes', 'this.signals.resume'];
+    const consumers = ['planApprovalPrompt', 'PROMPTS.applyReviewFixes', 'issue, resume,'];
     for (const consumer of consumers) {
       const call = dispatchCalls().find((c) => c.includes(consumer));
       expect(call, `no dispatch found for ${consumer}`).toBeDefined();

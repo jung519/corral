@@ -65,6 +65,21 @@ in English — they are notation, not prose. What you say around them is in the 
 
 ---
 
+## Execution model
+
+**This run is a single unattended turn. There is no next turn.** You are not in a
+conversation: when you stop talking, the process exits. Anything you meant to "check back
+on", "wait for", or "finish once X completes" simply never happens.
+
+So, concretely:
+
+- **Do not start a background job and plan to collect its result later.** Long-running
+  verification (a boot check, a watcher, an integration run) either finishes inside this
+  turn or is abandoned — and either way the commit happens first, not after.
+- Anything not committed, and not written into `.corral/`, is gone when the turn ends.
+- If you genuinely cannot finish, commit what works and write what is left to
+  `.corral/question.md`. A stated gap is worth far more than an unfinished intention.
+
 ## Branches (what to do, based on the orchestrator's prompt)
 
 ### A — Planning (fresh session, no prior memory)
@@ -123,7 +138,11 @@ different agent may have written it, so rely on the file, not memory of the plan
 {% endif %}For EACH repo you need to change:
 1. `cd` into its subdirectory and create/switch to that repo's work branch (listed above)
    off its base branch.
-2. Implement the approved plan and commit your changes there (do not push).
+2. Implement the approved plan.
+3. **Commit, before any further verification.** Extra checks are worth running, but they
+   run against committed work — a check that hangs or overruns must not be able to take
+   the implementation with it. If a later check finds a problem, fix it and commit again.
+4. Never end the turn with uncommitted changes. (Do not push.)
 Leave repos you do not need to change untouched. If blocked, write a question to
 `.corral/question.md` and stop. (You do not need to record base commits — the orchestrator
 captured them at clone time.)
@@ -181,7 +200,8 @@ headings and the bullet labels may be written in the output language; keep the s
 ### Apply review fixes
 (Only when the orchestrator explicitly asks — auto-fix is off by default.) Apply the BLOCKER
 and SUGGESTION fixes from `.corral/pending_review.md`, commit (in the relevant repo subdir),
-and stop. (NITs are advisory — do not block on them.)
+and stop. (NITs are advisory — do not block on them.) The commit-before-verification rule
+from branch C applies here too — this turn is just as final as that one.
 
 ### E — Review feedback (the prompt starts with a feedback marker while a review is pending)
 This is the human's instruction after reading the review.{% if direction %} It takes
