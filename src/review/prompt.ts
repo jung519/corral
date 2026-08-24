@@ -33,6 +33,9 @@ export function planCritiquePrompt(
     `- WRONG assumptions about the schema / API / existing code (cite the real file:line that contradicts the plan).`,
     `- Anything that would BREAK existing behavior.`,
     `- Acceptance criteria that are missing, vague, or not testable.`,
+    // The critic has to know the notation the plan is required to use. Without this it
+    // reads EARS as awkward phrasing and "fixes" it, and the format dies in consolidation.
+    `- Acceptance criteria not written in EARS notation (THE SYSTEM SHALL / WHEN / WHILE / IF-THEN / WHERE) or missing REQ-n labels. Judge the wording, not the count — do not ask for more criteria than the issue warrants.`,
     `- A simpler or safer approach the plan overlooked.`,
   ];
   if (focus) {

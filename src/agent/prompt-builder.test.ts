@@ -58,6 +58,31 @@ describe('prompt-builder', () => {
     expect(def).toContain('English'); // default when no language given
   });
 
+  /**
+   * EARS is a notation, not prose. A Korean user gets the explanation in Korean and the
+   * keywords in English — the same split the guide already makes for BLOCKER/SUGGESTION/NIT.
+   * If the keywords translated, nothing downstream could ever check the format (CRL-98).
+   */
+  it('keeps the EARS keywords in English whatever the output language is', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const ko = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    expect(ko).toContain('THE SYSTEM SHALL');
+    expect(ko).toContain('REQ-n');
+  });
+
+  it('gives the planner every EARS form, not just WHEN', async () => {
+    // Only offering WHEN makes the agent contort invariants ("WHEN the build runs THE
+    // SYSTEM SHALL have no type errors") — that would measure the template, not the agent.
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    for (const form of ['THE SYSTEM SHALL', 'WHEN', 'WHILE', 'IF', 'THEN', 'WHERE']) {
+      expect(out, `EARS form ${form} missing from branch A`).toContain(form);
+    }
+    expect(out).toContain('REQ-1');
+    // The IDs have to be pointed at by something, or they are decoration.
+    expect(out).toMatch(/mark each file you will change and each\s+edge case with the `REQ-n`/);
+  });
+
   it('renders signals in the configured language', () => {
     const ko = buildSignals(createTranslator('ko'));
     expect(ko.approve).toBe('✅ 승인됨');
