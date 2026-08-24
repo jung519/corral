@@ -82,3 +82,51 @@ describe('review prompts', () => {
     expect(planCritiquePrompt(issue, 1, profileKo)).not.toContain('guiding, not a rule');
   });
 });
+
+/**
+ * CRL-99 — the criteria are written down (CRL-98) and survive to review time (CRL-88).
+ * These pin the third leg: somebody actually rules on them.
+ */
+describe('acceptance-criteria check', () => {
+  const profileKo = resolveProfile(ProfileSchema.parse({ language: 'ko', stack: 'nestjs' }));
+  const profileEn = resolveProfile(ProfileSchema.parse({ language: 'en', stack: 'nestjs' }));
+
+  it('the review round reads the approved plan and rules on each REQ', () => {
+    const p = reviewRoundPrompt(issue, 1, [{ dir: 'server', base: 'abc123' }], profileEn);
+    expect(p).toContain('.corral/pending_plan.md');
+    expect(p).toMatch(/For EACH `REQ-n`/);
+    expect(p).toContain('MET');
+    expect(p).toContain('UNMET');
+  });
+
+  it('the verdict words come from the profile like every other review phrase', () => {
+    const p = reviewRoundPrompt(issue, 1, [{ dir: 'server', base: 'abc123' }], profileKo);
+    expect(p).toContain('충족');
+    expect(p).toContain('미충족');
+  });
+
+  /**
+   * The repo is already running. Issues planned before CRL-98 have no REQ labels, and a
+   * reviewer that reports their absence would turn every in-flight issue into a finding.
+   * Same shape as the "prevReview does not exist → first review" escape below it.
+   */
+  it('tells the reviewer to skip the check when the plan has no REQ labels', () => {
+    const p = reviewRoundPrompt(issue, 1, [{ dir: 'server', base: 'abc123' }], profileEn);
+    expect(p).toMatch(/If the plan has NO `REQ-n` labels[\s\S]*SKIP this entirely/);
+    expect(p).toMatch(/Do not report their absence as a problem/);
+  });
+
+  it('the plan critic looks between requirements, not just at each one', () => {
+    const p = planCritiquePrompt(issue, 1, profileEn);
+    expect(p).toMatch(/Problems BETWEEN requirements/);
+    // The three axes a per-item read misses.
+    expect(p).toMatch(/cannot both hold/);          // 논리적 모순
+    expect(p).toMatch(/at the same time/);          // 충돌하는 제약
+    expect(p).toMatch(/as if it already existed/);  // 암묵적 가정
+  });
+
+  it('the plan critic names unquantified words instead of only saying "vague"', () => {
+    const p = planCritiquePrompt(issue, 1, profileEn);
+    expect(p).toMatch(/large volume|fast response/);
+  });
+});

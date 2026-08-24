@@ -8,6 +8,8 @@ export type MessageKey =
   | 'review.noIssues'
   | 'review.resolved'
   | 'review.unresolved'
+  | 'review.reqMet'
+  | 'review.reqUnmet'
   | 'signal.approved'
   | 'signal.feedback'
   | 'signal.requestMoreReview'
@@ -24,6 +26,8 @@ const en: Messages = {
   'review.noIssues': 'No issues found',
   'review.resolved': 'resolved',
   'review.unresolved': 'unresolved',
+  'review.reqMet': 'MET',
+  'review.reqUnmet': 'UNMET',
   'signal.approved': 'APPROVED',
   'signal.feedback': 'FEEDBACK',
   'signal.requestMoreReview': 'REQUEST FURTHER REVIEW',
@@ -40,6 +44,8 @@ const ko: Messages = {
   'review.noIssues': '특이사항 없음',
   'review.resolved': '해결됨',
   'review.unresolved': '미해결',
+  'review.reqMet': '충족',
+  'review.reqUnmet': '미충족',
   'signal.approved': '승인됨',
   'signal.feedback': '피드백',
   'signal.requestMoreReview': '더 검토 요청',

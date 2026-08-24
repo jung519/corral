@@ -29,13 +29,16 @@ export function planCritiquePrompt(
     `Read the DRAFT plan at \`${SCRATCH.pendingPlan}\` and the issue. Critique it BEFORE any code is written.`,
     `Inspect the ACTUAL repositories (each subdirectory of the workspace is a repo) to verify the plan's assumptions — do not trust the plan's claims.`,
     `Hunt for:`,
-    `- Underspecified / ambiguous steps; missing edge cases, failure modes, concurrency, data migration.`,
+    `- Underspecified / ambiguous steps; unquantified words that cannot be tested ("large volume", "fast response", "most users"); missing edge cases, failure modes, concurrency, data migration.`,
     `- WRONG assumptions about the schema / API / existing code (cite the real file:line that contradicts the plan).`,
     `- Anything that would BREAK existing behavior.`,
     `- Acceptance criteria that are missing, vague, or not testable.`,
     // The critic has to know the notation the plan is required to use. Without this it
     // reads EARS as awkward phrasing and "fixes" it, and the format dies in consolidation.
     `- Acceptance criteria not written in EARS notation (THE SYSTEM SHALL / WHEN / WHILE / IF-THEN / WHERE) or missing REQ-n labels. Judge the wording, not the count — do not ask for more criteria than the issue warrants.`,
+    // The axis a per-item read misses. Each requirement can be sound on its own while the
+    // set is impossible to satisfy — and that only shows up when they are read together.
+    `- Problems BETWEEN requirements, not within one: two that are each reasonable but cannot both hold; constraints that cannot be satisfied at the same time; a concept referenced as if it already existed when nothing in the plan or the code defines it.`,
     `- A simpler or safer approach the plan overlooked.`,
   ];
   if (focus) {
@@ -97,6 +100,14 @@ export function reviewRoundPrompt(
     `BEFORE judging, read \`${SCRATCH.staticQa}\` if it exists. It holds static-check results (lint / typecheck / analyze) that were actually executed. These are DETERMINISTIC FACTS:`,
     `- Any command with a non-zero \`code\` is a real failure caused by this branch. Treat it as a BLOCKER and diagnose the root cause. Never dismiss it as noise.`,
     `- Then look for what static tools CANNOT catch: logic errors, wrong behavior, missing edge cases.`,
+    // Mirrors the re-review block below: read the input first, then rule on each item with
+    // evidence. The criteria are only here to be read because the implementation dispatch
+    // stopped blanking pending_plan.md (CRL-88).
+    `BEFORE judging, read the approved plan at \`${SCRATCH.pendingPlan}\` and find its acceptance criteria (\`REQ-1\`, \`REQ-2\`, …):`,
+    `- For EACH \`REQ-n\`, inspect the actual diff and state explicitly "${profile.t('review.reqMet')}" with the \`file:line\` that satisfies it, or "${profile.t('review.reqUnmet')}" naming what is missing.`,
+    `- Judge the code, not the plan's own claim that it was done. A criterion the diff does not implement is UNMET however confidently the plan states it.`,
+    `- An unmet criterion is a finding in its own right — report it with the others.`,
+    `- If the plan has NO \`REQ-n\` labels (an older or hand-written plan), SKIP this entirely. Do not report their absence as a problem.`,
     `ALSO read \`${SCRATCH.prevReview}\` if it exists — the PREVIOUS review; the current diff includes the fix meant to address it. This is a RE-REVIEW:`,
     `- For EACH prior finding, inspect the current code and state explicitly "${profile.t('review.resolved')}" (verify the actual code) or "${profile.t('review.unresolved')}" (cite the current file:line still affected).`,
     `- Do NOT silently re-raise a previous finding as if new — tie it back with its id and the verdict.`,
