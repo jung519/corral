@@ -39,6 +39,7 @@ import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } 
 import { SCRATCH, SCRATCH_DIR } from './core/paths.js';
 import { wipeProduced } from './core/scratch-outputs.js';
 import { describeUncommitted, uncommittedAcross } from './core/uncommitted.js';
+import { fixableCount, isReviewClean, parseReviewStatus, unmetCriteria, type ReviewStatus } from './core/review-status.js';
 import {
   type AgentAdapter,
   type AgentRunResult,
@@ -1247,8 +1248,18 @@ export class Orchestrator {
       return;
     }
     const status = await this.reviewStatus(handle);
-    const clean = !status || status.blocker + status.suggestion === 0;
-    if (clean && this.config.review.auto_pr_when_clean) {
+    const unmet = unmetCriteria(status);
+    if (unmet > 0) {
+      // The one place this layer has teeth. Everything else can be quiet and a requirement
+      // the plan committed to is still missing — shipping that unseen is what writing the
+      // criteria down was meant to prevent.
+      bus.emitEvent({
+        identifier: rt.identifier,
+        kind: 'notice',
+        label: `📋 ${unmet} of ${status!.criteria!.total} acceptance criteria unmet — needs a human`,
+      });
+    }
+    if (isReviewClean(status) && this.config.review.auto_pr_when_clean) {
       bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: '✅ Self-review clean — opening PR automatically' });
       await this.reviewApproved(rt, issue);
       return;
@@ -1312,7 +1323,9 @@ export class Orchestrator {
       await this.workspace.io.writeFile(handle, SCRATCH.prevReview, review);
 
       const status = await this.reviewStatus(handle);
-      const fixable = status ? status.blocker + status.suggestion : 0;
+      // Unmet criteria count as fixable: they mean code is missing, and the fix turn reads
+      // the `## Acceptance criteria` section of pending_review.md that names which.
+      const fixable = fixableCount(status);
       if (fixable === 0 || round >= maxFixRounds) {
         if (fixable > 0) {
           bus.emitEvent({
@@ -1330,7 +1343,9 @@ export class Orchestrator {
         identifier: rt.identifier,
         kind: 'phase',
         phase: 'review_fixing',
-        label: `🔧 Auto-fixing review findings (BLOCKER ${status?.blocker ?? 0}, SUG ${status?.suggestion ?? 0})`,
+        label: `🔧 Auto-fixing review findings (BLOCKER ${status?.blocker ?? 0}, SUG ${status?.suggestion ?? 0}${
+          unmetCriteria(status) > 0 ? `, UNMET ${unmetCriteria(status)}` : ''
+        })`,
       });
       // Reads the findings in pending_review.md — produces no card file.
       const fix = await this.dispatch(rt, issue, PROMPTS.applyReviewFixes, true, 'implementation');
@@ -1338,15 +1353,8 @@ export class Orchestrator {
     }
   }
 
-  private async reviewStatus(handle: WorkspaceHandle): Promise<{ blocker: number; suggestion: number; nit: number } | null> {
-    const raw = await this.workspace.io.readFile(handle, SCRATCH.reviewStatus);
-    if (!raw) return null;
-    try {
-      const p = JSON.parse(raw) as Record<string, unknown>;
-      return { blocker: Number(p.blocker) || 0, suggestion: Number(p.suggestion) || 0, nit: Number(p.nit) || 0 };
-    } catch {
-      return null;
-    }
+  private async reviewStatus(handle: WorkspaceHandle): Promise<ReviewStatus | null> {
+    return parseReviewStatus(await this.workspace.io.readFile(handle, SCRATCH.reviewStatus));
   }
 
   private async reviewApproved(rt: IssueRuntime, issue: Issue): Promise<void> {
