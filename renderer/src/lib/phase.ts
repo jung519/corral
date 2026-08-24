@@ -12,6 +12,11 @@ export function stageIndex(phase: string): number {
     case 'plan_sent':
     case 'pr_plan_sent':
     case 'question_sent':
+    // The three spec gates sit in the approve column for now. Widening the bar to show
+    // them as their own stages is CRL-104; until then they at least land on the right one.
+    case 'requirements_sent':
+    case 'design_sent':
+    case 'tasks_sent':
       return 1;
     case 'implementing':
     case 'review_fixing':
@@ -35,6 +40,9 @@ const IDLE_PHASES = new Set([
   'plan_sent',
   'pr_plan_sent',
   'question_sent',
+  'requirements_sent',
+  'design_sent',
+  'tasks_sent',
   'review_sent',
   'pr_open',
   'auth_error_waiting',
@@ -48,7 +56,16 @@ export function isWorking(phase: string): boolean {
 
 /** Phases that are in-flight but paused on a human action or an external event (PR
  * merge) — not the agent working, but the issue is still actively progressing. */
-const WAITING_PHASES = new Set(['plan_sent', 'pr_plan_sent', 'question_sent', 'review_sent', 'pr_open']);
+const WAITING_PHASES = new Set([
+  'plan_sent',
+  'pr_plan_sent',
+  'question_sent',
+  'requirements_sent',
+  'design_sent',
+  'tasks_sent',
+  'review_sent',
+  'pr_open',
+]);
 
 export type PhaseActivity = 'working' | 'waiting' | 'error' | 'done' | 'idle';
 
@@ -83,6 +100,15 @@ export function waitingLabelKey(phase: string): string {
     case 'plan_sent':
     case 'pr_plan_sent':
       return 'wait.planApproval';
+    // Named separately rather than folded into the plan label: with three gates in a row,
+    // "awaiting plan approval" three times running tells the reader nothing about where
+    // they are.
+    case 'requirements_sent':
+      return 'wait.requirementsApproval';
+    case 'design_sent':
+      return 'wait.designApproval';
+    case 'tasks_sent':
+      return 'wait.tasksApproval';
     case 'review_sent':
       return 'wait.reviewApproval';
     case 'question_sent':

@@ -266,7 +266,18 @@ export interface WorkspaceAdapter {
  * or Slack. The only human touch-points: plan approval (with option selection),
  * review approval, PR-fix-plan approval, and ad-hoc questions.
  */
-export type ApprovalKind = 'plan' | 'fix_plan' | 'review' | 'pr_plan' | 'question';
+export type ApprovalKind =
+  | 'plan'
+  | 'fix_plan'
+  | 'review'
+  | 'pr_plan'
+  | 'question'
+  // Spec-driven planning splits the single plan gate into three (SDD S2). Nothing raises
+  // these until the split lands; they are here first so the change that does is only about
+  // the flow, not about widening every union at the same time.
+  | 'requirements'
+  | 'design'
+  | 'tasks';
 
 export interface ApprovalRequest {
   identifier: string;
@@ -309,6 +320,11 @@ export type IssuePhase =
   | 'plan_reviewing'
   | 'plan_sent'
   | 'pr_plan_sent'
+  // The three spec gates (SDD S2), each waiting on a human exactly like `plan_sent`.
+  // Unused until the planning split produces them — see ApprovalKind above.
+  | 'requirements_sent'
+  | 'design_sent'
+  | 'tasks_sent'
   | 'implementing'
   | 'question_sent'
   | 'review_sent'
@@ -324,6 +340,12 @@ export type IssuePhase =
 export const WAITING_PHASES: ReadonlySet<IssuePhase> = new Set([
   'plan_sent',
   'pr_plan_sent',
+  // Listing these the moment the phases exist, not when something first sets them: a
+  // `*_sent` phase missing from this set reads as "idle", and the poller would dispatch
+  // straight over a gate a human is standing at.
+  'requirements_sent',
+  'design_sent',
+  'tasks_sent',
   'review_sent',
   'question_sent',
   'pr_open',
@@ -334,4 +356,6 @@ export const WAITING_PHASES: ReadonlySet<IssuePhase> = new Set([
  * Unattended phases (no human gate, no external wake event) that a restart can
  * leave mid-run. On recovery these are marked retryable rather than auto-redispatched.
  */
+// The spec gates are deliberately absent: they are waiting on a person, not a run the
+// restart cut short, so there is nothing to resume.
 export const RESUMABLE_PHASES: ReadonlySet<IssuePhase> = new Set(['implementing', 'review_fixing']);

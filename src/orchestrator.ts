@@ -1613,7 +1613,16 @@ export class Orchestrator {
 
 /** Compact one-line error for UI messages. */
 /** Phases whose awaited step `redispatchPhase` can re-run in place (others need a Restart). */
-const RETRYABLE_PHASES = new Set<string>(['plan_sent', 'pr_plan_sent', 'review_sent', 'implementing', 'review_fixing']);
+const RETRYABLE_PHASES = new Set<string>([
+  'plan_sent',
+  'pr_plan_sent',
+  'requirements_sent',
+  'design_sent',
+  'tasks_sent',
+  'review_sent',
+  'implementing',
+  'review_fixing',
+]);
 
 function oneLineErr(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);
