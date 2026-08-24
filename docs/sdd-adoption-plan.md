@@ -87,19 +87,18 @@ SDD 자체는 차별점이 아니다. **SDD를 어디에 놓았는가**가 차�
 파일 셋만 빈 문자열로 덮는다.
 
 ```javascript
-// src/orchestrator.ts — wipeOutputs
-writeFile(handle, SCRATCH.pendingPlan, '')
-writeFile(handle, SCRATCH.pendingReview, '')
-writeFile(handle, SCRATCH.reply, '')
+// src/orchestrator.ts — 각 dispatch가 자기 산출물만 선언한다 (CRL-88 이후)
+dispatch(..., 'planning', [SCRATCH.pendingPlan])   // 계획을 쓰는 턴
+dispatch(..., 'review',   [SCRATCH.pendingReview]) // 리뷰를 통합하는 턴
+dispatch(..., 'implementation')                    // 읽기만 하는 턴 — 아무것도 안 지운다
 ```
 
 지정 목록이지 디렉터리 청소가 아니므로 `.corral/spec/` 아래 파일은 애초에 대상이 아니다.
-`SCRATCH`에는 이미 `staticQa`·`semgrep`·`planDraft`·`planOptions`·`prevReview`가 있고 **전부
-wipe를 안 탄다** — 여러 dispatch에 걸쳐 사는 파일이 이미 다섯이다. 스펙 3문서도 같은 자리에
-놓이면 된다.
+게다가 CRL-88 이후로는 **선언하지 않은 파일은 어느 턴도 건드리지 않는다.** 스펙 3문서는
+아무 dispatch도 산출물로 선언하지 않는 한 그냥 살아 있다.
 
 (초안을 `plan_draft.md`로 복사하는 코드는 그대로 있다. 통합 dispatch가 `pending_plan.md`를
-비우기 때문이고, 그건 위 셋에 들어 있어서다.)
+새로 쓰기 때문이다.)
 
 **T9/T10이 진짜 신규 엔진이다.** 나머지는 기존 구조의 재배치에 가깝다.
 
