@@ -155,7 +155,11 @@ from the approved plan — **carry those verdicts through**; a criterion the cod
 is the whole point of having written it down. Consolidate everything into
 `.corral/pending_review.md`,
 and write the unresolved counts as JSON to `.corral/review_status.json`:
-`{"blocker": N, "suggestion": N, "nit": N}`.{% if direction %} When consolidating, calibrate
+`{"blocker": N, "suggestion": N, "nit": N}`. When the approved plan carried `REQ-n`
+criteria, add how they came out — `"criteria": {"total": N, "met": N}` — counting the same
+verdicts you just wrote into the report. **Leave `criteria` out entirely when the plan had
+no `REQ-n` labels**; an absent field means "not applicable", and `{"total": 0, "met": 0}`
+would claim there were zero criteria.{% if direction %} When consolidating, calibrate
 the SEVERITY of subjective / priority findings to the **Direction** above (a speed/MVP
 direction → downgrade or drop cosmetic and gold-plating items; a stability/mature direction
 → hold strict). Never downgrade a correctness, security, data-loss, or broken-behavior

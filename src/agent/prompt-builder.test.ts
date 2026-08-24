@@ -120,6 +120,15 @@ describe('prompt-builder', () => {
     expect(out.indexOf('this turn is just as final as that one')).toBeGreaterThan(commit);
   });
 
+  it('asks the consolidation to record how the criteria came out', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(out).toMatch(/"criteria": \{"total": N, "met": N\}/);
+    // Absent and {0,0} mean different things — a plan with no REQ labels vs a plan that
+    // defined none — and only the first must leave the old behaviour alone (CRL-108).
+    expect(out).toMatch(/Leave `criteria` out entirely when the plan had\s+no `REQ-n` labels/);
+  });
+
   it('renders signals in the configured language', () => {
     const ko = buildSignals(createTranslator('ko'));
     expect(ko.approve).toBe('✅ 승인됨');
