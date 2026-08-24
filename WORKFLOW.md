@@ -53,7 +53,9 @@ The operator has set a **direction** for how this work should be judged. Apply i
 Write every human-facing file you produce — `.corral/pending_plan.md`,
 `.corral/pending_review.md`, `.corral/question.md`, and the title/body in
 `.corral/pr_meta.json` — in **{{ language | default: "English" }}**. Keep code,
-identifiers, file paths, commands, and severity labels (BLOCKER/SUGGESTION/NIT) in English.
+identifiers, file paths, commands, severity labels (BLOCKER/SUGGESTION/NIT), and the EARS
+keywords (`WHEN`/`WHILE`/`IF`/`THEN`/`WHERE`/`THE SYSTEM SHALL`) with their `REQ-n` labels
+in English — they are notation, not prose. What you say around them is in the language above.
 
 ## Issue
 
@@ -71,7 +73,29 @@ identifiers, file paths, commands, and severity labels (BLOCKER/SUGGESTION/NIT) 
    the skills/conventions repo at `{{ reference_path }}` so the plan follows its rules.{% endif %}
 2. Write a plan to `.corral/pending_plan.md` (Markdown): which repo(s) you will change and
    why, the approach, the files you will change (prefix each with its repo dir, e.g.
-   `server/src/...`), edge cases, and **testable acceptance criteria**.
+   `server/src/...`), edge cases, and **testable acceptance criteria** (see below).
+   - Number the acceptance criteria `REQ-1`, `REQ-2`, … and write each one in EARS
+     notation — one requirement per line, picking the form that fits:
+
+     | Form | Template |
+     |---|---|
+     | Ubiquitous (always true) | `THE SYSTEM SHALL <response>` |
+     | Event-driven | `WHEN <trigger> THE SYSTEM SHALL <response>` |
+     | State-driven | `WHILE <state> THE SYSTEM SHALL <response>` |
+     | Unwanted behaviour | `IF <condition> THEN THE SYSTEM SHALL <response>` |
+     | Optional feature | `WHERE <feature is present> THE SYSTEM SHALL <response>` |
+
+     Pick the form that matches what you mean. Do not force an invariant into `WHEN` —
+     a criterion with no trigger is ubiquitous, and an error path is `IF … THEN`.
+
+     ```
+     REQ-1: WHEN a refresh token that has already been rotated is presented,
+            THE SYSTEM SHALL reject the request and invalidate that user's tokens.
+     REQ-2: IF the upstream tracker is unreachable for longer than the retry budget,
+            THEN THE SYSTEM SHALL leave the issue in its current state and surface the failure.
+     ```
+   - Reference the IDs from the rest of the plan: mark each file you will change and each
+     edge case with the `REQ-n` it serves. An ID nothing points at is not worth writing.
    - If there are genuinely distinct viable approaches, present them as numbered options
      (recommended first) and write the option labels as a JSON array to
      `.corral/plan_options.json`. A single approach → omit that file.{% if direction %}
@@ -83,7 +107,9 @@ identifiers, file paths, commands, and severity labels (BLOCKER/SUGGESTION/NIT) 
 ### Consolidate plan
 Independent critiques are in `.corral/plan_critique_*.md`. Fold them into the final vetted
 plan at `.corral/pending_plan.md` (keep options + acceptance criteria; note how each
-critique was addressed). Do not modify code.{% if direction %} Keep the final plan aligned
+critique was addressed). **Keep every `REQ-n` label attached to the same requirement** —
+renumbering breaks the references in the rest of the plan. A requirement dropped in
+consolidation loses its ID; a new one takes the next unused number. Do not modify code.{% if direction %} Keep the final plan aligned
 with the **Direction** above where the issue is neutral (it is guiding, not a rule).{% endif %}
 
 ### B — Plan feedback

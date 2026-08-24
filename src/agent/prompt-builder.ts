@@ -91,7 +91,7 @@ export function directionCheckPrompt(label: string, text: string, outPath: strin
 /** Language-independent operational instructions sent to the agent. */
 export const PROMPTS = {
   consolidateReview: `Please consolidate the review rounds into ${SCRATCH.pendingReview}.`,
-  consolidatePlan: `Please consolidate the plan critiques into the final vetted plan (${SCRATCH.pendingPlan}).`,
+  consolidatePlan: `Please consolidate the plan critiques into the final vetted plan (${SCRATCH.pendingPlan}). Keep every REQ-n label attached to the same requirement.`,
   applyReviewFixes: 'Please apply the BLOCKER and SUGGESTION fixes from the review and commit.',
 } as const;
 
