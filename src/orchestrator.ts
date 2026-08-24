@@ -36,7 +36,7 @@ import {
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
 import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } from './core/direction.js';
-import { SCRATCH, SCRATCH_DIR } from './core/paths.js';
+import { SCRATCH, SCRATCH_DIR, SPEC } from './core/paths.js';
 import { wipeProduced } from './core/scratch-outputs.js';
 import { describeUncommitted, uncommittedAcross } from './core/uncommitted.js';
 import { fixableCount, isReviewClean, parseReviewStatus, unmetCriteria, type ReviewStatus } from './core/review-status.js';
@@ -53,7 +53,9 @@ import {
   type WorkspaceAdapter,
   type WorkspaceHandle,
 } from './core/types.js';
-import type { ApprovalDetail } from './core/types.js';
+import type { ApprovalDetail,
+  ApprovalKind,
+} from './core/types.js';
 import type { ResolvedProfile } from './profile/index.js';
 import type { RepositoryRouter } from './repository/router.js';
 import { PlanCritiqueOrchestrator } from './review/plan-critique.js';
@@ -261,10 +263,16 @@ export class Orchestrator {
 
   /** Re-create a lost pending approval from the workspace's `.corral/` file. */
   private async recoverPendingApproval(rt: IssueRuntime, handle: WorkspaceHandle): Promise<void> {
-    const spec: Record<string, { file: string; kind: 'plan' | 'pr_plan' | 'review' | 'fix_plan' }> = {
+    const spec: Record<string, { file: string; kind: ApprovalKind }> = {
       plan_sent: { file: SCRATCH.pendingPlan, kind: 'plan' },
       pr_plan_sent: { file: SCRATCH.pendingPlan, kind: 'pr_plan' },
       review_sent: { file: SCRATCH.pendingReview, kind: 'review' },
+      // The spec gates recover the same way — the card is rebuilt from the document the
+      // human was looking at. Listed here rather than with the flow that raises them
+      // (CRL-103) because it is the file paths that were missing, and they exist now.
+      requirements_sent: { file: SPEC.requirements, kind: 'requirements' },
+      design_sent: { file: SPEC.design, kind: 'design' },
+      tasks_sent: { file: SPEC.tasks, kind: 'tasks' },
     };
     let s = spec[rt.phase];
     if (!s) return;
