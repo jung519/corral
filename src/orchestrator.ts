@@ -1635,6 +1635,18 @@ export class Orchestrator {
     log.info('issue completed; workspace cleaned up');
   }
 
+  /**
+   * Whether planning runs as three spec gates or one plan.
+   *
+   * The dashboard needs it, not just the flow: the phase bar shows three approval stages in
+   * split mode, and deriving that from the current phase would make the bar collapse from
+   * three stages back to one the moment the gates are passed — losing the reader's place
+   * exactly when the long part of the run starts (CRL-104).
+   */
+  get specMode(): 'single' | 'split' {
+    return this.config.spec_mode;
+  }
+
   /** Snapshot for the dashboard: each tracked issue + its accumulated cost. */
   snapshot(): Array<IssueRuntime & { cost: number }> {
     return this.store.all().map((rt) => ({ ...rt, cost: this.cost.get(rt.identifier)?.costUsd ?? 0 }));

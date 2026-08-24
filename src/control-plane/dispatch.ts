@@ -108,6 +108,11 @@ export async function dispatch(
       if (!deps.setup) return NO_SETUP;
       // For the app when it writes the file itself — see `SetupHost.configMerge`.
       return { yaml: deps.setup.configMerge(String(a.yaml ?? '')) };
+    case 'specModeSet': {
+      if (!deps.setup) return NO_SETUP;
+      const mode = a.mode === 'split' ? 'split' : 'single';
+      return { ...(await deps.setup.specModeWrite(mode)), specMode: mode };
+    }
     case 'configSet':
       if (!deps.setup) return NO_SETUP;
       // Writes, then rebuilds the orchestrator in place — a remote core has no parent
@@ -217,7 +222,12 @@ export async function dispatch(
       // BOTH — it is what explains a core that has stopped calling models.
       return { budget: deps.ops.budgetSnapshot() };
     case 'state':
-      return { issues: o ? o.snapshot() : [], pending: deps.channel.getPending(), events: bus.recent() };
+      return {
+        issues: o ? o.snapshot() : [],
+        pending: deps.channel.getPending(),
+        events: bus.recent(),
+        specMode: o?.specMode ?? 'single',
+      };
     case 'candidates':
       return o
         ? await o.listCandidates({ cursor: a.cursor as string | undefined, limit: a.limit as number | undefined })

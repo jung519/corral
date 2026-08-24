@@ -76,6 +76,14 @@ export async function configParsed(): Promise<{ config?: unknown; raw?: unknown 
 }
 
 /**
+ * Flip spec mode. Always the core's job, local or remote — it owns the YAML parser and the
+ * schema, and a one-key document written from here would erase the rest (CRL-104).
+ */
+export async function specModeWrite(mode: 'single' | 'split'): Promise<{ ok: boolean; error?: string }> {
+  return (await callCore('specModeSet', { mode })) as { ok: boolean; error?: string };
+}
+
+/**
  * Persist the config. Remotely this also brings the core up on it (there is no parent
  * process out there to respawn it), so the reload's verdict is what comes back — the
  * wizard shows it instead of claiming success.

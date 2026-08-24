@@ -34,8 +34,13 @@ import YAML from 'yaml';
  *
  * Kept as a list rather than "whatever is missing" so that a block the wizard *stopped*
  * writing on purpose is not resurrected forever by accident.
+ *
+ * `spec_mode` is a scalar rather than a block, and it is here for the same reason as the
+ * rest: the wizard renders the whole document from the fields it models, so turning
+ * spec-driven planning on and then editing anything in the wizard would silently turn it
+ * back off (CRL-104).
  */
-export const PRESERVED_BLOCKS = ['control_plane', 'review', 'plan_review'] as const;
+export const PRESERVED_BLOCKS = ['control_plane', 'review', 'plan_review', 'spec_mode'] as const;
 
 /**
  * Fields inside blocks the wizard rewrites, which therefore do NOT survive a save.

@@ -17,6 +17,9 @@ declare global {
         /** Saving against a remote core also restarts it on the new config, so failures
          *  (bad token, unreachable tracker) come back here instead of passing silently. */
         write(yaml: string): Promise<{ ok: boolean; error?: string }>;
+        /** Change planning shape only. The core does the read-modify-write, because this
+         *  window has no YAML parser and a one-key document would erase the rest. */
+        specMode(mode: 'single' | 'split'): Promise<{ ok: boolean; error?: string }>;
       };
       draft: {
         read(): Promise<string | null>;

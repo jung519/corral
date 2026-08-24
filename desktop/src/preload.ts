@@ -23,6 +23,9 @@ const api = {
     /** Save the config. Against a remote core this also restarts it on the new config,
      *  so the result carries why that failed (bad token, unreachable tracker). */
     write: (yaml: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('config:write', yaml),
+    /** Change planning shape only — the core rewrites the file so nothing else is lost. */
+    specMode: (mode: 'single' | 'split'): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('config:specMode', mode),
   },
   /** In-progress wizard draft (non-secret fields) persisted to userData. */
   draft: {
