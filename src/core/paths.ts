@@ -40,5 +40,28 @@ export const SCRATCH = {
   planCritique: (n: number): string => `${SCRATCH_DIR}/plan_critique_${n}.md`,
 } as const;
 
+/**
+ * The spec documents of spec-driven planning (SDD S2).
+ *
+ * Unlike `pending_plan.md`, these are meant to live across many dispatches: requirements
+ * are written once and then read by the design turn, the task turn, the implementation, and
+ * the review. That only works because a dispatch now clears exactly the outputs it declares
+ * and nothing else (CRL-88) — before that, surviving a dispatch was an accident of which of
+ * two hard-coded lists a file happened to be on.
+ *
+ * **No dispatch may declare these as its outputs.** Doing so would blank a later turn's
+ * input, which is the failure CRL-88 was about; `scratch-outputs.test.ts` pins it.
+ */
+export const SPEC_DIR = `${SCRATCH_DIR}/spec`;
+
+export const SPEC = {
+  /** WHAT must be true — EARS criteria with REQ-n ids. */
+  requirements: `${SPEC_DIR}/requirements.md`,
+  /** HOW it will be built — the approach, traced back to REQ ids. */
+  design: `${SPEC_DIR}/design.md`,
+  /** The ordered work, as checkboxes referencing the REQ ids they serve. */
+  tasks: `${SPEC_DIR}/tasks.md`,
+} as const;
+
 /** Where the rendered workflow guide is written in the workspace. */
 export const WORKFLOW_FILE = `${SCRATCH_DIR}/WORKFLOW.md`;

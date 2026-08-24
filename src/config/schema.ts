@@ -361,6 +361,20 @@ export const ConfigSchema = z.object({
   plan_review: PlanReviewSchema,
   /** Max issues active (workspaces) at once. */
   max_active_issues: z.number().int().positive().default(3),
+  /**
+   * How planning is shaped: one plan document, or the three spec gates
+   * (requirements → design → tasks) of spec-driven development.
+   *
+   * Defaults to `single`, and the reason is not the extra money. The daily token ceiling is
+   * ONE pool shared by the development and operational pillars (`core/token-budget.ts`), so
+   * roughly 2.4x the dev-side calls does not just cost more — it takes that much away from
+   * the operational pipeline, which then stops running. `split` is something an operator
+   * turns on knowing that, not something that arrives with an upgrade.
+   *
+   * (It also keeps in-flight issues out of it: a plan written before the split still means
+   * what it meant.)
+   */
+  spec_mode: z.enum(['single', 'split']).default('single'),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

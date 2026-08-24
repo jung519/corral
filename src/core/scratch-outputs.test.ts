@@ -14,7 +14,7 @@
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { SCRATCH } from './paths.js';
+import { SCRATCH, SPEC, SPEC_DIR } from './paths.js';
 import { wipeProduced } from './scratch-outputs.js';
 import type { WorkspaceHandle, WorkspaceIO } from './types.js';
 
@@ -81,9 +81,63 @@ describe('dispatch call sites', () => {
     expect(declaring[0]).toContain("'review'");
   });
 
+  /**
+   * The spec documents are read across many turns — requirements by the design turn, both
+   * by the task turn, all three by the implementation and the review. Declaring one as a
+   * turn's output would blank the next turn's input, which is exactly the bug CRL-88 fixed
+   * on `pending_plan.md`. They survive by being named nowhere, so that is what is pinned
+   * here (CRL-101).
+   */
+  it('no dispatch declares a spec document as its output', () => {
+    const offenders = dispatchCalls().filter(
+      (call) => call.includes('SPEC.') || call.includes('.corral/spec/'),
+    );
+    expect(offenders).toEqual([]);
+  });
+
   it('every plan-writing turn declares pending_plan.md, and no other turn does', () => {
     // Kickoff draft, consolidation, the empty-output retry, answering a question, and the
     // review-feedback turn that may write a fix plan.
     expect(dispatchCalls().filter((c) => c.includes('SCRATCH.pendingPlan'))).toHaveLength(5);
+  });
+});
+
+describe('spec document paths', () => {
+  it('live under their own directory, distinct from each other', () => {
+    const paths = [SPEC.requirements, SPEC.design, SPEC.tasks];
+    for (const p of paths) expect(p.startsWith(`${SPEC_DIR}/`)).toBe(true);
+    expect(new Set(paths).size).toBe(3);
+  });
+
+  it('are not part of the scratch files a turn can be asked to clear', () => {
+    // SCRATCH is what a dispatch may name in `produces`. Keeping the spec paths out of it
+    // means the wipe list cannot reach them even by mistake.
+    expect(Object.values(SCRATCH)).not.toContain(SPEC.requirements);
+    expect(Object.values(SCRATCH)).not.toContain(SPEC.design);
+    expect(Object.values(SCRATCH)).not.toContain(SPEC.tasks);
+  });
+});
+
+/**
+ * A restart during a human gate must be able to put the card back. That was already true
+ * for the plan and the review; the spec gates could not do it because the paths did not
+ * exist yet (CRL-102 left it here deliberately).
+ */
+describe('restart recovery', () => {
+  it('knows which document backs each spec gate', () => {
+    const table = ORCHESTRATOR.slice(
+      ORCHESTRATOR.indexOf('recoverPendingApproval'),
+      ORCHESTRATOR.indexOf('let s = spec[rt.phase]'),
+    );
+    for (const [phase, file, kind] of [
+      ['requirements_sent', 'SPEC.requirements', "'requirements'"],
+      ['design_sent', 'SPEC.design', "'design'"],
+      ['tasks_sent', 'SPEC.tasks', "'tasks'"],
+    ]) {
+      const row = table.split('\n').find((l) => l.includes(`${phase}:`));
+      expect(row, `${phase} missing from the recovery table`).toBeDefined();
+      expect(row).toContain(file);
+      expect(row).toContain(kind);
+    }
   });
 });
