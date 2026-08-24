@@ -80,15 +80,7 @@ So, concretely:
 - If you genuinely cannot finish, commit what works and write what is left to
   `.corral/question.md`. A stated gap is worth far more than an unfinished intention.
 
-## Branches (what to do, based on the orchestrator's prompt)
-
-### A — Planning (fresh session, no prior memory)
-1. Inspect the ACTUAL repositories (the subdirectories above) to ground your plan in
-   reality, and identify which repo(s) the work belongs to.{% if reference_path %} First review
-   the skills/conventions repo at `{{ reference_path }}` so the plan follows its rules.{% endif %}
-2. Write a plan to `.corral/pending_plan.md` (Markdown): which repo(s) you will change and
-   why, the approach, the files you will change (prefix each with its repo dir, e.g.
-   `server/src/...`), edge cases, and **testable acceptance criteria** (see below).
+{%- capture ears_forms -%}
    - Number the acceptance criteria `REQ-1`, `REQ-2`, … and write each one in EARS
      notation — one requirement per line, picking the form that fits:
 
@@ -109,7 +101,18 @@ So, concretely:
      REQ-2: IF the upstream tracker is unreachable for longer than the retry budget,
             THEN THE SYSTEM SHALL leave the issue in its current state and surface the failure.
      ```
-   - Reference the IDs from the rest of the plan: mark each file you will change and each
+{%- endcapture -%}
+
+## Branches (what to do, based on the orchestrator's prompt)
+
+### A — Planning (fresh session, no prior memory)
+1. Inspect the ACTUAL repositories (the subdirectories above) to ground your plan in
+   reality, and identify which repo(s) the work belongs to.{% if reference_path %} First review
+   the skills/conventions repo at `{{ reference_path }}` so the plan follows its rules.{% endif %}
+2. Write a plan to `.corral/pending_plan.md` (Markdown): which repo(s) you will change and
+   why, the approach, the files you will change (prefix each with its repo dir, e.g.
+   `server/src/...`), edge cases, and **testable acceptance criteria** (see below).
+{{ ears_forms }}   - Reference the IDs from the rest of the plan: mark each file you will change and each
      edge case with the `REQ-n` it serves. An ID nothing points at is not worth writing.
    - If there are genuinely distinct viable approaches, present them as numbered options
      (recommended first) and write the option labels as a JSON array to
@@ -119,20 +122,75 @@ So, concretely:
 3. If you cannot proceed without a decision from the human, write the question to
    `.corral/question.md` instead of a plan, and stop.
 
+### A1 — Requirements (spec mode; fresh session, no prior memory)
+1. Inspect the ACTUAL repositories to ground the requirements in what exists, and identify
+   which repo(s) the work belongs to.{% if reference_path %} First review the
+   skills/conventions repo at `{{ reference_path }}`.{% endif %}
+2. Write `.corral/spec/requirements.md`: **what must become true**, and nothing about how.
+   No file names, no APIs, no chosen libraries — those are the next document's job. Include
+   the edge cases and failure modes the issue implies.
+{{ ears_forms }}
+3. If you cannot proceed without a decision from the human, write the question to
+   `.corral/question.md` instead and stop.
+
+### A2 — Design (spec mode)
+Read `.corral/spec/requirements.md` first — it is approved and binding; a different agent
+may have written it, so rely on the file.
+
+Write `.corral/spec/design.md`: **how** it will be built. Which repo(s) change and why, the
+approach and the alternatives rejected, the files you will touch (prefix each with its repo
+dir, e.g. `server/src/...`), the data/API shapes, and the failure handling.
+
+- **Every design decision names the `REQ-n` it serves.** A decision serving no requirement is
+  scope you invented; a requirement no decision covers is a gap — say so rather than leaving
+  it silent.
+- If there are genuinely distinct viable approaches, present them as numbered options
+  (recommended first) and write the option labels as a JSON array to
+  `.corral/plan_options.json`. A single approach → omit that file.{% if direction %}
+- Let the **Direction** above steer the trade-offs where the requirements are neutral.{% endif %}
+
+### A3 — Tasks (spec mode)
+Read `.corral/spec/requirements.md` and `.corral/spec/design.md` first.
+
+Write `.corral/spec/tasks.md` as an ordered checklist. **A parser reads this file**, so the
+shape is fixed:
+
+```md
+- [ ] T1 — Add the token rotation guard (REQ-1)
+- [ ] T2 — Reject reused refresh tokens and invalidate the family (REQ-1, REQ-4) [after: T1]
+- [ ] T3 — Surface the tracker outage instead of dropping the issue (REQ-2)
+```
+
+- One task per line, in the order they should be done.
+- `- [ ] ` then `T<n>` then ` — ` then what the task does.
+- `(REQ-1, REQ-3)` — every task names at least one requirement it serves.
+- `[after: T1]` — only when a task genuinely cannot start before another finishes. Omit it
+  otherwise; a false dependency serialises work for no reason.
+- Size each task so it is one coherent commit. Not "implement the feature", not "rename a
+  variable".
+- Do not tick any box. The implementation ticks them as it goes.
+
 ### Consolidate plan
 Independent critiques are in `.corral/plan_critique_*.md`. Fold them into the final vetted
-plan at `.corral/pending_plan.md` (keep options + acceptance criteria; note how each
-critique was addressed). **Keep every `REQ-n` label attached to the same requirement** —
+document — **the one the orchestrator's prompt names** (in spec mode that is the spec file
+for the stage you are in, otherwise `.corral/pending_plan.md`) — keeping options + acceptance
+criteria and noting how each critique was addressed. **Keep every `REQ-n` label attached to the same requirement** —
 renumbering breaks the references in the rest of the plan. A requirement dropped in
 consolidation loses its ID; a new one takes the next unused number. Do not modify code.{% if direction %} Keep the final plan aligned
 with the **Direction** above where the issue is neutral (it is guiding, not a rule).{% endif %}
 
 ### B — Plan feedback
-The prompt starts with a feedback marker. Revise `.corral/pending_plan.md` accordingly and stop.
+The prompt starts with a feedback marker. Revise the document the prompt names — the spec
+file for the current stage in spec mode, `.corral/pending_plan.md` otherwise — and stop.
 
 ### C — Implementation (after plan approval)
-First read the approved plan at `.corral/pending_plan.md` and implement exactly that — a
-different agent may have written it, so rely on the file, not memory of the planning chat.
+First read what was approved and implement exactly that — a different agent wrote it, so rely
+on the file, not memory of the planning chat.
+
+- **Spec mode**: `.corral/spec/requirements.md`, `.corral/spec/design.md` and
+  `.corral/spec/tasks.md`. Work the tasks in order and tick each `- [ ]` to `- [x]` as you
+  commit it, so an interrupted run can be picked up from where it stopped.
+- Otherwise: `.corral/pending_plan.md`.
 {% if reference_path %}Before writing any code, (re)check the skills/conventions repo at
 `{{ reference_path }}` and follow its rules as you implement.
 {% endif %}For EACH repo you need to change:

@@ -10,7 +10,7 @@
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SCRATCH, WORKFLOW_FILE } from '../core/paths.js';
+import { SCRATCH, SPEC, WORKFLOW_FILE } from '../core/paths.js';
 import type { Issue } from '../core/types.js';
 import type { Translator } from '../profile/i18n.js';
 
@@ -94,6 +94,47 @@ export const PROMPTS = {
   consolidatePlan: `Please consolidate the plan critiques into the final vetted plan (${SCRATCH.pendingPlan}). Keep every REQ-n label attached to the same requirement.`,
   applyReviewFixes: 'Please apply the BLOCKER and SUGGESTION fixes from the review and commit.',
 } as const;
+
+/** The three spec stages, in the order they gate on (SDD S2). */
+export const SPEC_STAGES = ['requirements', 'design', 'tasks'] as const;
+export type SpecStage = (typeof SPEC_STAGES)[number];
+
+/** Which document each stage writes, and which branch of the guide produces it. */
+const STAGE_DOC: Record<SpecStage, { file: string; branch: string }> = {
+  requirements: { file: SPEC.requirements, branch: 'A1' },
+  design: { file: SPEC.design, branch: 'A2' },
+  tasks: { file: SPEC.tasks, branch: 'A3' },
+};
+
+/** The document a stage produces — the orchestrator gates on this file. */
+export function specDoc(stage: SpecStage): string {
+  return STAGE_DOC[stage].file;
+}
+
+/** The stage after this one, or null when the last gate has been approved. */
+export function nextSpecStage(stage: SpecStage): SpecStage | null {
+  return SPEC_STAGES[SPEC_STAGES.indexOf(stage) + 1] ?? null;
+}
+
+/**
+ * Kick off one spec stage.
+ *
+ * Names the branch and the output file rather than letting the agent infer them: the guide
+ * carries three planning branches in spec mode and picking the wrong one silently produces
+ * the wrong document.
+ */
+export function specStagePrompt(issue: Issue, stage: SpecStage, workflowFile: string = WORKFLOW_FILE): string {
+  const { file, branch } = STAGE_DOC[stage];
+  return [
+    `You are Corral's worker for issue ${issue.identifier}.`,
+    `Follow ${workflowFile}, branch ${branch} (${stage}), and write ${file}.`,
+  ].join(' ');
+}
+
+/** Fold the critiques of one spec stage back into that stage's document. */
+export function consolidateSpecPrompt(stage: SpecStage): string {
+  return `Please consolidate the critiques into the final vetted ${stage} document (${specDoc(stage)}).`;
+}
 
 export interface Signals {
   /** Plan/review approved — proceed. */

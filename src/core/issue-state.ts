@@ -68,6 +68,15 @@ export interface IssueRuntime {
    * is already there instead of re-deriving it (CRL-89/91).
    */
   uncommitted?: boolean;
+  /**
+   * Which spec gate the run is at, in `spec_mode: split`.
+   *
+   * The critique phase is shared — there is one `plan_reviewing`, not three — so this is
+   * what says *which* document is being vetted when a restart lands mid-stage. Absent means
+   * the single-plan flow, which is also how state files written before spec mode existed
+   * read: no field, no split (plan doc §10).
+   */
+  specStage?: 'requirements' | 'design' | 'tasks';
 }
 
 export class IssueStateStore {
