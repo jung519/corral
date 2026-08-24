@@ -4,9 +4,11 @@
   import ModelPicker from './lib/ModelPicker.svelte';
   import ClaudeTokenDialog from './ClaudeTokenDialog.svelte';
   import CopyButton from './lib/CopyButton.svelte';
+  import CredentialField from './lib/CredentialField.svelte';
   import PasteButton from './lib/PasteButton.svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import {
+    activeSlot,
     apiSupported,
     buildConfigYaml,
     configured,
@@ -20,6 +22,7 @@
     stateFromConfig,
     newFallback,
     newRepo,
+    oauthSlot,
     OPTIONAL_STATE_KEYS,
     type Provider,
     PROVIDER_NAMES,
@@ -29,7 +32,10 @@
     secretRefs,
     secretsFor,
     serviceFor,
+    slotComplaint,
+    type StageAgent,
     type TrackerKind,
+    type Transport,
     unrunnableAssigned,
     validateStep,
     type WizardState,
@@ -143,8 +149,10 @@
 
   // ── Fallback agents (failover order) ──────────────────────────────────────
   function addFallback() {
-    // Default a new fallback to a provider valid for the current backend.
-    s.fallbacks = [...s.fallbacks, newFallback(s.backend === 'docker' ? 'claude' : 'gemini')];
+    // Default a new fallback to a provider valid for the current backend, on the same
+    // transport the primary runs — a fallback added without a thought behaves the way it
+    // did before entries could differ (CRL-94).
+    s.fallbacks = [...s.fallbacks, newFallback(s.backend === 'docker' ? 'claude' : 'gemini', s.transport)];
   }
   function removeFallback(i: number) {
     s.fallbacks = s.fallbacks.filter((_, j) => j !== i);
@@ -162,6 +170,25 @@
     f.planningModel = d.planning;
     f.implementationModel = d.implementation;
     f.reviewModel = d.review;
+  }
+
+  /**
+   * Switch one entry (a fallback or a stage) between CLI and API.
+   *
+   * The models go back to that provider's defaults. The two transports name models
+   * differently — CLI takes version-agnostic aliases (`opus`), the API wants a concrete id
+   * — so a value carried across the switch is one the other side does not accept
+   * (CRL-81). Resetting says so by doing it rather than leaving a stale name in the box.
+   */
+  function setEntryTransport(entry: FallbackEntry | StageAgent, transport: Transport) {
+    entry.transport = transport;
+    const d = defaultModels(entry.provider);
+    if ('model' in entry) entry.model = d.planning;
+    else {
+      entry.planningModel = d.planning;
+      entry.implementationModel = d.implementation;
+      entry.reviewModel = d.review;
+    }
   }
 
   // Non-sequential: jump to any step freely; validation is per-item (sidebar ✓) and
@@ -193,7 +220,9 @@
   ] as const;
   const providerName = (p: Provider) => providers.find((x) => x.id === p)?.name ?? p;
   // A provider may be assigned to a role only if it has a usable auth path.
-  const isConfigured = (p: Provider) => configured(s, p, secretSaved);
+  /** Configured *for the transport that entry runs on*. The account cards ask about the
+   *  primary; a fallback or a stage asks about its own (CRL-94). */
+  const isConfigured = (p: Provider, transport: Transport = s.transport) => configured(s, p, secretSaved, transport);
 
   function setStageProvider(stage: (typeof STAGES)[number]['key'], p: Provider) {
     s.stages[stage].provider = p;
@@ -323,7 +352,22 @@
     test.notion = await window.corral.validate.notion(s.notionToken);
   }
 
-  const keyHint = (p: Provider) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-…');
+  const keyHint = (p: Provider) => (p === 'gemini' ? 'AIza…' : p === 'gpt' ? 'sk-…' : 'sk-ant-api…');
+
+  /**
+   * What is wrong with what was just pasted, in a sentence, or nothing.
+   *
+   * Checked as it is typed rather than on save: the two claude credentials differ by
+   * prefix, so a token in the wrong box is knowable immediately, and knowing it later
+   * costs a container build and an agent turn to find out (CRL-85).
+   */
+  function complaint(p: Provider, kind: 'key' | 'oauth'): string {
+    const c = slotComplaint(p, kind, kind === 'key' ? s.accounts[p].key : s.accounts[p].oauth);
+    return c ? t(`account.${c}`) : '';
+  }
+
+  /** codex's login is present — imported this session or already in the store. */
+  const codexHeld = $derived(!!s.accounts.gpt.oauth.trim() || secretSaved(serviceFor('gpt'), 'oauth'));
 
   // Notion schema → property/option dropdowns (no manual name typing).
   type NotionProp = { name: string; type: string; options: string[] };
@@ -484,37 +528,57 @@
                 <span class="tag muted">{t('account.unset')}</span>
               {/if}
             </div>
-            <!-- Every secret here arrives by copy from somewhere else — a console page, a
-                 terminal. A paste button is the whole interaction. -->
-            <div class="keyrow">
-              <input
-                class="acct-key"
-                type="password"
-                disabled={apiUnsupported}
-                bind:value={s.accounts[p.id].key}
-                placeholder={!s.accounts[p.id].key && secretSaved(serviceFor(p.id), 'default') ? t('field.secretSaved') : keyHint(p.id)}
-              />
-              {#if hasBridge && !apiUnsupported}<PasteButton onpaste={(v) => (s.accounts[p.id].key = v)} />{/if}
-            </div>
-            {#if hasBridge && s.transport === 'cli'}
-              <div class="acct-btns">
-                <!-- No install check under docker. The CLI that runs comes from the worker
-                     image, so a host probe answers about the wrong machine — and a button
-                     that can only ever say "not found, install it" about a machine nothing
-                     runs on is worse than no button (CRL-78). -->
-                {#if s.backend !== 'docker'}<Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button>{/if}
-                <!-- One button. The dialog carries the steps, and the manual route is a
-                     line inside it — reachable without having to fail into it first. -->
-                {#if p.id === 'claude'}<Button onclick={() => (tokenDialog = 'auto')}>{t('oauth.setupBtn')}</Button>{/if}
-                {#if p.id === 'gpt'}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
+            <!-- Both slots the config has, each with its name on it, and the one this
+                 configuration will actually read marked. A single unlabelled box over two
+                 slots is what made this card unusable (CRL-85). -->
+            <CredentialField
+              label={t('account.slotKey')}
+              bind:value={s.accounts[p.id].key}
+              placeholder={keyHint(p.id)}
+              active={activeSlot(s, p.id, secretSaved) === 'key'}
+              saved={secretSaved(serviceFor(p.id), 'default')}
+              disabled={apiUnsupported}
+              warning={complaint(p.id, 'key')}
+            />
+
+            {#if oauthSlot(p.id) === 'subscription'}
+              <CredentialField
+                label={t('account.slotOauth')}
+                bind:value={s.accounts[p.id].oauth}
+                placeholder="sk-ant-oat…"
+                active={activeSlot(s, p.id, secretSaved) === 'oauth'}
+                saved={secretSaved(serviceFor(p.id), 'oauth')}
+                warning={complaint(p.id, 'oauth')}
+              >
+                {#if hasBridge}
+                  <!-- The attempt sits beside the field it fills rather than in place of
+                       it. However it ends, the box is already there and the command that
+                       prints the token is one click from the clipboard — nobody has to
+                       fail into the manual route to find it (CRL-85). -->
+                  <Button onclick={() => (tokenDialog = 'auto')}>{t('oauth.setupBtn')}</Button>
+                  <CopyButton value="claude setup-token" label={t('oauth.copyCommand')} />
+                {/if}
+              </CredentialField>
+            {:else if oauthSlot(p.id) === 'codex'}
+              <!-- Not a field: codex's auth.json is a base64 blob, imported whole. Nobody
+                   types it, so offering a box to type it in would be a lie. -->
+              <div class="slot-import">
+                <span class="slot-label">{t('account.slotCodex')}</span>
+                {#if codexHeld}<span class="tag ok">✓ {t('account.set')}</span>{/if}
+                {#if hasBridge}<Button onclick={() => importOauth('gpt')}>{t('codex.importBtn')}</Button>{/if}
               </div>
+            {/if}
+
+            <!-- No install check under docker. The CLI that runs comes from the worker
+                 image, so a host probe answers about the wrong machine — and a button
+                 that can only ever say "not found, install it" about a machine nothing
+                 runs on is worse than no button (CRL-78). -->
+            {#if hasBridge && s.transport === 'cli' && s.backend !== 'docker'}
+              <div class="acct-btns"><Button onclick={() => testCli(p.id)}>{t('cli.check')}</Button></div>
             {/if}
             {#if apiUnsupported}
               <p class="helper warn-text">{t('account.apiNoHint')}</p>
             {:else}
-              {#if (p.id === 'claude' || p.id === 'gpt') && !s.accounts[p.id].oauth && secretSaved(serviceFor(p.id), 'oauth')}
-                <p class="helper">{t('account.oauthSaved')}</p>
-              {/if}
               {#if !runnableInBackend(s, p.id)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>
               {:else if s.backend === 'docker' && s.transport === 'cli'}
                 <!-- Where this agent's credential comes from once it runs in a container. -->
@@ -568,18 +632,21 @@
         </div>
       {:else}
         {#each STAGES as st}
+          {@const a = s.stages[st.key]}
           <div class="stage-row">
             <span class="stage-name">{t(st.label)}</span>
-            <select value={s.stages[st.key].provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as Provider)}>
-              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
+            <select value={a.provider} onchange={(e) => setStageProvider(st.key, e.currentTarget.value as Provider)}>
+              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id, a.transport)}
+                  >{p.name}{isConfigured(p.id, a.transport) ? '' : ` · ${t('account.unset')}`}</option
+                >{/each}
             </select>
-            <ModelPicker
-              bind:value={s.stages[st.key].model}
-              provider={s.stages[st.key].provider}
-              transport={s.transport}
-              id={`stage-${st.key}`}
-            />
+            <select value={a.transport} onchange={(e) => setEntryTransport(a, e.currentTarget.value as Transport)}>
+              <option value="cli">{t('transport.cli')}</option>
+              <option value="api">{t('transport.api')}</option>
+            </select>
+            <ModelPicker bind:value={a.model} provider={a.provider} transport={a.transport} id={`stage-${st.key}`} />
           </div>
+          {#if !runnableInBackend(s, a.provider, a.transport)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
         {/each}
       {/if}
 
@@ -587,45 +654,53 @@
         <p class="run-warn">⚠ {t('assign.runWarn').replace('{p}', unrunnableAssigned(s).map(providerName).join(', '))}</p>
       {/if}
 
-      {#if s.transport === 'cli'}
-        <!-- ── 4 · fallbacks ── -->
-        <div class="sec-head"><span class="sec-no">4</span> {t('agent.fallbackLabel')}</div>
-        <p class="hint">{t('agent.fallbackHint')}</p>
-        {#each s.fallbacks as f, i (i)}
-          <div class="repo-card">
-            <div class="repo-head">
-              <span class="repo-num">#{i + 2} · {providerName(f.provider)}</span>
-              <div class="reorder">
-                <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
-                <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
-                <button class="ghost-x" onclick={() => removeFallback(i)} title={t('repo.remove')}>✕</button>
-              </div>
+      <!-- ── 4 · fallbacks ──
+           No longer gated on the primary being `cli`. That gate meant an API-first setup
+           could not have failover at all, and it was the same mistake as the transport
+           itself: one global answer deciding something that belongs to each entry
+           (CRL-94). -->
+      <div class="sec-head"><span class="sec-no">4</span> {t('agent.fallbackLabel')}</div>
+      <p class="hint">{t('agent.fallbackHint')}</p>
+      {#each s.fallbacks as f, i (i)}
+        <div class="repo-card">
+          <div class="repo-head">
+            <span class="repo-num">#{i + 2} · {providerName(f.provider)}</span>
+            <div class="reorder">
+              <button class="ghost-x" onclick={() => moveFallback(i, -1)} disabled={i === 0} title="↑">↑</button>
+              <button class="ghost-x" onclick={() => moveFallback(i, 1)} disabled={i === s.fallbacks.length - 1} title="↓">↓</button>
+              <button class="ghost-x" onclick={() => removeFallback(i)} title={t('repo.remove')}>✕</button>
             </div>
-            <div class="stage-row">
-              <span class="stage-name">{t('assign.agent')}</span>
-              <select value={f.provider} onchange={(e) => setFallbackProvider(f, e.currentTarget.value as Provider)}>
-                {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id)}>{p.name}{isConfigured(p.id) ? '' : ` · ${t('account.unset')}`}</option>{/each}
-              </select>
-            </div>
-            <div class="three">
-              <label class="field"
-                ><span>{t('field.planningModel')}</span>
-                <ModelPicker bind:value={f.planningModel} provider={f.provider} transport={s.transport} id={`fb${i}-plan`} /></label
-              >
-              <label class="field"
-                ><span>{t('field.implModel')}</span>
-                <ModelPicker bind:value={f.implementationModel} provider={f.provider} transport={s.transport} id={`fb${i}-impl`} /></label
-              >
-              <label class="field"
-                ><span>{t('field.reviewModel')}</span>
-                <ModelPicker bind:value={f.reviewModel} provider={f.provider} transport={s.transport} id={`fb${i}-review`} /></label
-              >
-            </div>
-            {#if !runnableInBackend(s, f.provider)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
           </div>
-        {/each}
-        <button class="add-repo" onclick={addFallback}>{t('agent.fallbackAdd')}</button>
-      {/if}
+          <div class="stage-row">
+            <span class="stage-name">{t('assign.agent')}</span>
+            <select value={f.provider} onchange={(e) => setFallbackProvider(f, e.currentTarget.value as Provider)}>
+              {#each providers as p}<option value={p.id} disabled={!isConfigured(p.id, f.transport)}
+                  >{p.name}{isConfigured(p.id, f.transport) ? '' : ` · ${t('account.unset')}`}</option
+                >{/each}
+            </select>
+            <select value={f.transport} onchange={(e) => setEntryTransport(f, e.currentTarget.value as Transport)}>
+              <option value="cli">{t('transport.cli')}</option>
+              <option value="api">{t('transport.api')}</option>
+            </select>
+          </div>
+          <div class="three">
+            <label class="field"
+              ><span>{t('field.planningModel')}</span>
+              <ModelPicker bind:value={f.planningModel} provider={f.provider} transport={f.transport} id={`fb${i}-plan`} /></label
+            >
+            <label class="field"
+              ><span>{t('field.implModel')}</span>
+              <ModelPicker bind:value={f.implementationModel} provider={f.provider} transport={f.transport} id={`fb${i}-impl`} /></label
+            >
+            <label class="field"
+              ><span>{t('field.reviewModel')}</span>
+              <ModelPicker bind:value={f.reviewModel} provider={f.provider} transport={f.transport} id={`fb${i}-review`} /></label
+            >
+          </div>
+          {#if !runnableInBackend(s, f.provider, f.transport)}<p class="helper warn-text">{t('account.dockerNoRunHint')}</p>{/if}
+        </div>
+      {/each}
+      <button class="add-repo" onclick={addFallback}>{t('agent.fallbackAdd')}</button>
     {:else if step === 1}
       <h1>{t('step.repo')}</h1>
       <p class="subtitle">{t('repo.multiHint')}</p>
@@ -1236,9 +1311,18 @@
     gap: 6px;
     font-weight: 500;
   }
-  .acct-key {
-    width: 100%;
-    margin-bottom: 8px;
+  /* codex's slot: a label, whether it is held, and the button that fetches it. No input,
+     because the value is a base64 blob nobody types (CRL-85). */
+  .slot-import {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 10px;
+  }
+  .slot-label {
+    font-size: 12px;
+    color: var(--text-dim);
   }
   .acct-btns {
     display: flex;

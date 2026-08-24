@@ -62,9 +62,21 @@ export interface AccountCred {
   oauth: string;
 }
 
-/** One stage's agent in per-stage mode: provider + the model for that stage. */
+/**
+ * How a turn reaches its model.
+ *
+ * Per entry, not per app. The schema and the runtime have always allowed a mix — a
+ * fallback or a stage carries its own `transport` and `bootstrap.ts` honours it — but the
+ * wizard used to push one global choice into every entry, so the one combination the
+ * operational AI actually needs (claude on `cli` for the subscription token, gemini on
+ * `api` because its CLI cannot be run without tools) could not be expressed (CRL-94).
+ */
+export type Transport = 'api' | 'cli';
+
+/** One stage's agent in per-stage mode: provider + transport + the model for that stage. */
 export interface StageAgent {
   provider: Provider;
+  transport: Transport;
   model: string;
 }
 
@@ -72,6 +84,7 @@ export interface StageAgent {
  *  References a configured provider (credentials come from that provider's account). */
 export interface FallbackEntry {
   provider: Provider;
+  transport: Transport;
   planningModel: string;
   implementationModel: string;
   reviewModel: string;
@@ -79,7 +92,7 @@ export interface FallbackEntry {
 
 export interface WizardState {
   provider: Provider;
-  transport: 'api' | 'cli';
+  transport: Transport;
   /** Independent per-provider accounts (credentials). Keyed by provider. */
   accounts: Record<Provider, AccountCred>;
   planningModel: string;
@@ -149,9 +162,9 @@ export function initialState(): WizardState {
     fallbacks: [],
     perStageAgents: false,
     stages: {
-      planning: { provider: 'claude', model: 'opus' },
-      implementation: { provider: 'claude', model: 'sonnet' },
-      review: { provider: 'claude', model: 'opus' },
+      planning: { provider: 'claude', transport: 'cli', model: 'opus' },
+      implementation: { provider: 'claude', transport: 'cli', model: 'sonnet' },
+      review: { provider: 'claude', transport: 'cli', model: 'opus' },
     },
     repos: [{ ...newRepo(), key: 'main' }],
     trackerKind: 'notion',
@@ -207,11 +220,16 @@ export function defaultModels(provider: Provider): {
   return { planning: first, implementation: m[1] ?? first, review: first };
 }
 
-/** A new fallback entry defaulting to the given provider's models. */
-export function newFallback(provider: Provider = 'gemini'): FallbackEntry {
+/** A new fallback entry defaulting to the given provider's models.
+ *
+ *  `transport` starts from whatever the primary agent is on: a fallback added without a
+ *  thought behaves the way it did before entries could differ, and changing it is a
+ *  deliberate act rather than something to discover. */
+export function newFallback(provider: Provider = 'gemini', transport: Transport = 'cli'): FallbackEntry {
   const d = defaultModels(provider);
   return {
     provider,
+    transport,
     planningModel: d.planning,
     implementationModel: d.implementation,
     reviewModel: d.review,
@@ -263,9 +281,74 @@ export function firstApiProvider(): Provider {
   return PROVIDERS.find((p) => apiSupported(p)) ?? 'claude';
 }
 
-/** Whether this provider can execute under the current backend + transport. */
-export function runnableInBackend(s: WizardState, provider: Provider): boolean {
-  return !(s.backend === 'docker' && dockerBlocked(provider, s.transport));
+/**
+ * Whether this provider can execute under the current backend + transport.
+ *
+ * `transport` defaults to the primary agent's, which is what a caller asking about the
+ * account cards means. A fallback or a stage passes its own — the same provider can be
+ * blocked in one entry and fine in the next, which is the whole point of letting entries
+ * differ (CRL-94).
+ */
+export function runnableInBackend(s: WizardState, provider: Provider, transport: Transport = s.transport): boolean {
+  return !(s.backend === 'docker' && dockerBlocked(provider, transport));
+}
+
+/**
+ * The second credential slot, when a provider has one.
+ *
+ * Every provider stores an API key at `<service>:default`. Two of them also have a
+ * *subscription* credential at `<service>:oauth`, and it is a different kind of thing:
+ * claude's is a token the CLI prints (`claude setup-token`) and a person pastes; gpt's is
+ * codex's own `auth.json`, imported wholesale rather than typed. Gemini has no second
+ * slot, so its card stays one field.
+ *
+ * The card has to know this, because a provider with two slots and one visible field is
+ * what made the screen unusable — the visible field was the API key, and a subscription
+ * token typed into it saved fine and then failed at the first agent turn (CRL-85).
+ */
+export function oauthSlot(p: Provider): 'subscription' | 'codex' | null {
+  if (p === 'claude') return 'subscription';
+  if (p === 'gpt') return 'codex';
+  return null;
+}
+
+/**
+ * Which of the two slots the configured run will actually read.
+ *
+ * Read off the runtime rather than guessed: the API transport sends the key as
+ * `x-api-key` and never looks at the OAuth slot (`claude-api.ts`), while the CLI transport
+ * prefers the OAuth token when there is one and falls back to the key (`claude-cli.ts`,
+ * resolved in `bootstrap.ts`). Marking the live slot on the card is the point — two
+ * password fields with nothing to tell them apart is the problem being fixed.
+ */
+export function activeSlot(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): 'key' | 'oauth' {
+  if (s.transport === 'api' || !oauthSlot(p)) return 'key';
+  const svc = serviceFor(p);
+  return !!s.accounts[p].oauth.trim() || isSaved(svc, 'oauth') ? 'oauth' : 'key';
+}
+
+/** What is wrong with a value, when it is decidable from the value alone. */
+export type SlotComplaint = 'oauthInKey' | 'keyInOauth' | 'oauthShape';
+
+/**
+ * A value that plainly belongs in the other slot, or in neither.
+ *
+ * Only claude has two fields a person types into, and its two credentials are told apart
+ * by prefix: `sk-ant-api…` is a console key, `sk-ant-oat…` is a subscription token. That
+ * makes both directions of the mix-up decidable before saving, and it makes a third case
+ * decidable too — a token that starts with neither, which is what a truncated paste looks
+ * like. One of those (92 characters, no prefix) authenticated nowhere and cost a 43-minute
+ * container build before anything said so.
+ *
+ * Silent whenever the answer is not certain: this warns, it does not block, and a wrong
+ * warning on a format that later changes is worse than no warning.
+ */
+export function slotComplaint(p: Provider, kind: 'key' | 'oauth', value: string): SlotComplaint | null {
+  const v = value.trim();
+  if (!v || p !== 'claude') return null;
+  if (kind === 'key') return v.startsWith('sk-ant-oat') ? 'oauthInKey' : null;
+  if (v.startsWith('sk-ant-api')) return 'keyInOauth';
+  return v.startsWith('sk-ant-oat') ? null : 'oauthShape';
 }
 
 /** A stored or freshly-entered credential exists for this provider. */
@@ -288,28 +371,63 @@ export function hasCred(s: WizardState, p: Provider, isSaved: SecretSavedFn = ()
  * different machine's login, invisible to the container. Counting it let the wizard
  * finish with no credential at all and fail at the first agent turn instead (CRL-78).
  * On the local backend it is the same CLI that will run, so there it still counts. */
-export function configured(s: WizardState, p: Provider, isSaved: SecretSavedFn = () => false): boolean {
+export function configured(
+  s: WizardState,
+  p: Provider,
+  isSaved: SecretSavedFn = () => false,
+  transport: Transport = s.transport,
+): boolean {
   // API mode needs an actual key, and only claude has an api adapter.
-  if (s.transport === 'api') return apiSupported(p) && hasCred(s, p, isSaved);
+  if (transport === 'api') return apiSupported(p) && hasCred(s, p, isSaved);
   if (hasCred(s, p, isSaved)) return true;
   if (s.backend === 'local') return true;
   return p === 'claude' && s.dockerMountLogin;
 }
 
+/** The three stages, in the order the pipeline runs them. */
+export const STAGE_KEYS = ['planning', 'implementation', 'review'] as const;
+
 /** Distinct providers used in per-stage mode (plan/build/review). */
 export function stageProviders(s: WizardState): Array<Provider> {
-  return [...new Set([s.stages.planning.provider, s.stages.implementation.provider, s.stages.review.provider])];
+  return [...new Set(STAGE_KEYS.map((k) => s.stages[k].provider))];
+}
+
+/**
+ * Every agent the assignment actually routes to, each with the transport it will run on.
+ *
+ * A provider alone is no longer enough to answer "can this run" or "is this configured":
+ * gemini is fine on `api` under docker and blocked on `cli`, and an entry may differ from
+ * the primary (CRL-94). So the checks below take pairs.
+ */
+export function assignedAgents(s: WizardState): Array<{ provider: Provider; transport: Transport }> {
+  const used = s.perStageAgents
+    ? STAGE_KEYS.map((k) => ({ provider: s.stages[k].provider, transport: s.stages[k].transport }))
+    : [{ provider: s.provider, transport: s.transport }];
+  const all = [...used, ...s.fallbacks.map((f) => ({ provider: f.provider, transport: f.transport }))];
+  // One row per distinct pair — the same provider on two transports is two answers.
+  const seen = new Set<string>();
+  return all.filter(({ provider, transport }) => {
+    const id = `${provider}:${transport}`;
+    if (seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
 }
 
 /** All providers referenced by the current assignment (primary/stages + fallbacks). */
 export function assignedProviders(s: WizardState): Array<Provider> {
-  const used = s.perStageAgents ? stageProviders(s) : [s.provider];
-  return [...new Set([...used, ...s.fallbacks.map((f) => f.provider)])];
+  return [...new Set(assignedAgents(s).map((a) => a.provider))];
 }
 
 /** Assigned providers that cannot run under the current backend (→ run-time block). */
 export function unrunnableAssigned(s: WizardState): Array<Provider> {
-  return assignedProviders(s).filter((p) => !runnableInBackend(s, p));
+  return [
+    ...new Set(
+      assignedAgents(s)
+        .filter((a) => !runnableInBackend(s, a.provider, a.transport))
+        .map((a) => a.provider),
+    ),
+  ];
 }
 
 export function validateStep(step: number, s: WizardState, isSaved: SecretSavedFn = () => false): string {
@@ -323,7 +441,13 @@ export function validateStep(step: number, s: WizardState, isSaved: SecretSavedF
       // selected — so a docker setup could be finished with every stage reading
       // "Claude · 미설정" and fail at the first agent turn, on the far side of an image
       // build and a clone (CRL-78).
-      const unset = assignedProviders(s).filter((p) => !configured(s, p, isSaved));
+      const unset = [
+        ...new Set(
+          assignedAgents(s)
+            .filter((a) => !configured(s, a.provider, isSaved, a.transport))
+            .map((a) => a.provider),
+        ),
+      ];
       if (unset.length) {
         const names = unset.map((p) => PROVIDER_NAMES[p]).join(', ');
         return vt(s.backend === 'docker' ? 'validate.agentCredDocker' : 'validate.agentCred', { p: names });
@@ -474,14 +598,15 @@ function credLines(provider: Provider, indent: string): string[] {
 /** YAML for agent.fallbacks (one ordered entry each). Credentials come from the
  *  provider's shared account (service:default / :oauth).
  *
- *  Transport follows the one chosen in step 1. It used to be hardcoded `cli`, which made
- *  the API choice a lie for every setup that had a fallback or per-stage agents: the
- *  screen said api, the file said cli, and the file wins (CRL-79). */
+ *  Each entry writes **its own** transport. It was hardcoded `cli` (CRL-79 made it follow
+ *  the step-1 choice instead), and then that single choice was pushed into every entry —
+ *  which still could not say "claude on cli, gemini on api", the one shape the operational
+ *  AI needs (CRL-94). */
 function fallbackYaml(s: WizardState): string[] {
   if (s.fallbacks.length === 0) return [];
   const lines = ['  fallbacks:'];
   for (const f of s.fallbacks) {
-    lines.push(`    - provider: ${f.provider}`, `      transport: ${s.transport}`, ...credLines(f.provider, '      '));
+    lines.push(`    - provider: ${f.provider}`, `      transport: ${f.transport}`, ...credLines(f.provider, '      '));
     lines.push(
       '      models:',
       `        planning: ${yamlStr(f.planningModel)}`,
@@ -497,14 +622,14 @@ function fallbackYaml(s: WizardState): string[] {
  *
  *  A stage override replaces the routing whole (`bootstrap.ts`), so its transport is the
  *  one that runs — hardcoding `cli` here silently overrode the API choice for all three
- *  stages (CRL-79). The wizard applies one transport to every stage; the schema allows a
- *  mix, and a hand-written mix collapses to the step-1 choice on the next save. */
+ *  stages (CRL-79). Each stage now carries its own, so a hand-written mix survives a save
+ *  instead of collapsing onto the primary's choice (CRL-94). */
 function stageAgentYaml(s: WizardState): string[] {
   if (!s.perStageAgents) return [];
   const lines = ['  stages:'];
-  for (const stage of ['planning', 'implementation', 'review'] as const) {
+  for (const stage of STAGE_KEYS) {
     const a = s.stages[stage];
-    lines.push(`    ${stage}:`, `      provider: ${a.provider}`, `      transport: ${s.transport}`, ...credLines(a.provider, '      '));
+    lines.push(`    ${stage}:`, `      provider: ${a.provider}`, `      transport: ${a.transport}`, ...credLines(a.provider, '      '));
     lines.push('      models:', `        ${stage}: ${yamlStr(a.model)}`);
   }
   return lines;
@@ -590,6 +715,12 @@ const arr = (v: unknown): unknown[] => (Array.isArray(v) ? v : []);
  * Secrets are never here. The config holds credential *pointers*; the values live in the
  * store, and the screen asks it separately whether each one is set.
  */
+/** A transport from a config file, or the given default. Anything unrecognised falls back
+ *  rather than throwing: this is a read path for a file a person may have hand-edited. */
+function readTransport(value: unknown, fallback: Transport): Transport {
+  return value === 'api' || value === 'cli' ? value : fallback;
+}
+
 export function stateFromConfig(config: unknown, written?: unknown): WizardState {
   const c = obj(config);
   // What was actually in the file, for the fields where presence is the meaning. Falls
@@ -615,11 +746,14 @@ export function stateFromConfig(config: unknown, written?: unknown): WizardState
   // Per-stage agents are on when the config actually names stages — the same test
   // `stageAgentYaml` applies when writing them.
   s.perStageAgents = Object.keys(stages).length > 0;
-  for (const key of ['planning', 'implementation', 'review'] as const) {
+  for (const key of STAGE_KEYS) {
     const stage = obj(stages[key]);
     if (!Object.keys(stage).length) continue;
     s.stages[key] = {
       provider: (str(stage.provider, s.provider) as Provider) ?? s.provider,
+      // Read back per stage. Falling back to the primary's is right for a config written
+      // before entries could differ — it is what that file meant (CRL-94).
+      transport: readTransport(stage.transport, s.transport),
       model: str(obj(stage.models)[key], s.stages[key].model),
     };
   }
@@ -628,7 +762,7 @@ export function stateFromConfig(config: unknown, written?: unknown): WizardState
     const e = obj(f);
     const m = obj(e.models);
     const provider = (str(e.provider, 'gemini') as Provider) ?? 'gemini';
-    const base = newFallback(provider);
+    const base = newFallback(provider, readTransport(e.transport, s.transport));
     return {
       ...base,
       planningModel: str(m.planning, base.planningModel),
