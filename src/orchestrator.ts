@@ -36,7 +36,7 @@ import {
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
 import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } from './core/direction.js';
-import { SCRATCH } from './core/paths.js';
+import { SCRATCH, SCRATCH_DIR } from './core/paths.js';
 import { wipeProduced } from './core/scratch-outputs.js';
 import { describeUncommitted, uncommittedAcross } from './core/uncommitted.js';
 import {
@@ -719,7 +719,18 @@ export class Orchestrator {
   }
 
   /** Plan vetting: critics over the draft → consolidate → send approval card. */
-  private async vetAndSendPlan(rt: IssueRuntime, issue: Issue, handle: WorkspaceHandle, focus?: string): Promise<void> {
+  /**
+   * `resume` is set only by `resumeVetting()` — the restart-recovery path. A fresh cycle and
+   * a human-requested re-vet both start over; a run the core interrupted picks up where it
+   * left off instead of paying for finished rounds again (CRL-87).
+   */
+  private async vetAndSendPlan(
+    rt: IssueRuntime,
+    issue: Issue,
+    handle: WorkspaceHandle,
+    focus?: string,
+    resume = false,
+  ): Promise<void> {
     rt.phase = 'plan_reviewing';
     this.store.upsert(rt);
     bus.emitEvent({
@@ -736,6 +747,7 @@ export class Orchestrator {
       (r) => this.cost.add(rt.identifier, r),
       focus,
       this.buildDirection(),
+      resume,
     );
     // Preserve the draft — consolidation rewrites pending_plan.md from scratch.
     await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
@@ -758,9 +770,19 @@ export class Orchestrator {
       await this.surfaceStuck(rt, 'Failed to resume plan vetting — no draft left. Restart the issue.');
       return;
     }
-    bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: '↻ Auto-resuming interrupted plan vetting' });
+    // Say which rounds survived. A restart that reuses them and a restart that re-runs them
+    // look the same on screen otherwise, and telling them apart is the point (CRL-87).
+    const kept = (await this.workspace.io.list(handle, SCRATCH_DIR)).filter((n) => /^plan_critique_\d+\.md$/.test(n));
+    bus.emitEvent({
+      identifier: rt.identifier,
+      kind: 'notice',
+      label:
+        kept.length > 0
+          ? `↻ Auto-resuming interrupted plan vetting — reusing ${kept.length} finished critique round(s)`
+          : '↻ Auto-resuming interrupted plan vetting',
+    });
     void this.serialize(rt.identifier, () =>
-      this.vetAndSendPlan(rt, issue, handle).catch((err) => {
+      this.vetAndSendPlan(rt, issue, handle, undefined, true).catch((err) => {
         logger.child(rt.identifier).error('resumeVetting failed', String(err));
         bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: `❌ Plan vetting resume failed: ${oneLineErr(err)}` });
       }),
