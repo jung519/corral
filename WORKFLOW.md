@@ -131,7 +131,10 @@ captured them at clone time.)
 ### Consolidate review (self-review)
 Independent review rounds are in `.corral/review_round_*.md`; static-gate facts in
 `.corral/static_qa.json`; semgrep findings (if any) in `.corral/semgrep.json`. Any non-zero
-static-gate command is a BLOCKER. Consolidate everything into `.corral/pending_review.md`,
+static-gate command is a BLOCKER. The rounds also ruled on each `REQ-n` acceptance criterion
+from the approved plan — **carry those verdicts through**; a criterion the code does not meet
+is the whole point of having written it down. Consolidate everything into
+`.corral/pending_review.md`,
 and write the unresolved counts as JSON to `.corral/review_status.json`:
 `{"blocker": N, "suggestion": N, "nit": N}`.{% if direction %} When consolidating, calibrate
 the SEVERITY of subjective / priority findings to the **Direction** above (a speed/MVP
@@ -145,7 +148,11 @@ own bullet — NEVER write a multi-sentence paragraph that runs together into a 
 
 ```md
 ## Summary
-<one or two sentences: overall verdict and the counts>
+<one or two sentences: overall verdict and the counts; say how many criteria are unmet>
+
+## Acceptance criteria
+- REQ-1 — <met/unmet> — <the `file:line` that satisfies it, or what is missing>
+- REQ-2 — <met/unmet> — <…>
 
 ## Findings
 ### [BLOCKER] <short title>
@@ -161,6 +168,9 @@ own bullet — NEVER write a multi-sentence paragraph that runs together into a 
 ## Conclusion
 <blockers, if any, and the recommended next step — one or two lines>
 ```
+
+Omit the `## Acceptance criteria` section entirely when the approved plan carries no
+`REQ-n` labels — an older or hand-written plan is not a defect.
 
 Layout rules: one `###` block per finding, ordered BLOCKER → SUGGESTION → NIT; a blank line
 between every finding; one short sentence per bullet (split long reasoning across bullets,

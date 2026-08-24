@@ -83,6 +83,17 @@ describe('prompt-builder', () => {
     expect(out).toMatch(/mark each file you will change and each\s+edge case with the `REQ-n`/);
   });
 
+  it('tells the consolidation to carry the REQ verdicts into pending_review.md', async () => {
+    // The rounds rule on each criterion; without this the verdicts die in consolidation and
+    // the human never sees which requirement the code missed (CRL-99).
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(out).toContain('## Acceptance criteria');
+    expect(out).toMatch(/carry those verdicts through/);
+    // An older plan without REQ labels must not grow an empty section.
+    expect(out).toMatch(/Omit the `## Acceptance criteria` section entirely/);
+  });
+
   it('renders signals in the configured language', () => {
     const ko = buildSignals(createTranslator('ko'));
     expect(ko.approve).toBe('✅ 승인됨');
