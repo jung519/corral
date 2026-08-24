@@ -44,6 +44,8 @@ export interface StateResponse {
   issues: IssueRuntime[];
   pending: PendingAction[];
   events: CorralEvent[];
+  /** Planning shape. Absent from an older core's reply, which means single (CRL-104). */
+  specMode?: 'single' | 'split';
 }
 
 export interface Candidate {

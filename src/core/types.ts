@@ -266,18 +266,24 @@ export interface WorkspaceAdapter {
  * or Slack. The only human touch-points: plan approval (with option selection),
  * review approval, PR-fix-plan approval, and ad-hoc questions.
  */
-export type ApprovalKind =
-  | 'plan'
-  | 'fix_plan'
-  | 'review'
-  | 'pr_plan'
-  | 'question'
-  // Spec-driven planning splits the single plan gate into three (SDD S2). Nothing raises
-  // these until the split lands; they are here first so the change that does is only about
-  // the flow, not about widening every union at the same time.
-  | 'requirements'
-  | 'design'
-  | 'tasks';
+export const APPROVAL_KINDS = [
+  'plan',
+  'fix_plan',
+  'review',
+  'pr_plan',
+  'question',
+  // Spec-driven planning splits the single plan gate into three (SDD S2).
+  'requirements',
+  'design',
+  'tasks',
+] as const;
+
+/**
+ * A value, not just a type, because the dashboard has to have a label for every one of
+ * them: the approval card renders the kind, and an untranslated kind reaches the reader as
+ * a bare English identifier on the card whose whole content is *which* thing it approves.
+ */
+export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export interface ApprovalRequest {
   identifier: string;

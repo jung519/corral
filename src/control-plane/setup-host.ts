@@ -105,6 +105,32 @@ export class SetupHost {
   }
 
   /**
+   * Flip `spec_mode` without the caller having to render a config document.
+   *
+   * The window has no YAML parser — deliberately; the core is the only side that knows what
+   * a config contains. Sending a one-key document instead would erase everything outside
+   * `PRESERVED_BLOCKS`, so the read-modify-write happens here, where both the parser and
+   * the schema live (CRL-104).
+   */
+  async specModeWrite(mode: 'single' | 'split'): Promise<{ ok: boolean; error?: string }> {
+    const text = this.configRead();
+    if (text === null) return { ok: false, error: 'No config to update.' };
+    let doc: unknown;
+    try {
+      doc = YAML.parse(text);
+    } catch {
+      return { ok: false, error: 'The config on disk does not parse; fix it before changing this.' };
+    }
+    if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+      return { ok: false, error: 'The config on disk is not a mapping.' };
+    }
+    (doc as Record<string, unknown>).spec_mode = mode;
+    mkdirSync(dirname(this.o.configPath), { recursive: true });
+    writeFileSync(this.o.configPath, YAML.stringify(doc, { lineWidth: 100 }), 'utf8');
+    return this.o.reload();
+  }
+
+  /**
    * The same merge, without writing.
    *
    * The desktop writes this file itself when the core runs on the same machine — it has

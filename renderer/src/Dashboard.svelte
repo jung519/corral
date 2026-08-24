@@ -163,10 +163,10 @@
             {@const wl = t(waitingLabelKey(issue.phase))}
             <span class="waiting" title={wl}><span class="pulse" aria-hidden="true"></span>{wl}</span>
           {/if}
-          <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase))}</span>
+          <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase, view.specMode))}</span>
           <span class="cost">${issue.cost.toFixed(4)}</span>
         </div>
-        <div class="bar-row"><PhaseBar phase={issue.phase} /></div>
+        <div class="bar-row"><PhaseBar phase={issue.phase} specMode={view.specMode} /></div>
         <div class="issue-actions">
           {#if issue.url}<a href={issue.url} target="_blank" rel="noreferrer">{t('dash.tracker')} ↗</a>{/if}
           {#each issue.prs ?? [] as pr}

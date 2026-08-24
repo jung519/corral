@@ -71,6 +71,24 @@ describe('what a save keeps', () => {
   it('names every block it keeps', () => {
     // The list is the answer to "what does saving overwrite?", so it is worth asserting
     // that it is a list and not an accident.
-    expect([...PRESERVED_BLOCKS]).toEqual(['control_plane', 'review', 'plan_review']);
+    expect([...PRESERVED_BLOCKS]).toEqual(['control_plane', 'review', 'plan_review', 'spec_mode']);
+  });
+
+  /**
+   * Not a block but a scalar, and the reason it has to be here is the same: the wizard
+   * renders the whole document from the fields it models, so turning spec-driven planning
+   * on and then editing anything in the wizard would silently turn it back off (CRL-104).
+   */
+  it('keeps spec_mode through a wizard save', () => {
+    const merged = mergePreserved(FROM_WIZARD, `${FROM_WIZARD}\nspec_mode: split\n`);
+    expect(merged).toContain('spec_mode: split');
+  });
+
+  it('does not resurrect spec_mode when the incoming document sets it', () => {
+    // Turning it back off has to work — a merge that always carried the old value would
+    // make the setting one-way.
+    const merged = mergePreserved(`${FROM_WIZARD}\nspec_mode: single\n`, `${FROM_WIZARD}\nspec_mode: split\n`);
+    expect(merged).toContain('spec_mode: single');
+    expect(merged).not.toContain('spec_mode: split');
   });
 });

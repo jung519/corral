@@ -1,34 +1,63 @@
 /** Phase → progress-stage + color mapping for the dashboard (see docs/ui-ux.md §5). */
 
-/** i18n keys for the 6 progress stages shown in the issue PhaseBar. */
-export const STAGE_KEYS = ['phase.plan', 'phase.approve', 'phase.implement', 'phase.review', 'phase.pr', 'phase.done'];
+/** i18n keys for the progress stages shown in the issue PhaseBar. */
+const SINGLE_STAGES = ['phase.plan', 'phase.approve', 'phase.implement', 'phase.review', 'phase.pr', 'phase.done'];
 
-/** Which stage (0..5) the orchestrator phase currently sits at. */
-export function stageIndex(phase: string): number {
+/**
+ * Spec mode splits the one approval stage into the three gates it actually is. A stage is
+ * *replaced*, not appended, so `single` renders exactly what it rendered before.
+ */
+const SPLIT_STAGES = [
+  'phase.plan',
+  'kind.requirements',
+  'kind.design',
+  'kind.tasks',
+  'phase.implement',
+  'phase.review',
+  'phase.pr',
+  'phase.done',
+];
+
+export function stageKeys(specMode: string | undefined): string[] {
+  return specMode === 'split' ? SPLIT_STAGES : SINGLE_STAGES;
+}
+
+/**
+ * Which stage the orchestrator phase currently sits at, as an index into `stageKeys()`.
+ *
+ * `specMode` is passed rather than inferred from the phase: after the last gate is approved
+ * the phase says nothing about how planning was shaped, so an inferring bar would collapse
+ * from three approval stages back to one just as the long part of the run begins.
+ */
+export function stageIndex(phase: string, specMode?: string): number {
+  const split = specMode === 'split';
+  // Everything after the approval stage(s) shifts right by the two extra gates.
+  const after = (n: number) => n + (split ? 2 : 0);
   switch (phase) {
     case 'initial':
     case 'plan_reviewing':
       return 0;
+    case 'requirements_sent':
+      return 1;
+    case 'design_sent':
+      return split ? 2 : 1;
+    case 'tasks_sent':
+      return split ? 3 : 1;
     case 'plan_sent':
     case 'pr_plan_sent':
     case 'question_sent':
-    // The three spec gates sit in the approve column for now. Widening the bar to show
-    // them as their own stages is CRL-104; until then they at least land on the right one.
-    case 'requirements_sent':
-    case 'design_sent':
-    case 'tasks_sent':
       return 1;
     case 'implementing':
     case 'review_fixing':
     case 'pr_fixing':
-      return 2;
+      return after(2);
     case 'reviewing':
     case 'review_sent':
-      return 3;
+      return after(3);
     case 'pr_open':
-      return 4;
+      return after(4);
     case 'done':
-      return 5;
+      return after(5);
     default:
       return 0;
   }
@@ -88,9 +117,9 @@ export function phaseColor(phase: string): string {
 }
 
 /** i18n key for the short phase badge label (the active stage, or error). */
-export function phaseLabelKey(phase: string): string {
+export function phaseLabelKey(phase: string, specMode?: string): string {
   if (phase === 'auth_error_waiting') return 'phase.error';
-  return STAGE_KEYS[stageIndex(phase)] ?? 'phase.plan';
+  return stageKeys(specMode)[stageIndex(phase, specMode)] ?? 'phase.plan';
 }
 
 /** i18n key for the waiting badge — phase-specific so it says WHAT is awaited (a plan

@@ -99,6 +99,7 @@ function registerIpc(): void {
   ipcMain.handle('config:read', () => native.configRead());
   ipcMain.handle('config:parsed', () => native.configParsed());
   ipcMain.handle('config:write', (_e, yaml: string) => native.configWrite(yaml));
+  ipcMain.handle('config:specMode', (_e, mode: 'single' | 'split') => native.specModeWrite(mode));
 
   ipcMain.handle('draft:read', () => native.draftRead());
   ipcMain.handle('draft:write', (_e, json: string) => native.draftWrite(json));

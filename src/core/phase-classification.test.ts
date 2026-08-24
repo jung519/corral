@@ -12,7 +12,7 @@
  * `rootDir`, so the same source-reading approach `ops/boundaries.test.ts` uses applies.
  */
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { RESUMABLE_PHASES, WAITING_PHASES, type IssuePhase } from './types.js';
 
 /** The three gates spec-driven planning introduces. */
@@ -83,5 +83,74 @@ describe('the two copies of the waiting list', () => {
     const renderer = new Set(rendererSet('WAITING_PHASES'));
     const missing = [...WAITING_PHASES].filter((p) => !coreOnly.has(p) && !renderer.has(p));
     expect(missing).toEqual([]);
+  });
+});
+
+/**
+ * Spec mode replaces the single approval stage with the three gates it actually is. It has
+ * to be told the mode rather than infer it: once the gates are passed the phase says
+ * nothing about how planning was shaped, and a bar that inferred would collapse from three
+ * stages back to one exactly as the long part of the run begins (CRL-104).
+ */
+describe('the phase bar in spec mode', () => {
+  // These are pure functions, so they are run rather than pattern-matched. Imported
+  // through a computed specifier: a literal one fails `tsc` because the renderer is
+  // outside this project's `rootDir`, while the runtime resolves it fine.
+  let stageIndex: (phase: string, specMode?: string) => number;
+  let stageKeys: (specMode?: string) => string[];
+
+  beforeAll(async () => {
+    const href = new URL('../../renderer/src/lib/phase.ts', import.meta.url).href;
+    const mod = (await import(/* @vite-ignore */ href)) as {
+      stageIndex: typeof stageIndex;
+      stageKeys: typeof stageKeys;
+    };
+    stageIndex = mod.stageIndex;
+    stageKeys = mod.stageKeys;
+  });
+
+  it('leaves the single-mode bar exactly as it was', () => {
+    expect(stageKeys('single')).toEqual(['phase.plan', 'phase.approve', 'phase.implement', 'phase.review', 'phase.pr', 'phase.done']);
+    expect(stageKeys(undefined)).toEqual(stageKeys('single'));
+    for (const [phase, i] of [
+      ['initial', 0],
+      ['plan_sent', 1],
+      ['implementing', 2],
+      ['review_sent', 3],
+      ['pr_open', 4],
+      ['done', 5],
+    ] as const) {
+      expect(stageIndex(phase), phase).toBe(i);
+    }
+  });
+
+  it('splits the approval stage into three, rather than appending', () => {
+    const keys = stageKeys('split');
+    expect(keys).toHaveLength(8);
+    expect(keys.slice(1, 4)).toEqual(['kind.requirements', 'kind.design', 'kind.tasks']);
+    // The stages around it are the same ones, just shifted.
+    expect(keys[0]).toBe('phase.plan');
+    expect(keys.slice(4)).toEqual(['phase.implement', 'phase.review', 'phase.pr', 'phase.done']);
+  });
+
+  it('gives each gate its own column', () => {
+    const at = SPEC_GATES.map((p) => stageIndex(p, 'split'));
+    expect(at).toEqual([1, 2, 3]);
+  });
+
+  it('shifts everything after the gates by the two extra columns', () => {
+    for (const phase of ['implementing', 'review_sent', 'pr_open', 'done']) {
+      expect(stageIndex(phase, 'split'), phase).toBe(stageIndex(phase) + 2);
+    }
+  });
+
+  it('keeps every index inside its own key list', () => {
+    for (const mode of ['single', 'split']) {
+      const keys = stageKeys(mode);
+      for (const phase of ['initial', 'plan_sent', ...SPEC_GATES, 'implementing', 'review_sent', 'pr_open', 'done']) {
+        const i = stageIndex(phase, mode);
+        expect(keys[i], `${phase} @ ${mode}`).toBeDefined();
+      }
+    }
   });
 });
