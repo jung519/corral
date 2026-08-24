@@ -37,6 +37,7 @@ import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-s
 import { logger } from './core/logger.js';
 import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } from './core/direction.js';
 import { SCRATCH } from './core/paths.js';
+import { wipeProduced } from './core/scratch-outputs.js';
 import {
   type AgentAdapter,
   type AgentRunResult,
@@ -526,7 +527,7 @@ export class Orchestrator {
       case 'pr_plan_sent': {
         const kind = rt.phase === 'plan_sent' ? 'plan' : 'pr_plan';
         const msg = 'The previous output was empty. Re-write the plan to `.corral/pending_plan.md` and stop.';
-        const result = await this.dispatch(rt, issue, msg, true, 'planning');
+        const result = await this.dispatch(rt, issue, msg, true, 'planning', [SCRATCH.pendingPlan]);
         if (result.ok) await this.afterPlanProduced(rt, issue, kind);
         return;
       }
@@ -706,7 +707,7 @@ export class Orchestrator {
     const handle = this.handles.get(rt.identifier)!;
     // Direction validation gate (§15) — blocks the issue if a Direction text is rejected.
     if (!(await this.runDirectionCheck(rt, issue, handle))) return;
-    const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning');
+    const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning', [SCRATCH.pendingPlan]);
     if (!draft.ok) return;
     if (await this.handleQuestion(rt, handle)) return;
     if (!(await this.readOutput(handle, SCRATCH.pendingPlan))) {
@@ -735,9 +736,11 @@ export class Orchestrator {
       focus,
       this.buildDirection(),
     );
-    // Preserve the draft before the consolidate dispatch's wipeOutputs clears it.
+    // Preserve the draft — consolidation rewrites pending_plan.md from scratch.
     await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
-    const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidatePlan, true, 'planning');
+    const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidatePlan, true, 'planning', [
+      SCRATCH.pendingPlan,
+    ]);
     if (!consolidate.ok) return;
     await this.afterPlanProduced(rt, issue, 'plan');
   }
@@ -863,6 +866,16 @@ export class Orchestrator {
     prompt: string,
     continueSession: boolean,
     stage: AgentStage,
+    /**
+     * The human-facing files this turn is expected to write. They are blanked first, so a
+     * turn that produces nothing is distinguishable from one that leaves the previous
+     * cycle's file in place.
+     *
+     * Empty by default, and most turns leave it empty: `pending_plan.md` and
+     * `pending_review.md` are *inputs* to the implementation, fix and feedback turns, and
+     * clearing an input is never right. It used to happen on every dispatch (CRL-88).
+     */
+    produces: readonly string[] = [],
   ): Promise<AgentRunResult> {
     const handle = this.handles.get(rt.identifier);
     if (!handle) throw new Error(`no workspace handle for ${rt.identifier}`);
@@ -897,7 +910,7 @@ export class Orchestrator {
         reference_path: this.referencePath(),
         direction: this.buildDirection(),
       });
-      await this.wipeOutputs(handle);
+      await wipeProduced(this.workspace.io, handle, produces);
       // Run-time backend guard: a provider assigned to this stage that can't execute under
       // the current backend (gemini under docker) is cancelled here with a clear message,
       // instead of failing cryptically mid-build. Configurable in setup, blocked at run.
@@ -1085,13 +1098,16 @@ export class Orchestrator {
 
     if (rt.phase === 'question_sent') {
       this.clearApproval(rt);
-      const result = await this.dispatch(rt, issue, text, true, 'planning');
+      const result = await this.dispatch(rt, issue, text, true, 'planning', [SCRATCH.pendingPlan]);
       if (result.ok) await this.afterPlanProduced(rt, issue, 'plan');
       return;
     }
 
     const signal = this.signals.feedback(text);
     if (rt.phase === 'plan_sent' || rt.phase === 'pr_plan_sent') {
+      // Revises the existing plan in place (WORKFLOW.md branch B), so it must survive.
+      // The cost: if the agent edits nothing, the unchanged plan goes back to the human
+      // as though it were a revision. Better than asking it to revise a blank file.
       const result = await this.dispatch(rt, issue, signal, true, 'planning');
       if (result.ok) await this.resendApproval(rt, issue, rt.phase === 'plan_sent' ? 'plan' : 'pr_plan', SCRATCH.pendingPlan);
     } else if (rt.phase === 'review_sent') {
@@ -1099,7 +1115,12 @@ export class Orchestrator {
       // instruction — editing + committing code if asked — then we re-review ONCE and
       // present again (clean → PR, findings → card). No automatic fix→re-review loop.
       this.clearApproval(rt);
-      const result = await this.dispatch(rt, issue, signal, true, 'implementation');
+      // Declares pending_plan.md because this turn is the one place a *fix plan* is born:
+      // asked to plan the fixes rather than apply them, the agent writes one here, and
+      // `recoverPendingApproval` reads it back after a restart. That read only tells a fix
+      // plan from the original implementation plan because this turn blanks the file first.
+      // It consumes pending_review.md, so that one is left alone.
+      const result = await this.dispatch(rt, issue, signal, true, 'implementation', [SCRATCH.pendingPlan]);
       if (!result.ok) return;
       await this.presentReview(rt, issue);
     } else {
@@ -1117,6 +1138,7 @@ export class Orchestrator {
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'implementing', label: `🛠 Implementing${sel}` });
     await this.tracker.transitionIssue(issue, 'in_progress');
 
+    // Reads the approved pending_plan.md (WORKFLOW.md branch C) — produces no card file.
     const impl = await this.dispatch(rt, issue, this.planApprovalPrompt(detail), true, 'implementation');
     if (!impl.ok) return;
     await this.reviewAfterImplement(rt, issue);
@@ -1235,7 +1257,9 @@ export class Orchestrator {
         this.buildDirection(),
       );
       await this.uploadDiff(rt, issue, changed);
-      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review');
+      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review', [
+        SCRATCH.pendingReview,
+      ]);
       if (!consolidate.ok) return null;
       const review = await this.readOutput(handle, SCRATCH.pendingReview);
       if (!review) {
@@ -1265,6 +1289,7 @@ export class Orchestrator {
         phase: 'review_fixing',
         label: `🔧 Auto-fixing review findings (BLOCKER ${status?.blocker ?? 0}, SUG ${status?.suggestion ?? 0})`,
       });
+      // Reads the findings in pending_review.md — produces no card file.
       const fix = await this.dispatch(rt, issue, PROMPTS.applyReviewFixes, true, 'implementation');
       if (!fix.ok) return null;
     }
@@ -1507,14 +1532,6 @@ export class Orchestrator {
       (this.channel as { resolve(id: string): void }).resolve(rt.approvalId);
     }
     rt.approvalId = undefined;
-  }
-
-  private async wipeOutputs(handle: WorkspaceHandle): Promise<void> {
-    await Promise.all([
-      this.workspace.io.writeFile(handle, SCRATCH.pendingPlan, ''),
-      this.workspace.io.writeFile(handle, SCRATCH.pendingReview, ''),
-      this.workspace.io.writeFile(handle, SCRATCH.reply, ''),
-    ]);
   }
 
   private async readOutput(handle: WorkspaceHandle, path: string): Promise<string | null> {

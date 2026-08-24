@@ -24,8 +24,6 @@ export const SCRATCH = {
   planOptions: `${SCRATCH_DIR}/plan_options.json`,
   /** Unresolved finding counts {blocker, suggestion, nit} — drives the auto-fix loop. */
   reviewStatus: `${SCRATCH_DIR}/review_status.json`,
-  /** Agent's reply scratch (feedback answers). */
-  reply: `${SCRATCH_DIR}/pending_reply.md`,
   /** Agent's answer to a read-only Q&A question (structured markdown, preserved verbatim). */
   qaAnswer: `${SCRATCH_DIR}/qa_answer.md`,
   /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}` (§15). */
