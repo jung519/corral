@@ -54,7 +54,8 @@ Write every human-facing file you produce — `.corral/pending_plan.md`,
 `.corral/pending_review.md`, `.corral/question.md`, and the title/body in
 `.corral/pr_meta.json` — in **{{ language | default: "English" }}**. Keep code,
 identifiers, file paths, commands, severity labels (BLOCKER/SUGGESTION/NIT), and the EARS
-keywords (`WHEN`/`WHILE`/`IF`/`THEN`/`WHERE`/`THE SYSTEM SHALL`) with their `REQ-n` labels
+keywords (`WHEN`/`WHILE`/`IF`/`THEN`/`WHERE`/`THE SYSTEM SHALL`/`SHALL CONTINUE TO`) with
+their `REQ-n` labels
 in English — they are notation, not prose. What you say around them is in the language above.
 
 ## Issue
@@ -103,6 +104,46 @@ So, concretely:
      ```
 {%- endcapture -%}
 
+{%- capture defect_shape -%}
+   - **If this issue is a defect report** — something already built behaves wrongly —
+     organise the criteria under three headings instead of one list. Keep numbering them
+     `REQ-1`, `REQ-2`, … straight through: one number space, so the review rules on all of
+     them.
+
+     | Section | Form | What goes in it |
+     |---|---|---|
+     | `## Current Behavior` | `WHEN <condition> THE SYSTEM <wrong behaviour>` | The conditions that reproduce the defect. No `SHALL` here — this is what happens, not what ought to. |
+     | `## Expected Behavior` | the EARS forms above | What it does once fixed. |
+     | `## Unchanged Behavior` | `WHEN <condition> THE SYSTEM SHALL CONTINUE TO <existing behaviour>` | What this fix must not disturb. |
+
+     `SHALL CONTINUE TO` is this project's addition to EARS; treat it as notation and keep
+     it in English like the rest.
+
+     The third section is the one that earns its place. Write down what a plausible fix
+     could plausibly break — the path that shares the code you are about to change, the
+     caller that depends on today's timing, the case the old behaviour was protecting.
+     "The existing tests still pass" is not a behaviour; it is a hope.
+
+     **If nothing is genuinely at risk, say so in one line** rather than leaving the section
+     out. An empty heading and a considered "this fix touches nothing else" read the same on
+     screen and mean opposite things.
+
+     ```
+     ## Current Behavior
+     REQ-1: WHEN a rotated refresh token is presented a second time,
+            THE SYSTEM accepts it and issues a new access token.
+
+     ## Expected Behavior
+     REQ-2: WHEN a rotated refresh token is presented a second time,
+            THE SYSTEM SHALL reject the request and invalidate that user's token family.
+
+     ## Unchanged Behavior
+     REQ-3: WHEN a valid unrotated refresh token is presented,
+            THE SYSTEM SHALL CONTINUE TO issue a new access token without extra latency.
+     ```
+   - **Otherwise** — new capability, changed behaviour — use the single list above.
+{%- endcapture -%}
+
 ## Branches (what to do, based on the orchestrator's prompt)
 
 ### A — Planning (fresh session, no prior memory)
@@ -112,7 +153,8 @@ So, concretely:
 2. Write a plan to `.corral/pending_plan.md` (Markdown): which repo(s) you will change and
    why, the approach, the files you will change (prefix each with its repo dir, e.g.
    `server/src/...`), edge cases, and **testable acceptance criteria** (see below).
-{{ ears_forms }}   - Reference the IDs from the rest of the plan: mark each file you will change and each
+{{ ears_forms }}
+{{ defect_shape }}   - Reference the IDs from the rest of the plan: mark each file you will change and each
      edge case with the `REQ-n` it serves. An ID nothing points at is not worth writing.
    - If there are genuinely distinct viable approaches, present them as numbered options
      (recommended first) and write the option labels as a JSON array to
@@ -130,6 +172,7 @@ So, concretely:
    No file names, no APIs, no chosen libraries — those are the next document's job. Include
    the edge cases and failure modes the issue implies.
 {{ ears_forms }}
+{{ defect_shape }}
 3. If you cannot proceed without a decision from the human, write the question to
    `.corral/question.md` instead and stop.
 
@@ -144,6 +187,9 @@ dir, e.g. `server/src/...`), the data/API shapes, and the failure handling.
 - **Every design decision names the `REQ-n` it serves.** A decision serving no requirement is
   scope you invented; a requirement no decision covers is a gap — say so rather than leaving
   it silent.
+- An **Unchanged Behavior** requirement is not answered with a decision about how to build
+  something. Answer it with what you are *not* touching, and with the reason the change
+  cannot reach it — the boundary, the branch it does not enter, the caller it leaves alone.
 - If there are genuinely distinct viable approaches, present them as numbered options
   (recommended first) and write the option labels as a JSON array to
   `.corral/plan_options.json`. A single approach → omit that file.{% if direction %}
@@ -168,6 +214,10 @@ shape is fixed:
   otherwise; a false dependency serialises work for no reason.
 - Size each task so it is one coherent commit. Not "implement the feature", not "rename a
   variable".
+- **Do not invent a task for an Unchanged Behavior requirement.** There is no work in
+  keeping something the same. If holding it steady needs a guard — a test that would fail
+  if the behaviour drifted — attach that to the task that puts the change in, naming the
+  `REQ-n` it protects.
 - Do not tick any box. The implementation ticks them as it goes.
 
 ### Consolidate plan
