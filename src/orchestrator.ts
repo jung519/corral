@@ -38,6 +38,7 @@ import { logger } from './core/logger.js';
 import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } from './core/direction.js';
 import { SCRATCH } from './core/paths.js';
 import { wipeProduced } from './core/scratch-outputs.js';
+import { describeUncommitted, uncommittedAcross } from './core/uncommitted.js';
 import {
   type AgentAdapter,
   type AgentRunResult,
@@ -1152,7 +1153,13 @@ export class Orchestrator {
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'implementing', label: '🛠 Resuming implementation (interrupted run)' });
     await this.tracker.transitionIssue(issue, 'in_progress').catch(() => {});
 
-    const impl = await this.dispatch(rt, issue, this.signals.resume, true, 'implementation');
+    // A plain resume left the agent re-deriving what it had already done — six minutes of
+    // it, in the measured run. If the last check saw edits with no commit, say so up front
+    // so the first move is the commit (CRL-91).
+    const resume = rt.uncommitted
+      ? `${this.signals.resume} ${this.profile.t('signal.resumeUncommitted')}`
+      : this.signals.resume;
+    const impl = await this.dispatch(rt, issue, resume, true, 'implementation');
     if (!impl.ok) {
       await this.surfaceStuck(
         rt,
@@ -1172,15 +1179,29 @@ export class Orchestrator {
 
     const changed = await this.changedRepoKeys(handle, rt, issue);
     if (changed.length === 0) {
-      log.error('no committed diff in any repo after implementation');
-      // Retryable: the agent may not have committed yet, or a transient git issue.
-      // Retry resumes implementation and re-checks — the existing commit is reused.
+      // `git diff base..HEAD` cannot see a work tree, so "no committed diff" covers two
+      // very different situations: the agent did nothing, or it did everything and never
+      // committed. Look before saying which — the operator's next move differs, and the
+      // wrong sentence has already cost a 4.35M-token turn (CRL-91).
+      const dirty = await uncommittedAcross(this.workspace.io, handle, this.router.all().map((r) => r.key));
+      rt.uncommitted = dirty.length > 0;
+      this.store.upsert(rt);
+      log.error(`no committed diff in any repo after implementation (uncommitted repos: ${dirty.length})`);
+      // Retryable either way: retry resumes implementation and re-checks.
       await this.surfaceStuck(
         rt,
-        'No committed changes detected in any repo. The agent may not have committed — press Retry to re-check / resume.',
+        dirty.length > 0
+          ? `${this.profile.t('stuck.uncommitted')} ${describeUncommitted(dirty)}`
+          : this.profile.t('stuck.noChanges'),
         true,
       );
       return;
+    }
+    // A commit exists, so the earlier "edited but never committed" reading is spent. Left
+    // set, it would keep prepending the commit-first nudge to every later resume.
+    if (rt.uncommitted) {
+      rt.uncommitted = false;
+      this.store.upsert(rt);
     }
     bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `🗂 Changed repos: ${changed.join(', ')}` });
 

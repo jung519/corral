@@ -94,6 +94,32 @@ describe('prompt-builder', () => {
     expect(out).toMatch(/Omit the `## Acceptance criteria` section entirely/);
   });
 
+  /**
+   * `claude -p` is one shot: when the model stops talking the process exits. The agent did
+   * not know that — it left a background verification running, said it would "wait", and
+   * ended the turn with 4.35M tokens of work uncommitted (CRL-89). The guide said nothing
+   * about how many turns there are.
+   */
+  it('tells the worker this is the only turn, and names the background-work trap', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(out).toContain('single unattended turn');
+    expect(out).toMatch(/There is no next turn/);
+    // A generic "do not defer" is not enough — the incident WAS a background job whose
+    // result was to be collected later, so the guide has to name that shape.
+    expect(out).toMatch(/background job and plan to collect its result later/);
+  });
+
+  it('orders branch C so the commit precedes any further verification', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    const commit = out.indexOf('Commit, before any further verification');
+    expect(commit).toBeGreaterThan(-1);
+    expect(out).toMatch(/Never end the turn with uncommitted changes/);
+    // The same failure mode applies to the fix turn, so the rule has to reach it too.
+    expect(out.indexOf('this turn is just as final as that one')).toBeGreaterThan(commit);
+  });
+
   it('renders signals in the configured language', () => {
     const ko = buildSignals(createTranslator('ko'));
     expect(ko.approve).toBe('✅ 승인됨');
