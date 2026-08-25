@@ -272,7 +272,11 @@ export const WorkspaceSchema = z
  */
 export const ChannelSchema = z
   .object({
-    kind: z.enum(['web', 'slack']).default('web'),
+    // One axis, one implementation for now. `slack` used to be accepted here and there
+    // was nothing registered to serve it, so a config naming it validated cleanly and then
+    // died at the registry — the latest possible moment to learn you were wrong. A value
+    // goes back in this list when an adapter exists to answer for it (CRL-116).
+    kind: z.enum(['web']).default('web'),
   })
   .default({ kind: 'web' });
 

@@ -6,7 +6,7 @@
  * It produces the per-round files + semgrep output; the MAIN agent then
  * consolidates them into pending_review.md.
  *
- * Lifted from upstream. Adaptation: a single configured agent runs all rounds
+ * Carried over from corral's pre-rename implementation. Adaptation: a single configured agent runs all rounds
  * (corral is single-agent), so the agents[]×kinds filter is dropped; output
  * language/calibration come from the profile.
  */

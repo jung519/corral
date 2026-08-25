@@ -15,7 +15,7 @@ export type TaskStep =
   | { kind: 'run'; taskId: string; position: number; total: number }
   /** Every task is ticked — go to review. */
   | { kind: 'done' }
-  /** No readable task list: fall back to the single implementation dispatch (plan §13). */
+  /** No readable task list: fall back to the single implementation dispatch. */
   | { kind: 'downgrade'; reason: string }
   /** Stop and tell the human. Nothing here resolves by trying again. */
   | { kind: 'halt'; reason: string };

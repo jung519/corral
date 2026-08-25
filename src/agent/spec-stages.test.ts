@@ -4,7 +4,7 @@
  * Two things are load-bearing beyond "it runs". The `tasks.md` shape is fixed here because
  * CRL-105's parser will read it — changing it later breaks the parser and every task file
  * already written. And `spec_mode: single` has to stay untouched: the repo is live, and a
- * plan written before any of this still has to mean what it meant (plan doc §10).
+ * plan written before any of this still has to mean what it meant.
  */
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';

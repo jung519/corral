@@ -16,7 +16,8 @@ A human is at every gate.
 *Optional:* turn on **spec mode** and that one plan becomes three — requirements, design,
 tasks — each approved on its own, with the implementation then working the task list one
 task at a time and the dashboard showing how far it has got. It costs roughly 2.4× the model
-calls per issue, so it is off by default. See [`docs/spec-mode.md`](docs/spec-mode.md).
+calls per issue, so it is off by default — set `spec_mode: split` in `corral.yaml` to turn
+it on.
 
 **Operations — a queue becomes an answer.**
 `trigger → fetch → one model turn → checks → your API`
@@ -28,7 +29,15 @@ a doubtful answer is held back with a link rather than written.
 Both are **provider-neutral** (Claude / Gemini / GPT), **BYOK** (bring your own keys;
 nothing is embedded), and **self-hostable**.
 
-Corral is the open-source successor to an internal tool called *Symphony*.
+Corral is built to [OpenAI's Symphony](https://github.com/openai/symphony) spec (Apache-2.0),
+written from scratch in TypeScript — the "make your own" route that repository offers, rather
+than a fork of its Elixir reference implementation.
+
+It started as a rebuild of a Slack-driven harness on that spec: review requests, three
+candidate plans to choose from, and completion reports all arrived as Slack messages, and
+nothing showed what was where. So Corral goes past the spec exactly where the spec stops — a
+rich UI is one of Symphony's stated non-goals — and that is the point of the project: a
+dashboard that shows each issue's stage, what it is waiting on, and what it has spent.
 
 ## ⬇ Download
 
@@ -97,8 +106,9 @@ proposes, and it implements, self-reviews, and opens a pull request for you to m
 To reopen the app later, just run `pnpm app` again from the `corral` folder.
 
 > Want it running on a server instead of your laptop — with the app connecting to it from
-> anywhere? See [Run it on a server](docs/vm-deploy.md). Packaging and other advanced usage
-> are in [Development](#development) below.
+> anywhere? See [Run headless](#run-headless-no-gui) below: the core runs there, the app
+> pairs with it over SSH, and nothing needs a port opened. Packaging and other advanced
+> usage are in [Development](#development) below.
 
 ## Architecture (6 pluggable axes)
 
@@ -110,17 +120,17 @@ Every external integration sits behind an adapter interface, selected by a
 | Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira | Development |
 | Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket | Development |
 | Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local | Development |
-| Channel | `ChannelAdapter` | Web (Slack optional) | Development |
+| Channel | `ChannelAdapter` | Web | Development |
 | Trigger | `TriggerAdapter` | Manual, Schedule (cron), Google Pub/Sub | Operations |
-| Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) | Both |
+| Agent | `AgentAdapter` (provider × transport) | Claude · Gemini · GPT (api/cli each) | Both |
 
 Adding an integration = one adapter implementation + one config schema variant
 + one registry registration.
 
 A pipeline's own steps — what it reads, how the answer is checked, where the result goes —
 are **not** an axis. They are fields in the pipeline file, because a declaration someone can
-read and edit is the point; see [the operations design note](docs/operational-ai-design.md)
-for what that declaration can and cannot express.
+read and edit is the point. What a declaration can express is the pipeline schema itself
+(`src/ops/pipeline/schema.ts`), which carries the reasoning for each field.
 
 ## Principles
 
@@ -173,8 +183,11 @@ export CORRAL_ANTHROPIC_DEFAULT=...
 pnpm start corral.yaml
 ```
 
-Running it on a server long-term (systemd, Docker, provider login without a browser):
-**[docs/vm-deploy.md](docs/vm-deploy.md)**.
+Running it on a server long-term: put the core behind a systemd unit with
+`Restart=always`, keep the control plane on loopback, and let the desktop app open the SSH
+tunnel (Settings → Core connection → Another computer). A provider login that needs a
+browser is captured on your own machine and stored on the server's credential store, so the
+server never needs one.
 
 #### Where secrets come from
 

@@ -1,8 +1,25 @@
 Corral
 Copyright 2026 Corral contributors
 
-This product is the open-source release of an internal agent development
-orchestrator ("Symphony").
+Corral is an independent work. The source in this repository was written for
+this project: it is not a derivative of, and contains no code from, any prior
+internal or third-party codebase.
+
+It is built to the specification OpenAI published as Symphony
+(https://github.com/openai/symphony), which is licensed Apache-2.0 — the same
+license as this project. Reimplementing that specification in a language of your
+choice is the first of the two routes that repository offers ("Make your own");
+Symphony's own reference implementation is Elixir and Corral is TypeScript, so
+there is no shared code to have taken.
+
+Where Corral goes past the specification it does so knowingly: a rich UI is one
+of Symphony's stated non-goals (SPEC.md 2.2), and it is the reason this project
+exists at all.
+
+Some source comments refer to "the pre-rename implementation". That is this same
+codebase before it was named Corral, when it still used the `symphony` name in
+paths and type names; those notes record why a decision changed, not a source
+the code was taken from.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not
 use this software except in compliance with the License. A copy of the
@@ -15,10 +32,14 @@ License is provided in the LICENSE file and at:
 Third-party software:
 
 This product depends on software distributed under separate, compatible
-open-source licenses. Each dependency retains its own license; see the
-respective package metadata under node_modules/ for details. A consolidated
-attribution list is generated for distributed builds (see the application's
-"Open source licenses" screen).
+open-source licenses. Each dependency retains its own license.
+
+THIRD-PARTY-LICENSES.txt lists every third-party package a distributed build
+carries, with the license text that package ships. It is generated from the
+production dependency trees by scripts/licenses.mjs (`pnpm licenses`), it is
+kept in the repository so it can be read without building anything, and the
+packaged application ships it and shows it under "Open source licenses" in the
+About screen.
 
 Corral integrates with third-party AI providers, trackers, and repositories
 using credentials supplied by the user (BYOK). Corral does not bundle any

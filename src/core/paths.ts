@@ -1,7 +1,7 @@
 /**
  * Agent scratch paths inside the workspace — the orchestrator ↔ agent handoff
  * files. Single source of truth so the prompt builder, orchestrator, and review
- * pipeline agree. (Upstream used `.symphony/`; Corral uses `.corral/`.)
+ * pipeline agree. (The pre-rename implementation used `.symphony/`; Corral uses `.corral/`.)
  */
 export const SCRATCH_DIR = '.corral';
 
@@ -26,7 +26,7 @@ export const SCRATCH = {
   reviewStatus: `${SCRATCH_DIR}/review_status.json`,
   /** Agent's answer to a read-only Q&A question (structured markdown, preserved verbatim). */
   qaAnswer: `${SCRATCH_DIR}/qa_answer.md`,
-  /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}` (§15). */
+  /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}`. */
   directionCheck: `${SCRATCH_DIR}/direction_check.json`,
   /** Agent's question to the human (when it can't proceed). */
   question: `${SCRATCH_DIR}/question.md`,

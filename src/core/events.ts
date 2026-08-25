@@ -3,7 +3,7 @@
  * dashboard (HTTP+SSE) subscribes. A ring buffer keeps recent history so a newly
  * opened dashboard shows the timeline so far, not just future events.
  *
- * Lifted from upstream (renamed SymphonyEvent → CorralEvent).
+ * Carried over from corral's pre-rename implementation (renamed SymphonyEvent → CorralEvent).
  */
 import { EventEmitter } from 'node:events';
 

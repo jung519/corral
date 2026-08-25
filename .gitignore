@@ -1,4 +1,10 @@
-node_modules/
+# Working notes and planning documents. Kept locally, not published: they record the
+# state of a moment, and a moment-old document in a public repo reads as the project's
+# current state to anyone — or anything — that finds it.
+docs/
+# No trailing slash: `node_modules/` matches directories only, so a symlink named
+# node_modules slips past it — which is how one got committed once.
+node_modules
 dist/
 release/
 coverage/
@@ -7,6 +13,12 @@ coverage/
 .env.*
 !.env.example
 .DS_Store
+# Editor and vault state. Local to whoever is working, regenerated on demand, and it
+# names files that may not exist any more — nothing a reader of this repo can use.
+.obsidian/
+.vscode/
+.idea/
+
 .corral-state/
 corral.yaml
 corral.local.yaml

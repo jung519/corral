@@ -8,7 +8,7 @@
  *   repo routing     ← a `select`-type property         (config properties.repo → repository.key)
  *   description      ← the page's child blocks, flattened to text
  *
- * Lifted from upstream. Adaptation: the API token comes from the resolved
+ * Carried over from corral's pre-rename implementation. Adaptation: the API token comes from the resolved
  * CredentialStore (ctx.token), not an inline config field.
  */
 import { z } from 'zod';

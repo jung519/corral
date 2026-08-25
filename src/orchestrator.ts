@@ -9,12 +9,12 @@
  *   → [✅] → PR(F) → PR comments(G) → [✅] → fix(H) → merge → done + cleanup
  * Human touch-points: plan approval, review approval, PR-fix-plan approval.
  *
- * Lifted from upstream. Adaptations: single configured agent (not agents[]×kinds);
+ * Carried over from corral's pre-rename implementation. Adaptations: single configured agent (not agents[]×kinds);
  * repositories via RepositoryRouter; review/plan-review/concurrency from the
  * corral config; signals + phrasing via the profile; UI/status strings in English
  * (the agent's OUTPUT language is controlled by the profile, not these labels);
  * scratch files via core/paths (SCRATCH); BYOK (no ~/.claude). A live cycle needs a
- * real channel (the dashboard lands in S3).
+ * real channel — the desktop dashboard is it, reached over the control plane.
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
@@ -633,7 +633,7 @@ export class Orchestrator {
     return this.referenceCloneUrl ? REFERENCE_DIR : undefined;
   }
 
-  /** The global Direction text to inject — only if it's VERIFIED (§15); unverified text is
+  /** The global Direction text to inject — only if it's VERIFIED; unverified text is
    * never injected. '' → the workflow's `{% if direction %}` block renders nothing. Read
    * fresh per dispatch so edits apply without a core restart. */
   private buildDirection(): string {
@@ -642,7 +642,7 @@ export class Orchestrator {
   }
 
   /**
-   * Direction validation gate (§15, checkpoint 2). Runs at planning start: any non-empty
+   * Direction validation gate. Runs at planning start: any non-empty
    * Direction text that isn't already verified is checked by an AI turn. Rejected text
    * BLOCKS the issue; approved text is recorded (hash) so it's injected. Without user
    * consent nothing is spent — unverified scopes simply won't be injected. Returns false
@@ -725,7 +725,7 @@ export class Orchestrator {
 
   private async dispatchPlanning(rt: IssueRuntime, issue: Issue): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
-    // Direction validation gate (§15) — blocks the issue if a Direction text is rejected.
+    // Direction validation gate — blocks the issue if a Direction text is rejected.
     if (!(await this.runDirectionCheck(rt, issue, handle))) return;
     if (this.config.spec_mode === 'split') {
       await this.runSpecStage(rt, issue, handle, 'requirements');
@@ -903,7 +903,7 @@ export class Orchestrator {
     if (!issue) return;
     // `plan_reviewing` is shared by both modes; `specStage` is what says which document was
     // being vetted. Absent means the single-plan flow — including every state file written
-    // before spec mode existed (plan doc §10).
+    // before spec mode existed.
     const stage = rt.specStage as SpecStage | undefined;
     const doc = stage ? specDoc(stage) : SCRATCH.pendingPlan;
     await this.workspace.io.exec(
@@ -1349,7 +1349,7 @@ export class Orchestrator {
    *
    * Returns false when there is no readable task list, so the caller falls back to the
    * single implementation dispatch — the plan doc's mitigation for the parser breaking on
-   * a format drift (§13). Every other outcome is handled here.
+   * a format drift. Every other outcome is handled here.
    *
    * The file is re-read every round rather than tracked in memory. That is the whole
    * mechanism behind "restart resumes from the remaining tasks": there is no state to

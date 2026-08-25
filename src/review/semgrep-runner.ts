@@ -1,6 +1,6 @@
 /**
  * Runs semgrep inside the workspace and writes JSON results for the validator to
- * fold into the consolidated review. Lifted from upstream.
+ * fold into the consolidated review. Carried over from corral's pre-rename implementation.
  *
  * Note: semgrep must be available on PATH in the workspace (worker image / host).
  * It is optional — omit `review.semgrep` in config to skip.

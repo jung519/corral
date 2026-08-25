@@ -1,7 +1,7 @@
 /**
  * Local workspace backend — clones each issue's repo into a host directory under
  * `<root>/<identifier>`. Convenient for development; no isolation.
- * Lifted from upstream.
+ * Carried over from corral's pre-rename implementation.
  */
 import { access, mkdir, readdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';

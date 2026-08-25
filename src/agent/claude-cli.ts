@@ -3,7 +3,7 @@
  * stream-json output as normalized AgentEvents. Works for both the local backend
  * (spawn in the workdir) and docker (exec into the issue container).
  *
- * Lifted from upstream's ClaudeBackend. KEY ADAPTATION (BYOK): auth is the user's
+ * Carried over from the pre-rename implementation's ClaudeBackend. KEY ADAPTATION (BYOK): auth is the user's
  * own credential, injected as env (local: process env; docker: `exec -e`) — never
  * the host ~/.claude subscription mount. Two credential kinds are supported:
  *   - ANTHROPIC_API_KEY        — pay-per-use API key

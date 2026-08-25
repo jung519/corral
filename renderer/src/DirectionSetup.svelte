@@ -8,7 +8,7 @@
 
   // Global Direction (방향성) — free text persisted to userData/direction.md via the
   // desktop bridge. `dirConsent` is the one-time consent to spend AI on validating the
-  // text at issue start (§15). This lives in Setup because Direction is a peer of
+  // text at issue start. This lives in Setup because Direction is a peer of
   // skills/profile — a "how the agent should work" setting, not a per-user preference.
   let direction = $state('');
   let savedDirection = $state('');

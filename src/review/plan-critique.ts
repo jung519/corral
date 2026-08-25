@@ -4,7 +4,7 @@
  * pipeline but for PLANNING. The main agent then consolidates the critiques into
  * the final vetted plan + options.
  *
- * Lifted from upstream. Adaptation: single configured agent runs all rounds
+ * Carried over from corral's pre-rename implementation. Adaptation: single configured agent runs all rounds
  * (agents[]×kinds filter dropped); language/conventions come from the profile.
  */
 import { SCRATCH, SCRATCH_DIR } from '../core/paths.js';

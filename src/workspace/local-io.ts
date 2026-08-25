@@ -1,6 +1,6 @@
 /**
  * WorkspaceIO for the local backend — plain Node fs + git in the host workdir.
- * Lifted from upstream.
+ * Carried over from corral's pre-rename implementation.
  */
 import { access, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';

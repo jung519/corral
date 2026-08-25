@@ -4,7 +4,7 @@
  * deterministic facts for the reviewer + consolidator.
  *
  * A non-zero exit is an objective fact the LLM reviewer cannot rationalize away;
- * the consolidator folds any failed command as a BLOCKER. Lifted from upstream.
+ * the consolidator folds any failed command as a BLOCKER. Carried over from corral's pre-rename implementation.
  */
 import { SCRATCH } from '../core/paths.js';
 import { logger } from '../core/logger.js';

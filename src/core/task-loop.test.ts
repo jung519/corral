@@ -81,7 +81,7 @@ describe('when the run stops making progress', () => {
 
 describe('when there is no task list', () => {
   // The plan doc's mitigation for a format drift: fall back to the single implementation
-  // dispatch rather than refusing to implement anything (§13).
+  // dispatch rather than refusing to implement anything.
   it('asks the caller to downgrade', () => {
     const step = nextTaskStep(null, fresh(), 20);
     expect(step).toEqual({ kind: 'downgrade', reason: 'no readable task list' });

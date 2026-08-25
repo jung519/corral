@@ -2,7 +2,7 @@
  * streams the transport's normalized events to the event bus (live timeline), and
  * aggregates them into an AgentRunResult.
  *
- * This aggregation is net-new logic (NOT lifted from upstream) and is exercised by
+ * This aggregation is net-new logic (not carried over — written for corral) and is exercised by
  * tests with a fake transport, so it works before any real transport runs. */
 import { bus } from '../core/events.js';
 import type { AgentAdapter, AgentRunOptions, AgentRunResult, Issue, WorkspaceHandle, WorkspaceIO } from '../core/types.js';

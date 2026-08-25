@@ -9,7 +9,7 @@
  * Guards:
  * - **Packaged only** — a dev run has no `app-update.yml` and no code signature.
  * - **macOS needs signing** — Squirrel.Mac refuses to install an unsigned update, so until
- *   the signing secrets exist (docs/signing.md) this errors on macOS; the error is logged
+ *   the signing secrets exist this errors on macOS; the error is logged
  *   and swallowed, and the gate's download link stays as the fallback. Windows works unsigned.
  */
 import { app } from 'electron';

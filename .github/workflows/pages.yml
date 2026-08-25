@@ -4,7 +4,7 @@ name: Deploy site (corralhq.dev)
 #   - version.json  the update gate's manifest (kill switch: raise minSupported to force)
 #   - index.html    the landing page
 #   - CNAME         binds the custom domain
-# Redeploys only when site/ changes. One-time setup (DNS + enabling Pages) is in docs/hosting.md.
+# Redeploys only when site/ changes. One-time setup (DNS + enabling Pages) is manual.
 
 on:
   push:

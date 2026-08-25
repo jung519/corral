@@ -12,7 +12,7 @@
  *     api : official SDK / HTTP, user API key (BYOK)
  *     cli : spawn a user-installed official CLI (claude / gemini / codex); never bundled
  *
- * Concrete transports (ClaudeApi, ClaudeCli, …) land in S2+; api is the priority path.
+ * All six cells are implemented; see `agent/index.ts` for what is registered.
  */
 import type { AgentStage, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 

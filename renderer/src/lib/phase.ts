@@ -1,4 +1,4 @@
-/** Phase → progress-stage + color mapping for the dashboard (see docs/ui-ux.md §5). */
+/** Phase → progress-stage + color mapping for the dashboard. */
 
 /** i18n keys for the progress stages shown in the issue PhaseBar. */
 const SINGLE_STAGES = ['phase.plan', 'phase.approve', 'phase.implement', 'phase.review', 'phase.pr', 'phase.done'];

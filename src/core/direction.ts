@@ -1,7 +1,7 @@
 /**
  * Global (machine-wide) Direction store — the free-text "org intent / 방향성" that,
  * from Phase 1 on, is merged with the per-project `.corral/DIRECTION.md` and injected
- * into planning/review prompts. See docs/direction-injection-plan.md.
+ * into planning/review prompts.
  *
  * This file only handles the GLOBAL scope. The desktop writes it (userData/direction.md
  * via its own IPC bridge); the core reads it here. The path is injectable (env
@@ -59,14 +59,14 @@ export function directionHash(text: string): string {
 }
 
 interface CheckState {
-  /** One-time user consent to spend AI on validating Direction text (see §15.6). */
+  /** One-time user consent to spend AI on validating Direction text. */
   consent: boolean;
   /** scope key → hash of the text that passed validation. */
   verified: Record<string, string>;
 }
 
 /**
- * Persists Direction-validation state (§15): the one-time consent flag and, per scope,
+ * Persists Direction-validation state: the one-time consent flag and, per scope,
  * the hash of the text an AI check approved. The core is the SOLE owner/writer so there
  * is no read-modify-write race with the desktop. Verified is hash-based, so any edit to
  * the text (UI save or a committed `.corral/DIRECTION.md` change) auto-invalidates it.
@@ -114,7 +114,7 @@ export class DirectionCheckStore {
   }
 }
 
-/** Parse the Direction safety-check verdict the agent writes (§15). Tolerant of the agent
+/** Parse the Direction safety-check verdict the agent writes. Tolerant of the agent
  *  wrapping the JSON in prose/fences — extracts the first `{…}`. null if absent/unparseable
  *  (treated as "couldn't validate", not a rejection). */
 export function parseDirectionVerdict(raw: string | null): { approved: boolean; reason: string } | null {

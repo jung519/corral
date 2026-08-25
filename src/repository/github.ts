@@ -2,7 +2,7 @@
  * GitHub repository — REST v3. Normalizes GitHub responses into the
  * tracker-neutral PullRequest / PullRequestComment models.
  *
- * Lifted from upstream. Adaptation: the access token comes from the resolved
+ * Carried over from corral's pre-rename implementation. Adaptation: the access token comes from the resolved
  * CredentialStore (ctx.token), not an inline config field.
  */
 import { z } from 'zod';

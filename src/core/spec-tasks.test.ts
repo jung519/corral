@@ -129,7 +129,7 @@ describe('a file that is not quite right', () => {
 });
 
 describe('nothing readable at all', () => {
-  // The signal for the caller to fall back to the single-plan flow (plan doc §13).
+  // The signal for the caller to fall back to the single-plan flow.
   it.each([
     ['empty', ''],
     ['whitespace', '   \n\n  '],
