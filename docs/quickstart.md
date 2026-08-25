@@ -49,10 +49,16 @@ export CORRAL_ANTHROPIC_DEFAULT=sk-ant-xxx     # API key (omit if using a logged
 ## 4. Run
 
 ```bash
-pnpm start corral.yaml
+pnpm start corral.yaml --control-plane 4410 --pair
 ```
 
-Open `http://localhost:4400`. Click **Import issues**, start one, and drive it:
+The core has no browser UI — the desktop app is the client, and it reaches the core over a
+WebSocket control plane bound to loopback. The command above prints a **6-digit pairing
+code**; in the app go **Settings → Core connection**, pick where the core runs, and enter
+the code once. (Running the core on this same machine? The app can fork it for you — leave
+**Core connection** on *This computer* and skip the pairing entirely.)
+
+Then click **Import issues**, start one, and drive it:
 
 1. **Plan** — the agent drafts a plan; independent critics vet it. Approve or give feedback.
 2. **Implement** — the agent writes code on a work branch and commits.

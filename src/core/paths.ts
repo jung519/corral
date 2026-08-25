@@ -1,7 +1,7 @@
 /**
  * Agent scratch paths inside the workspace — the orchestrator ↔ agent handoff
  * files. Single source of truth so the prompt builder, orchestrator, and review
- * pipeline agree. (Upstream used `.symphony/`; Corral uses `.corral/`.)
+ * pipeline agree. (The pre-rename implementation used `.symphony/`; Corral uses `.corral/`.)
  */
 export const SCRATCH_DIR = '.corral';
 

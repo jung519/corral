@@ -3,7 +3,7 @@
  * started with `sleep infinity` and kept alive across dispatches (reused via
  * docker exec).
  *
- * Lifted from upstream. KEY ADAPTATION (BYOK): the host `~/.claude` OAuth mount is
+ * Carried over from corral's pre-rename implementation. KEY ADAPTATION (BYOK): the host `~/.claude` OAuth mount is
  * removed — Corral never shares an operator's subscription login. Provider auth is
  * the agent transport's concern (API key / the user's own CLI login); any env the
  * orchestrator needs to inject goes through DockerBackendOptions.env.

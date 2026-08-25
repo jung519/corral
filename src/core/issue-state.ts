@@ -3,7 +3,7 @@
  * can resume mid-flow (the recovery step cross-checks workspace + tracker state).
  * Stored in the orchestrator state dir (NOT the workspace, so it outlives cleanup).
  *
- * Lifted from upstream. Adaptations: state dir renamed `.symphony-state` →
+ * Carried over from corral's pre-rename implementation. Adaptations: state dir renamed `.symphony-state` →
  * `.corral-state` and made injectable (constructor arg / CORRAL_STATE_DIR) for
  * testability.
  */

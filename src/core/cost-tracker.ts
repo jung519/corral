@@ -3,7 +3,7 @@
  * restart doesn't lose the running total. On merge the orchestrator posts a cost
  * summary comment to the tracker.
  *
- * Lifted from upstream. Adaptations: state dir → `.corral-state` (injectable), and
+ * Carried over from corral's pre-rename implementation. Adaptations: state dir → `.corral-state` (injectable), and
  * the summary comment is built from the configured language (profile Translator)
  * instead of hardcoded Korean.
  */

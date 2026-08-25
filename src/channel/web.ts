@@ -3,7 +3,7 @@
  * actions the UI renders (plan/review as HTML); the user approves / gives feedback
  * via POST. No polling: the user's click is the signal.
  *
- * Lifted from upstream, minus its HTTP server: the desktop app talks to the core over the
+ * Carried over from corral's pre-rename implementation, minus its HTTP server: the desktop app talks to the core over the
  * control plane, so this class is only the pending-action + diff state and the
  * approve/feedback callbacks.
  */

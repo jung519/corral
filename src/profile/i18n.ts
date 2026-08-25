@@ -1,8 +1,8 @@
 /** Message catalog — the language seam.
  *
- * Upstream hardcoded Korean strings into review/cost prompts (특이사항 없음, 해결됨,
+ * The pre-rename implementation hardcoded Korean strings into review/cost prompts (특이사항 없음, 해결됨,
  * 승인됨, …). Those move here as keyed messages so the core stays language-neutral
- * and the S2 review-pipeline lift pulls phrasing from the configured language. */
+ * and the review pipeline pulls phrasing from the configured language. */
 
 export type MessageKey =
   | 'review.noIssues'

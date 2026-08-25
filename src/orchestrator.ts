@@ -9,12 +9,12 @@
  *   → [✅] → PR(F) → PR comments(G) → [✅] → fix(H) → merge → done + cleanup
  * Human touch-points: plan approval, review approval, PR-fix-plan approval.
  *
- * Lifted from upstream. Adaptations: single configured agent (not agents[]×kinds);
+ * Carried over from corral's pre-rename implementation. Adaptations: single configured agent (not agents[]×kinds);
  * repositories via RepositoryRouter; review/plan-review/concurrency from the
  * corral config; signals + phrasing via the profile; UI/status strings in English
  * (the agent's OUTPUT language is controlled by the profile, not these labels);
  * scratch files via core/paths (SCRATCH); BYOK (no ~/.claude). A live cycle needs a
- * real channel (the dashboard lands in S3).
+ * real channel — the desktop dashboard is it, reached over the control plane.
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';

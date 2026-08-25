@@ -3,7 +3,7 @@
  * against the issue's long-lived container. File contents are moved with base64
  * to stay safe regardless of quoting/binary-ish payloads.
  *
- * Lifted from upstream (container name symphony-<id> → corral-<id>).
+ * Carried over from corral's pre-rename implementation (container name symphony-<id> → corral-<id>).
  */
 import type { WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 import { run } from '../util/exec.js';

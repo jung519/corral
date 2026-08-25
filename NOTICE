@@ -1,8 +1,16 @@
 Corral
 Copyright 2026 Corral contributors
 
-This product is the open-source release of an internal agent development
-orchestrator ("Symphony").
+Corral is an independent work. The source in this repository was written for
+this project: it is not a derivative of, and contains no code from, any prior
+internal or third-party codebase. Its approach to orchestrating coding agents
+was learned from OpenAI's Symphony, and that influence is conceptual only — no
+Symphony code is present here.
+
+Some source comments refer to "the pre-rename implementation". That is this same
+codebase before it was named Corral, when it still used the `symphony` name in
+paths and type names; those notes record why a decision changed, not a source
+the code was taken from.
 
 Licensed under the Apache License, Version 2.0 (the "License"); you may not
 use this software except in compliance with the License. A copy of the
@@ -15,10 +23,13 @@ License is provided in the LICENSE file and at:
 Third-party software:
 
 This product depends on software distributed under separate, compatible
-open-source licenses. Each dependency retains its own license; see the
-respective package metadata under node_modules/ for details. A consolidated
-attribution list is generated for distributed builds (see the application's
-"Open source licenses" screen).
+open-source licenses. Each dependency retains its own license; the applicable
+license and copyright are in that package's own metadata and license file.
+
+Distributed builds carry the runtime dependencies with them, so those licenses
+travel with the build. Assembling them into one attribution list that ships with
+the application is tracked as an open item, not something this file claims is
+already done.
 
 Corral integrates with third-party AI providers, trackers, and repositories
 using credentials supplied by the user (BYOK). Corral does not bundle any

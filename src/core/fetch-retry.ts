@@ -5,7 +5,7 @@
  *   - GitHub 403 + x-ratelimit-remaining:0 : wait until x-ratelimit-reset.
  *   - 5xx: exponential backoff (capped).
  *
- * Lifted from upstream.
+ * Carried over from corral's pre-rename implementation.
  */
 import { logger } from './logger.js';
 

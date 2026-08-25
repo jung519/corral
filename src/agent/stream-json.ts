@@ -2,7 +2,7 @@
  * Claude Code `--output-format stream-json` parsing. Pure functions, unit-tested —
  * the riskiest part of the CLI transport, kept free of spawn/IO so it's verifiable.
  *
- * Lifted/adapted from upstream's inline parser, emitting normalized AgentEvents.
+ * Carried over and adapted from the pre-rename implementation's inline parser, emitting normalized AgentEvents.
  */
 import type { AgentEvent } from './types.js';
 

@@ -326,8 +326,8 @@ export type IssuePhase =
   | 'plan_reviewing'
   | 'plan_sent'
   | 'pr_plan_sent'
-  // The three spec gates (SDD S2), each waiting on a human exactly like `plan_sent`.
-  // Unused until the planning split produces them — see ApprovalKind above.
+  // The three spec gates, each waiting on a human exactly like `plan_sent`. Produced by
+  // the orchestrator when `spec_mode: split` is configured — see ApprovalKind above.
   | 'requirements_sent'
   | 'design_sent'
   | 'tasks_sent'

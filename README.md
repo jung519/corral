@@ -27,7 +27,11 @@ a doubtful answer is held back with a link rather than written.
 Both are **provider-neutral** (Claude / Gemini / GPT), **BYOK** (bring your own keys;
 nothing is embedded), and **self-hostable**.
 
-Corral is the open-source successor to an internal tool called *Symphony*.
+Corral began as a rebuild of a Slack-driven harness built on OpenAI's Symphony: review
+requests, three candidate plans to choose from, and completion reports all arrived as Slack
+messages, and nothing showed what was where. Only the concept carried over — the core here
+was written from scratch — and the missing piece became the point of the project: a UI that
+shows each issue's stage, what it is waiting on, and what it has spent.
 
 ## ⬇ Download
 
@@ -109,7 +113,7 @@ Every external integration sits behind an adapter interface, selected by a
 | Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira | Development |
 | Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket | Development |
 | Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local | Development |
-| Channel | `ChannelAdapter` | Web (Slack optional) | Development |
+| Channel | `ChannelAdapter` | Web | Development |
 | Trigger | `TriggerAdapter` | Manual, Schedule (cron), Google Pub/Sub | Operations |
 | Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) | Both |
 

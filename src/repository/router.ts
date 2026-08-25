@@ -1,5 +1,5 @@
 /** Routes an issue's repoKey → the repository adapter that owns it. Replaces
- * upstream's RepositoryRegistry (a key→client map). */
+ * the pre-rename implementation's RepositoryRegistry (a key→client map). */
 import type { Issue, RepositoryAdapter } from '../core/types.js';
 
 export class RepositoryRouter {

@@ -1,14 +1,15 @@
 /**
  * Credential storage abstraction (BYOK).
  *
- * NET-NEW boundary. Upstream stored secrets as plaintext in yaml / env vars and
+ * NET-NEW boundary. The pre-rename implementation stored secrets as plaintext in yaml / env vars and
  * mounted a host `~/.claude` OAuth dir. Corral never embeds keys and keeps secrets
  * out of config files — config holds only a CredentialRef pointer; the secret lives
  * in a CredentialStore.
  *
  * Implementations:
  *   - EnvCredentialStore  (./env-store.ts) — reads process.env; headless / CI. Available now.
- *   - KeychainCredentialStore             — OS keychain (Electron safeStorage / keytar). Lands in S3.
+ *   - KeychainCredentialStore             — OS keychain, via Electron `safeStorage` in the
+ *                                           desktop app (`desktop/src/keychain.ts`). See SECURITY.md.
  */
 
 export interface CredentialRef {

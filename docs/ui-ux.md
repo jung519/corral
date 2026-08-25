@@ -66,7 +66,8 @@
    - GitHub Issues: 이슈 repo(기본=작업 repo), scope 라벨, 식별자 prefix(GitHub 토큰 재사용).
    - 공통: 의미 상태(planning/plan_review/in_progress/in_review/done) → 트래커 값 매핑.
 4. **워크스페이스** — local | docker(+Docker 감지 결과 배지).
-5. **채널·예산** — 포트(기본 4400), 동시 이슈 한도, language/stack 프로파일.
+5. **채널·예산** — 동시 이슈 한도, language/stack 프로파일. (채널은 축이 하나라 고를 것이 없고,
+   포트는 컨트롤 플레인 쪽 설정이다 — `control_plane.port`, 기본 4410.)
 
 검증 상태(필드/Test): `idle → validating(“testing…”) → valid(✓ green) → error(✗ red + 사유)`.
 스텝퍼: 완료 ✓(green), 현재 단계 accent 강조, 미완 빈 원. 하단 진행 바.

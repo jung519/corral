@@ -2,7 +2,7 @@
  * Caps the number of globally active issues (= workspaces). An issue is "active"
  * from first dispatch until it reaches a terminal state / its PR merges.
  *
- * Lifted from upstream — pure, no external dependencies.
+ * Carried over from corral's pre-rename implementation — pure, no external dependencies.
  */
 export class ConcurrencyLimiter {
   private readonly active = new Set<string>();

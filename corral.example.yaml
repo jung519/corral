@@ -62,7 +62,7 @@ repositories:
 
 agent:
   provider: claude        # claude | gemini | gpt
-  transport: cli          # cli (spawns your installed CLI; implemented) | api (stub)
+  transport: cli          # cli (spawns your installed CLI) | api (official SDK, your key)
   credential: { service: anthropic, account: default }  # API key injected as ANTHROPIC_API_KEY (BYOK)
   models:
     planning: opus

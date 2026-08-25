@@ -1,5 +1,5 @@
 /**
- * Generic adapter registry — replaces upstream's hardcoded `switch (kind)` factories.
+ * Generic adapter registry — replaces the pre-rename implementation's hardcoded `switch (kind)` factories.
  *
  * Each axis (tracker / repository / agent / workspace / channel) owns one Registry.
  * Reference adapters register themselves at startup; external adapters can register

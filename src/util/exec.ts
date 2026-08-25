@@ -2,7 +2,7 @@
  * Thin promise wrapper around child_process.spawn. Captures stdout/stderr/exit
  * code without throwing on non-zero exit (callers decide what a failure means).
  *
- * Lifted from upstream.
+ * Carried over from corral's pre-rename implementation.
  */
 import { spawn } from 'node:child_process';
 
