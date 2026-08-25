@@ -40,6 +40,9 @@ export function planCritiquePrompt(
     `- Acceptance criteria not written in EARS notation (THE SYSTEM SHALL / WHEN / WHILE / IF-THEN / WHERE) or missing REQ-n labels. Judge the wording, not the count — do not ask for more criteria than the issue warrants.`,
     // The axis a per-item read misses. Each requirement can be sound on its own while the
     // set is impossible to satisfy — and that only shows up when they are read together.
+    // A defect spec that skips this section reads as complete; the gap is only visible
+    // by knowing the section should be there (CRL-111).
+    `- A defect spec with no "Unchanged Behavior" section, or one whose entries are hopes rather than behaviours ("the existing tests still pass"). What could a plausible fix plausibly break?`,
     `- Problems BETWEEN requirements, not within one: two that are each reasonable but cannot both hold; constraints that cannot be satisfied at the same time; a concept referenced as if it already existed when nothing in the plan or the code defines it.`,
     `- A simpler or safer approach the plan overlooked.`,
   ];
@@ -110,6 +113,9 @@ export function reviewRoundPrompt(
     `BEFORE judging, read the approved plan at \`${criteriaFrom}\` and find its acceptance criteria (\`REQ-1\`, \`REQ-2\`, …):`,
     `- For EACH \`REQ-n\`, inspect the actual diff and state explicitly "${profile.t('review.reqMet')}" with the \`file:line\` that satisfies it, or "${profile.t('review.reqUnmet')}" naming what is missing.`,
     `- Judge the code, not the plan's own claim that it was done. A criterion the diff does not implement is UNMET however confidently the plan states it.`,
+    // Inverted for these: the evidence of success is the absence of a change, so looking
+    // for code that implements them would mark every one of them UNMET (CRL-111).
+    `- An "Unchanged Behavior" requirement (\`SHALL CONTINUE TO\`) is met by the diff NOT disturbing it. Check the diff for anything that reaches that behaviour — a shared code path, an altered order, a changed default — and cite it if so; otherwise it is met.`,
     `- An unmet criterion is a finding in its own right — report it with the others.`,
     `- If the plan has NO \`REQ-n\` labels (an older or hand-written plan), SKIP this entirely. Do not report their absence as a problem.`,
     `ALSO read \`${SCRATCH.prevReview}\` if it exists — the PREVIOUS review; the current diff includes the fix meant to address it. This is a RE-REVIEW:`,
