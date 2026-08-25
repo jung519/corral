@@ -335,6 +335,12 @@ export type IssuePhase =
   | 'design_sent'
   | 'tasks_sent'
   | 'implementing'
+  // The self-review while it is running. `selfReviewLoop` announced this on the bus from
+  // the start — so the history timeline has always had it — but never wrote it to the
+  // runtime, and the dashboard reads the runtime. A review that takes minutes, plus every
+  // re-review after an auto-fix round, showed the card sitting on `implementing` (CRL-90).
+  // Planning has had `plan_reviewing` all along; this is the missing other half.
+  | 'reviewing'
   | 'question_sent'
   | 'review_sent'
   | 'review_fixing'
@@ -367,4 +373,4 @@ export const WAITING_PHASES: ReadonlySet<IssuePhase> = new Set([
  */
 // The spec gates are deliberately absent: they are waiting on a person, not a run the
 // restart cut short, so there is nothing to resume.
-export const RESUMABLE_PHASES: ReadonlySet<IssuePhase> = new Set(['implementing', 'review_fixing']);
+export const RESUMABLE_PHASES: ReadonlySet<IssuePhase> = new Set(['implementing', 'reviewing', 'review_fixing']);

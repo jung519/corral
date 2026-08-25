@@ -67,7 +67,9 @@ describe('saving a new pipeline', () => {
     const text = readFileSync(join(dir, 'classify-record.yaml'), 'utf8');
     expect(text).toContain('enabled: true');
     expect(text).toContain('max_concurrent: 1');
-    expect(text).toContain('max_tokens: 4096');
+    // Not max_tokens: it has no default to spell out, and writing one would change what
+    // runs rather than describe it (CRL-93).
+    expect(text).not.toContain('max_tokens:');
   });
 });
 

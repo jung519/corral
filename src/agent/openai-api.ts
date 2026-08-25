@@ -63,6 +63,9 @@ export class OpenAiChatClient implements ChatClient {
         messages: toOpenAiMessages(messages),
         tools: toOpenAiTools(tools),
         tool_choice: 'auto',
+        // `max_completion_tokens`, not the deprecated `max_tokens`: the reasoning models
+        // this defaults to reject the old name. Sent only when the caller has a limit.
+        ...(opts?.maxOutputTokens ? { max_completion_tokens: opts.maxOutputTokens } : {}),
         stream: true,
         stream_options: { include_usage: true },
       }),
@@ -75,12 +78,17 @@ export class OpenAiChatClient implements ChatClient {
     const acc = new Map<number, { id: string; name: string; args: string }>();
     let text = '';
     let inputTokens = 0;
+    let cacheRead = 0;
     let outputTokens = 0;
     try {
       for await (const data of sseData(res, opts?.signal)) {
         const chunk = JSON.parse(data) as {
           choices?: { delta?: { content?: string; tool_calls?: { index: number; id?: string; function?: { name?: string; arguments?: string } }[] } }[];
-          usage?: { prompt_tokens?: number; completion_tokens?: number };
+          usage?: {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            prompt_tokens_details?: { cached_tokens?: number };
+          };
         };
         const delta = chunk.choices?.[0]?.delta;
         if (delta?.content) {
@@ -97,6 +105,10 @@ export class OpenAiChatClient implements ChatClient {
         if (chunk.usage) {
           inputTokens = chunk.usage.prompt_tokens ?? inputTokens;
           outputTokens = chunk.usage.completion_tokens ?? outputTokens;
+          // `prompt_tokens` already includes the cached part; this says how much of it was.
+          // Half price rather than full, which is the difference between an estimate worth
+          // having and one that is wrong by a factor (CRL-86).
+          cacheRead = chunk.usage.prompt_tokens_details?.cached_tokens ?? cacheRead;
         }
       }
     } catch (e) {
@@ -106,7 +118,7 @@ export class OpenAiChatClient implements ChatClient {
     const toolCalls = [...acc.values()]
       .filter((s) => s.name)
       .map((s) => ({ id: s.id || `call_${s.name}`, name: s.name, args: parseJsonObject(s.args) }));
-    return { text, toolCalls, inputTokens, outputTokens };
+    return { text, toolCalls, inputTokens, outputTokens, input: { cacheRead } };
   }
 }
 

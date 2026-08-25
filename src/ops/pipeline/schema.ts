@@ -270,7 +270,22 @@ export const AgentStepSchema = z.object({
    *  the same provider settings and the same token ceiling (D24, D12). */
   provider: z.enum(['claude', 'gemini', 'gpt']).optional(),
   model: z.string().optional(),
-  max_tokens: z.number().int().positive().default(4096),
+  /**
+   * Cap on the tokens the model may produce. Omit and the provider's own behaviour applies,
+   * exactly as it did before this was wired up.
+   *
+   * Optional rather than defaulted on purpose: a default cannot be told apart from a value
+   * someone wrote, so applying one would have quietly narrowed every pipeline that already
+   * runs — Claude from 8192 down, Gemini and GPT from their own defaults down (CRL-93).
+   *
+   * The right number is measured, not chosen: too low and the JSON is cut mid-answer and
+   * the paid turn is discarded by the shape check; too high and reasoning tokens spend what
+   * they are given. Gemini counts its thinking against this same allowance, which is why
+   * one number cannot serve every pipeline.
+   *
+   * Not applied on the CLI transport — see `cli-turn.ts`.
+   */
+  max_tokens: z.number().int().positive().optional(),
   /**
    * Both halves take `{{field}}` placeholders, filled from the selected input fields and
    * from whatever `context` fetched.

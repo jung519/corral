@@ -116,7 +116,10 @@ output: { kind: none }
 
     expect(p.enabled).toBe(true);
     expect(p.max_concurrent).toBe(1); // start at one and raise once measured
-    expect(p.agent.max_tokens).toBe(4096);
+    // `max_tokens` deliberately has no default: absent means "leave it to the provider",
+    // which is what every pipeline ran on before it was wired up. A default would be
+    // indistinguishable from a written value and would narrow them all (CRL-93).
+    expect(p.agent.max_tokens).toBeUndefined();
     expect(p.on_low_confidence.action).toBe('report'); // don't write a doubtful answer
   });
 });

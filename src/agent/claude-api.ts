@@ -87,7 +87,9 @@ export class AnthropicChatClient implements ChatClient {
       headers: { 'content-type': 'application/json', 'x-api-key': this.apiKey ?? '', 'anthropic-version': VERSION },
       body: JSON.stringify({
         model: resolveModel(model),
-        max_tokens: MAX_TOKENS,
+        // Anthropic requires the field, so the constant becomes the fallback rather than
+        // the answer — a pipeline that declared a limit now gets it (CRL-93).
+        max_tokens: opts?.maxOutputTokens ?? MAX_TOKENS,
         stream: true,
         // Cache the (large, stable) system prompt so repeated turns only pay to read it once.
         system: system ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : undefined,
@@ -102,19 +104,29 @@ export class AnthropicChatClient implements ChatClient {
     const blocks = new Map<number, { type: string; id: string; name: string; json: string }>();
     let text = '';
     let inputTokens = 0;
+    let cacheWrite = 0;
+    let cacheRead = 0;
     let outputTokens = 0;
     try {
       for await (const data of sseData(res, opts?.signal)) {
         const ev = JSON.parse(data) as {
           type: string;
           index?: number;
-          message?: { usage?: { input_tokens?: number } };
+          message?: {
+            usage?: { input_tokens?: number; cache_creation_input_tokens?: number; cache_read_input_tokens?: number };
+          };
           content_block?: { type: string; id?: string; name?: string };
           delta?: { type?: string; text?: string; partial_json?: string };
           usage?: { output_tokens?: number };
         };
         if (ev.type === 'message_start') {
-          inputTokens = ev.message?.usage?.input_tokens ?? 0;
+          // All three, not just the first. `input_tokens` excludes the cached parts, so
+          // reading it alone undercounts — the same defect CRL-58 fixed on the CLI side,
+          // which never reached this client. A prompt of 4,037 tokens reported as 2.
+          const u = ev.message?.usage;
+          cacheWrite = u?.cache_creation_input_tokens ?? 0;
+          cacheRead = u?.cache_read_input_tokens ?? 0;
+          inputTokens = (u?.input_tokens ?? 0) + cacheWrite + cacheRead;
         } else if (ev.type === 'content_block_start' && ev.index != null && ev.content_block) {
           blocks.set(ev.index, { type: ev.content_block.type, id: ev.content_block.id ?? '', name: ev.content_block.name ?? '', json: '' });
         } else if (ev.type === 'content_block_delta' && ev.index != null) {
@@ -136,7 +148,7 @@ export class AnthropicChatClient implements ChatClient {
     const toolCalls = [...blocks.values()]
       .filter((b) => b.type === 'tool_use')
       .map((b) => ({ id: b.id, name: b.name, args: parseJsonObject(b.json) }));
-    return { text, toolCalls, inputTokens, outputTokens };
+    return { text, toolCalls, inputTokens, outputTokens, input: { cacheWrite, cacheRead } };
   }
 }
 

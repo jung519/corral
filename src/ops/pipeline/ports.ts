@@ -55,8 +55,13 @@ export interface OperationSpend {
   tokens?: number;
   inputTokens?: number;
   outputTokens?: number;
-  /** What it cost, if the runner worked it out (`agent/pricing.ts`). Informational only:
-   *  vendors change prices, which is exactly why the ceiling counts tokens instead. */
+  /**
+   * What it cost, if the runner worked it out (`agent/pricing.ts`).
+   *
+   * An estimate — vendors change prices, which is why the tokens above stay the figure of
+   * record. It reaches the shared ceiling all the same, because `limits.daily_cost_usd`
+   * is a limit people actually set (CRL-86). Absent means unpriced, not free.
+   */
   costUsd?: number;
 }
 

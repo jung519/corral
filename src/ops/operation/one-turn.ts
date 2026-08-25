@@ -132,13 +132,13 @@ export class OneTurnOperationRunner implements OperationRunner {
     for (const [index, client] of clients.entries()) {
       const model = step.model ?? this.options.modelFor?.(client.provider);
       try {
-        const turn = await client.send(messages, [], model);
+        const turn = await client.send(messages, [], model, { maxOutputTokens: step.max_tokens });
         // The reply is in hand, so it has been billed. Counted here, before anything looks
         // at whether it is usable — a shape check must not be able to skip the meter.
         spent.add({
           inputTokens: turn.inputTokens,
           outputTokens: turn.outputTokens,
-          costUsd: priceFor(client.provider, model, turn.inputTokens, turn.outputTokens),
+          costUsd: priceFor(client.provider, model, turn.inputTokens, turn.outputTokens, turn.input),
         });
         const checked = checkAnswer(step.schema, turn.text);
         if (!checked.ok) {

@@ -11,10 +11,19 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import type { Logger } from '../core/logger.js';
 import { looksLikeAuth, looksLikeRateLimit, type UsageAcc } from './stream-json.js';
-import type { AgentEvent, AgentTurnSpec } from './types.js';
+import { priceFor } from './pricing.js';
+import type { AgentEvent, AgentProviderId, AgentTurnSpec } from './types.js';
 
 /** How to read one CLI's stream output, normalized to AgentEvents. */
 export interface CliStreamParser<T> {
+  /**
+   * Which model family this CLI drives.
+   *
+   * Reading the usage out of the stream is this interface's job, and the price is the last
+   * step of that: two of the three CLIs report tokens and no money, so without this the
+   * day's cost silently omitted whatever they spent (CRL-86).
+   */
+  readonly provider: AgentProviderId;
   /** Parse one stdout line into a provider event, or null for non-JSON noise. */
   parse(line: string): T | null;
   /** Normalized activity events (text / tool_use) for the live timeline. */
@@ -110,7 +119,14 @@ export function runCliTurn<T>(
       if (timer) clearTimeout(timer);
       if (parser.flush) for (const e of parser.flush()) onEvent(e);
       if (answer) spec.onAnswerText?.(answer);
-      onEvent({ type: 'usage', ...acc });
+      // A CLI that reports its own cost is believed: it knows the account's terms, which
+      // may include a plan no price table can express. The table only stands in where the
+      // CLI says nothing — codex and gemini report tokens and no money, and counting those
+      // turns as free made the day's total wrong by however much they spent (CRL-86).
+      if (acc.costUsd === 0 && (acc.inputTokens > 0 || acc.outputTokens > 0)) {
+        acc.costUsd = priceFor(parser.provider, spec.model, acc.inputTokens, acc.outputTokens, acc.input);
+      }
+      onEvent({ type: 'usage', inputTokens: acc.inputTokens, outputTokens: acc.outputTokens, costUsd: acc.costUsd });
       // rate_limit before auth: a spent quota is auto-recoverable (fail over), whereas
       // auth needs manual re-auth — don't misreport a usage limit as the latter.
       if (sawRateLimit) onEvent({ type: 'error', error: 'rate_limit' });

@@ -550,6 +550,11 @@ export class Orchestrator {
       case 'review_fixing':
         await this.resumeImplementing(rt, issue);
         return;
+      // The code is already committed; the only thing the restart cost is the critique.
+      // Re-running the whole implementation would talk over work that is already done.
+      case 'reviewing':
+        await this.presentReview(rt, issue);
+        return;
       default:
         await this.surfaceStuck(rt, `Phase '${rt.phase}' does not support auto-retry — restart the issue from scratch.`);
     }
@@ -1613,6 +1618,15 @@ export class Orchestrator {
     const log = logger.child(rt.identifier);
     const maxFixRounds = this.config.review.max_fix_rounds;
     for (let round = 0; ; round++) {
+      // Written to the runtime, not only announced. The event has always gone out — which
+      // is why the history timeline knew about the review — but the dashboard reads
+      // `snapshot()`, which reads this, and so it said `implementing` for the whole run
+      // (CRL-90). Re-set each round so a re-review after an auto-fix is covered too.
+      rt.phase = 'reviewing';
+      // A retry after a restart enters here; the run is moving again, so it is no longer
+      // stuck. Every other resume path clears its own flag the same way.
+      rt.stuck = false;
+      this.store.upsert(rt);
       bus.emitEvent({
         identifier: rt.identifier,
         kind: 'phase',
@@ -1982,6 +1996,7 @@ const RETRYABLE_PHASES = new Set<string>([
   'tasks_sent',
   'review_sent',
   'implementing',
+  'reviewing',
   'review_fixing',
 ]);
 

@@ -137,6 +137,20 @@ export class CliTurnOperationRunner implements OperationRunner {
       }
     };
 
+    /**
+     * The CLI transport cannot carry an output limit — `claude --help` offers
+     * `--max-budget-usd` (money) and `--autocompact` (the context window), and nothing for
+     * the tokens a reply may use. A pipeline that declared one and runs here would have the
+     * value dropped in silence, which is the failure this issue is about; said once per
+     * turn so it is at least findable (CRL-93).
+     */
+    if (step.max_tokens !== undefined) {
+      logger.warn(
+        `ops: max_tokens (${step.max_tokens}) is not applied on the ${transport.provider} CLI transport — ` +
+          'no such flag exists; switch that pipeline to the API transport to cap output',
+      );
+    }
+
     try {
       await transport.run(
         {

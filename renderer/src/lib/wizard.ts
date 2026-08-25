@@ -132,10 +132,13 @@ export interface WizardState {
   dockerMemory: string;
   dockerCpus: string;
   maxActive: number;
-  /** Daily token ceiling, shared by the development and operational AI. Blank = no
+  /** Daily ceiling, shared by the development and operational AI. Blank = no
    *  ceiling; `0` would be a ceiling of zero, which is a different thing to say. */
   dailyInputTokens: string;
   dailyOutputTokens: string;
+  /** The same ceiling in dollars — estimated, and the unit people actually budget in
+   *  (CRL-86). Fractional: a day's work can be well under $1. */
+  dailyCostUsd: string;
   /** Agent output language: `'auto'` (follow the UI language until explicitly pinned),
    *  or a concrete code like `'en'`/`'ko'`. `buildConfigYaml` resolves `'auto'` to the
    *  current UI language, so config always stores a concrete code. */
@@ -190,6 +193,7 @@ export function initialState(): WizardState {
     maxActive: 3,
     dailyInputTokens: '',
     dailyOutputTokens: '',
+    dailyCostUsd: '',
     language: 'auto',
     stack: 'generic',
     referenceRepo: '',
@@ -502,12 +506,15 @@ function yamlStr(v: string): string {
 }
 
 /**
- * The daily token ceiling, written only for the sides that have one.
+ * The daily ceiling, written only for the sides that have one.
  *
- * Counted in tokens rather than money on purpose (see `LimitsSchema`): a price table
- * belongs to a vendor and the vendor changes it, while token counts come back from the
- * response. An empty box means no ceiling, so nothing is emitted — writing `0` there
- * would stop every call on the first request of the day.
+ * The token counts are the figure of record (see `LimitsSchema`): they come back from the
+ * response itself, while a price table belongs to a vendor and the vendor changes it. The
+ * dollar box is there because a token count is not a number anyone budgets in (CRL-86);
+ * it is estimated from that table.
+ *
+ * An empty box means no ceiling, so nothing is emitted — writing `0` there would stop
+ * every call on the first request of the day.
  */
 function limitsYaml(s: WizardState): string[] {
   const lines: string[] = [];
@@ -517,6 +524,8 @@ function limitsYaml(s: WizardState): string[] {
   const output = String(s.dailyOutputTokens ?? '').trim();
   if (input) lines.push(`  daily_input_tokens: ${Number(input)}`);
   if (output) lines.push(`  daily_output_tokens: ${Number(output)}`);
+  const cost = String(s.dailyCostUsd ?? '').trim();
+  if (cost) lines.push(`  daily_cost_usd: ${Number(cost)}`);
   return lines.length ? ['limits:', ...lines, ''] : [];
 }
 
@@ -832,6 +841,7 @@ export function stateFromConfig(config: unknown, written?: unknown): WizardState
   // Absent stays blank. `0` reads back as "0" — a ceiling somebody chose, not an empty box.
   s.dailyInputTokens = typeof limits.daily_input_tokens === 'number' ? String(limits.daily_input_tokens) : '';
   s.dailyOutputTokens = typeof limits.daily_output_tokens === 'number' ? String(limits.daily_output_tokens) : '';
+  s.dailyCostUsd = typeof limits.daily_cost_usd === 'number' ? String(limits.daily_cost_usd) : '';
 
   if (typeof c.max_active_issues === 'number') s.maxActive = c.max_active_issues;
   return s;
