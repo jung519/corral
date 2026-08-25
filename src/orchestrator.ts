@@ -21,6 +21,7 @@ import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkf
 import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, taskPrompt, type SpecStage } from './agent/prompt-builder.js';
 import { parseSpecTasks } from './core/spec-tasks.js';
 import { nextTaskStep, type TaskLoopState } from './core/task-loop.js';
+import { isUnbacked, taskEvidence, type RepoHeads, type TaskEvidence } from './core/task-evidence.js';
 import { TimingAgent } from './agent/timing-agent.js';
 import { unrunnableProvider } from './agent/backend-compat.js';
 import type { Config } from './config/schema.js';
@@ -1333,7 +1334,8 @@ export class Orchestrator {
     const log = logger.child(rt.identifier);
     const handle = this.handles.get(rt.identifier)!;
     const state: TaskLoopState = { rounds: 0 };
-    let announced = new Set<string>();
+    const announced = new Set<string>();
+    const unbacked: TaskEvidence[] = [];
 
     for (;;) {
       const tasks = parseSpecTasks(await this.workspace.io.readFile(handle, SPEC.tasks));
@@ -1363,6 +1365,17 @@ export class Orchestrator {
 
         case 'done':
           bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `✅ All ${tasks!.total} task(s) complete` });
+          // Said again, together, before the run moves on. The per-task notice scrolls away
+          // during a long implementation; this is the last point where a person sees it
+          // before a PR is proposed.
+          if (unbacked.length > 0) {
+            await this.channel.notify(
+              rt.identifier,
+              `⚠️ ${unbacked.length} task(s) marked done with no commit behind them: ${unbacked
+                .map((e) => `${e.taskId} (${e.detail})`)
+                .join('; ')}`,
+            );
+          }
           await this.reviewAfterImplement(rt, issue);
           return true;
 
@@ -1374,16 +1387,57 @@ export class Orchestrator {
             phase: 'implementing',
             label: `🛠 ${task.id} (${step.position}/${step.total}) — ${task.title.slice(0, 60)}`,
           });
+          // Bracket the turn so the tick can be checked against the repositories after it.
+          // The tick lives outside git, so a commit is real evidence rather than a
+          // by-product of writing the claim (CRL-109).
+          const before = await this.repoHeads(handle);
           // Declares nothing: every later task reads the same three spec documents, and a
           // turn that cleared them would take the next task's input with it (CRL-88).
           const run = await this.dispatch(rt, issue, taskPrompt(task, step.position, step.total), true, 'implementation');
           if (!run.ok) return true; // dispatch already surfaced why; the ticks so far survive
+          const after = await this.repoHeads(handle);
+
+          const ticked = parseSpecTasks(await this.workspace.io.readFile(handle, SPEC.tasks));
+          const claimed = ticked?.tasks.find((t) => t.id === task.id)?.done ?? false;
+          const evidence = taskEvidence(task.id, claimed, before, after);
+          if (isUnbacked(evidence)) {
+            // Not a halt: a task can legitimately need no change — already done, or covered
+            // in passing by an earlier one. Stopping the run on that would repeat the
+            // mistake CRL-105 avoided with missing dependencies. But it is said out loud,
+            // because silence here is exactly the CRL-89 failure.
+            unbacked.push(evidence);
+            bus.emitEvent({
+              identifier: rt.identifier,
+              kind: 'notice',
+              label: `⚠️ ${task.id} is ticked but no repository changed (${evidence.detail})`,
+            });
+          }
+
           state.lastTaskId = task.id;
           state.rounds += 1;
           break;
         }
       }
     }
+  }
+
+  /**
+   * `HEAD` per repo, for bracketing a task turn.
+   *
+   * A repo that cannot be read comes back as `null` rather than an empty string, so the
+   * comparison can leave it out instead of reading a failed `git` call as "unchanged".
+   */
+  private async repoHeads(handle: WorkspaceHandle): Promise<RepoHeads> {
+    const heads: RepoHeads = {};
+    for (const repo of this.router.all()) {
+      try {
+        const out = await this.workspace.io.exec(handle, `git -C ${repo.key} rev-parse HEAD`);
+        heads[repo.key] = out.code === 0 && out.stdout.trim() ? out.stdout.trim() : null;
+      } catch {
+        heads[repo.key] = null;
+      }
+    }
+    return heads;
   }
 
   /** Resume an implement / review-fix run that a restart interrupted (continue the session). */
