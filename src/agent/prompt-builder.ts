@@ -10,7 +10,7 @@
 import { Liquid } from 'liquidjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { SCRATCH, SPEC, WORKFLOW_FILE } from '../core/paths.js';
+import { SCRATCH, SPEC, SPEC_DIR, WORKFLOW_FILE } from '../core/paths.js';
 import type { SpecTask } from '../core/spec-tasks.js';
 import type { Issue } from '../core/types.js';
 import type { Translator } from '../profile/i18n.js';
@@ -146,7 +146,7 @@ export function taskPrompt(task: SpecTask, position: number, total: number): str
     `${task.id} — ${task.title}`,
     `It serves ${task.requires.join(', ')}; read those in ${SPEC.requirements}, and ${SPEC.design} for how.`,
     `Implement only this task and commit it.`,
-    `Then tick its line in ${SPEC.tasks} from \`- [ ]\` to \`- [x]\` and include that in the same commit.`,
+    `Commit the code FIRST, then tick its line in ${SPEC.tasks} from \`- [ ]\` to \`- [x]\` — ${SPEC_DIR} is outside the repositories, so the tick is not part of any commit, and ticking first would leave the claim standing with nothing behind it.`,
     `Leave every other task's line alone — another turn owns each of them.`,
   ].join(' ');
 }

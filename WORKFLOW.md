@@ -239,10 +239,12 @@ on the file, not memory of the planning chat.
 
 - **Spec mode**: `.corral/spec/requirements.md`, `.corral/spec/design.md` and
   `.corral/spec/tasks.md`. **The prompt names one task — do that one and stop.** Implement
-  it, commit it, and in the same commit tick its line in `tasks.md` from `- [ ]` to `- [x]`.
-  Leave every other line exactly as it is; a separate turn owns each of them, and the file
-  is how the orchestrator knows where the work stopped. Do not tick a task you did not
-  finish: the tick is the claim that the code is committed.
+  it and **commit it first**, then tick its line in `tasks.md` from `- [ ]` to `- [x]`.
+  That order matters: `.corral/` sits outside the repositories, so the tick is not part of
+  any commit, and ticking first would leave a claim standing with nothing behind it if the
+  turn ended there. Leave every other line exactly as it is; a separate turn owns each of
+  them, and the file is how the orchestrator knows where the work stopped. **The tick is
+  the claim that the code is committed** — the orchestrator checks it against the repository.
 - Otherwise: `.corral/pending_plan.md`.
 {% if reference_path %}Before writing any code, (re)check the skills/conventions repo at
 `{{ reference_path }}` and follow its rules as you implement.
