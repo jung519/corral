@@ -5,7 +5,7 @@
  * The core binds loopback only and the control plane is authenticated but **not
  * encrypted** (`src/control-plane/ws.ts`), so the one safe way to reach a remote core is
  * a tunnel. Until this module existed the product said so and stopped there: the UI told
- * you to "use a tunnel", `docs/vm-deploy.md` told you to leave `ssh -N -L …` running in a
+ * you to "use a tunnel", the server guide told you to leave `ssh -N -L …` running in a
  * terminal, and nothing made one. When that terminal closed — or the laptop slept — the
  * app showed an empty dashboard with no hint that a tunnel was the missing piece.
  *

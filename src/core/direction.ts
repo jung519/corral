@@ -1,7 +1,7 @@
 /**
  * Global (machine-wide) Direction store — the free-text "org intent / 방향성" that,
  * from Phase 1 on, is merged with the per-project `.corral/DIRECTION.md` and injected
- * into planning/review prompts. See docs/direction-injection-plan.md.
+ * into planning/review prompts.
  *
  * This file only handles the GLOBAL scope. The desktop writes it (userData/direction.md
  * via its own IPC bridge); the core reads it here. The path is injectable (env

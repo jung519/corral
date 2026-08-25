@@ -2,7 +2,7 @@
  * Version gate — the POLICY layer of updates (deliberately separate from delivery, so it
  * works before code-signing/auto-update exist: an out-of-date app can be blocked with just
  * a "download" link). At launch, main fetches a small remote manifest and this decides
- * whether to force an update, recommend one, or proceed. See docs/version-gate-plan (TBD).
+ * whether to force an update, recommend one, or proceed.
  *
  * This file is electron-free on purpose (pure logic + fetch) so it stays unit-testable.
  */

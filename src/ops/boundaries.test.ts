@@ -1,10 +1,10 @@
 /**
  * The wall between the two pillars, checked by machine.
  *
- * `docs/module-boundaries.md` says the operational AI must not import the development AI
- * and vice versa, with the wiring points as the only meeting place. That rule was written
- * down and nothing enforced it; the first code under `ops/` is the moment it starts being
- * possible to break. An import is one line and a reviewer will not always catch it.
+ * The rule: the operational AI must not import the development AI and vice versa, with the
+ * wiring points as the only meeting place. It was written down and nothing enforced it; the
+ * first code under `ops/` is the moment it starts being possible to break. An import is one
+ * line and a reviewer will not always catch it — so the rule lives here, in the check.
  *
  * The point isn't tidiness. The operational AI has to stay domain-neutral, and reaching
  * into issue/PR/workspace code is exactly how that neutrality would be lost.

@@ -77,7 +77,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Signing is SAFE-WHEN-EMPTY: with no secrets, no CSC_LINK is exported above →
-          # electron-builder builds unsigned. Add the secrets (docs/signing.md) → auto-signs.
+          # electron-builder builds unsigned. Add the MAC_/WIN_CSC_* secrets → auto-signs.
           SECRET_MAC_CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
           SECRET_MAC_CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
           SECRET_APPLE_ID: ${{ secrets.APPLE_ID }}

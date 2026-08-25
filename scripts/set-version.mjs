@@ -3,7 +3,7 @@
  * Single source of truth for the app version. Corral ships as ONE app (the desktop shell
  * bundles the core + renderer), so all three package.json versions must stay identical —
  * `app.getVersion()` (the update gate + the packaged installer) reads desktop's. Bump them
- * together, then tag the commit `vX.Y.Z` to match. See docs/versioning.md.
+ * together, then tag the commit `vX.Y.Z` to match.
  *
  *   node scripts/set-version.mjs 0.2.0
  */

@@ -151,7 +151,8 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
   };
 
   // The operational AI runs alongside the development one, sharing this core's state
-  // directory and control plane but none of its code (docs/module-boundaries.md). It
+  // directory and control plane but none of its code — the wall `ops/boundaries.test.ts`
+  // checks. It
   // needs no config: with no pipeline files on disk it simply has nothing to run.
   const ops = await startOpsHost({ stateDir, credentials, budget });
 

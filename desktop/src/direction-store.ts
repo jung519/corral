@@ -2,7 +2,6 @@
  * Global Direction file IO for the desktop app — the free-text "방향성 / org intent"
  * lives in userData/direction.md, next to corral.yaml. The core reads the SAME file
  * (via src/core/direction.ts, cwd = userData on spawn) to inject it into prompts.
- * See docs/direction-injection-plan.md.
  */
 import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';

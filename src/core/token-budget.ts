@@ -1,7 +1,7 @@
 /**
  * One daily token ceiling, shared by both pillars.
  *
- * Shared infrastructure on purpose (docs/module-boundaries.md): the development AI and
+ * Shared infrastructure on purpose: the development AI and
  * the operational AI spend from the same account, so a limit that only one of them
  * counted would not be a limit. First come, first served — when the day's tokens are
  * gone, both stop. There is no sub-allocation; splitting the budget would mean one side
