@@ -146,6 +146,14 @@ So, concretely:
 
 ## Branches (what to do, based on the orchestrator's prompt)
 
+The prompt's first line says which branch this is. The word after the symbol is in the
+configured language, but the symbol is not:
+
+- `✅ …` — **approval.** The human accepted what was presented.
+- `⚠️ …` — **feedback.** The human's instruction follows the colon.
+- `🔍 …` — **more review wanted**, with a focus after the colon.
+- Anything else — read it; a restart says so in words.
+
 ### A — Planning (fresh session, no prior memory)
 1. Inspect the ACTUAL repositories (the subdirectories above) to ground your plan in
    reality, and identify which repo(s) the work belongs to.{% if reference_path %} First review
@@ -230,7 +238,7 @@ consolidation loses its ID; a new one takes the next unused number. Do not modif
 with the **Direction** above where the issue is neutral (it is guiding, not a rule).{% endif %}
 
 ### B — Plan feedback
-The prompt starts with a feedback marker. Revise the document the prompt names — the spec
+The prompt starts with `⚠️`. Revise the document the prompt names — the spec
 file for the current stage in spec mode, `.corral/pending_plan.md` otherwise — and stop.
 
 ### C — Implementation (after plan approval)
@@ -259,6 +267,13 @@ on the file, not memory of the planning chat.
 Leave repos you do not need to change untouched. If blocked, write a question to
 `.corral/question.md` and stop. (You do not need to record base commits — the orchestrator
 captured them at clone time.)
+
+**If the prompt says the previous run was interrupted**, this same branch applies — but
+start by finding out what already exists instead of beginning again. Read the approved
+document, then check each repo's work branch: `git log` for what is committed and
+`git status` for edits that were never committed. Commit those first if the prompt says
+there are any. In spec mode `tasks.md` already records where the work stopped, so trust the
+ticks over any memory. Re-deriving finished work costs a full turn and produces nothing new.
 
 ### Consolidate review (self-review)
 Independent review rounds are in `.corral/review_round_*.md`; static-gate facts in
@@ -320,7 +335,7 @@ and SUGGESTION fixes from `.corral/pending_review.md`, commit (in the relevant r
 and stop. (NITs are advisory — do not block on them.) The commit-before-verification rule
 from branch C applies here too — this turn is just as final as that one.
 
-### E — Review feedback (the prompt starts with a feedback marker while a review is pending)
+### E — Review feedback (the prompt starts with `⚠️` while a review is pending)
 This is the human's instruction after reading the review.{% if direction %} It takes
 precedence over the standing Direction for this issue — if the two conflict, follow the
 human's instruction.{% endif %} Usually one of:
@@ -332,7 +347,7 @@ Either way, then just **stop** — the orchestrator runs the review **once more*
 it to the human again (clean → PR opens automatically). Do NOT write a plan, options, a fix
 plan, or `pr_meta.json`.
 
-### F — Review approved (the prompt starts with the approval marker)
+### F — Review approved (the prompt starts with `✅`)
 The human approved — open the PR with the **current code as-is**, even if findings remain. Do
 NOT write a fix plan. Make sure your work is committed on each changed repo's work branch, then
 write PR metadata as JSON to `.corral/pr_meta.json`: `{"title": "…", "body": "…"}`. The
