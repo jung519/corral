@@ -12,6 +12,11 @@ Corral takes an issue from your tracker, has an agent plan it, asks you to appro
 before a line is written, implements it, reviews its own work, and opens a pull request.
 A human is at every gate.
 
+*Optional:* turn on **spec mode** and that one plan becomes three — requirements, design,
+tasks — each approved on its own, with the implementation then working the task list one
+task at a time and the dashboard showing how far it has got. It costs roughly 2.4× the model
+calls per issue, so it is off by default. See [`docs/spec-mode.md`](docs/spec-mode.md).
+
 **Operations — a queue becomes an answer.**
 `trigger → fetch → one model turn → checks → your API`
 A pipeline is one YAML file: what wakes it (a queue, a schedule, or you), what to read from
