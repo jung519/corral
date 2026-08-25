@@ -394,6 +394,80 @@ describe('an answer the model is not sure about', () => {
   });
 });
 
+describe('an answer that is honestly empty', () => {
+  /**
+   * The prompt is often what asked for the empty answer, so `validate` lets it through.
+   * The harm is downstream: an API that stores results refuses a blank one, answers 400,
+   * and a queue trigger reads `output_failed` as retryable — the same message comes back,
+   * the model gives the same honest answer, and it loops to the dead-letter queue with
+   * nobody at fault (CRL-92).
+   */
+  const httpSink: OutputSink = {
+    kind: 'http',
+    send: async () => {
+      calls.send++;
+      if (sendError) throw sendError;
+    },
+  };
+  const withSkip = (skip_if?: Record<string, unknown>) =>
+    pipeline({
+      output: { kind: 'http', request: { method: 'PATCH', url: 'https://api/x' }, ...(skip_if ? { skip_if } : {}) },
+    });
+  const httpDeps = () => deps({ sinks: new Map([['http', httpSink]]) });
+
+  it('is not sent when the pipeline says not to', async () => {
+    verdict = { ok: true, answer: { items: [] } };
+    const record = await new PipelineRunner(httpDeps()).run(withSkip({ field: 'items', is: 'empty' }), {});
+
+    expect(calls.send).toBe(0);
+    expect(record.outcome).toBe('skipped');
+    expect(record.stage).toBe('output');
+  });
+
+  it('says why, so a missing write can be traced', async () => {
+    verdict = { ok: true, answer: { items: [] } };
+    const record = await new PipelineRunner(httpDeps()).run(withSkip({ field: 'items', is: 'empty' }), {});
+
+    // Silence here is the thing being fixed — "why was nothing saved" has to be answerable.
+    expect(record.reason).toBe('skip_if matched (items is empty)');
+  });
+
+  it('still charges the turn — it was already spent', async () => {
+    verdict = { ok: true, answer: { items: [] } };
+    const record = await new PipelineRunner(httpDeps()).run(withSkip({ field: 'items', is: 'empty' }), {});
+
+    expect(record.tokens).toBe(120);
+  });
+
+  it('is sent when the answer is not empty after all', async () => {
+    verdict = { ok: true, answer: { items: ['a'] } };
+    const record = await new PipelineRunner(httpDeps()).run(withSkip({ field: 'items', is: 'empty' }), {});
+
+    expect(calls.send).toBe(1);
+    expect(record.outcome).toBe('completed');
+  });
+
+  it('leaves a pipeline that never asked for this alone', async () => {
+    verdict = { ok: true, answer: { items: [] } };
+    const record = await new PipelineRunner(httpDeps()).run(withSkip(), {});
+
+    // An empty answer still goes out where nobody said otherwise — the old behaviour.
+    expect(calls.send).toBe(1);
+    expect(record.outcome).toBe('completed');
+  });
+
+  it('judges the bag the sink would have received, not just the answer', async () => {
+    // `title` comes from the input, not the model. The condition is written against what
+    // the output body can reference, so both have to be in scope.
+    resolved = { raw: {}, fields: { title: '' } };
+    verdict = { ok: true, answer: { items: ['a'] } };
+    const record = await new PipelineRunner(httpDeps()).run(withSkip({ field: 'title', is: 'empty' }), {});
+
+    expect(calls.send).toBe(0);
+    expect(record.outcome).toBe('skipped');
+  });
+});
+
 describe('concurrency', () => {
   it('never exceeds the pipeline limit, however the runs arrive', async () => {
     let inFlight = 0;

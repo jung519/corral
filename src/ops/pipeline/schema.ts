@@ -369,6 +369,22 @@ export const NoneOutputSchema = z.object({ kind: z.literal('none') });
 export const HttpOutputSchema = z.object({
   kind: z.literal('http'),
   request: HttpRequestSchema,
+  /**
+   * Don't send when the answer came back empty (CRL-92).
+   *
+   * The prompt is often the thing *asking* for an empty answer — "return an empty list if
+   * you have no grounds" — and `validate` rightly lets that through, because honouring the
+   * instruction is not drift. But an API that stores results usually refuses an empty one,
+   * since a stored blank cannot be told apart from "not processed yet". It answers 400, the
+   * run ends `output_failed`, and a queue trigger reads that as retryable: the same message
+   * returns, the model sees the same material, gives the same honest empty answer, and the
+   * loop runs to the dead-letter queue with nobody at fault.
+   *
+   * Same `ConditionSchema` as the input's `skip_if` — a judgement that works on the way in
+   * has no reason to be unavailable on the way out. Evaluated against what the sink would
+   * have received, so the name written here is the name the output body uses.
+   */
+  skip_if: ConditionSchema.optional(),
 });
 
 const MESSAGE_REQUIRED = 'a pubsub output needs a message — name the fields to publish, e.g. { labels: "{{labels}}" }';
@@ -396,6 +412,8 @@ export const PubSubOutputSchema = z.object({
   message: z
     .record(z.string(), z.unknown(), { required_error: MESSAGE_REQUIRED, invalid_type_error: MESSAGE_REQUIRED })
     .refine((m) => Object.keys(m).length > 0, { message: MESSAGE_REQUIRED }),
+  /** Don't publish an empty answer — see `HttpOutputSchema.skip_if` (CRL-92). */
+  skip_if: ConditionSchema.optional(),
 });
 
 export const OutputSchema = z.discriminatedUnion('kind', [NoneOutputSchema, HttpOutputSchema, PubSubOutputSchema]);

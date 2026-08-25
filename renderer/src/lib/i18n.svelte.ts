@@ -439,6 +439,10 @@ const en: Dict = {
   'editor.skipIs.nonEmpty': 'already filled',
   'editor.skipIs.empty': 'empty',
   'editor.skipIfHint': 'The guard against doing the same record twice — a queue redelivers, and a redelivery must not cost a second model turn. Leave blank to skip the check.',
+  'editor.outSkip': 'When the result is empty',
+  'editor.outSkipHint':
+    'A prompt that says "return an empty list if you have no grounds" gets taken at its word, and the check lets that through — the model did as it was told. But a store that refuses a blank answers 400, which a queue reads as worth retrying, so the same honest answer comes back until it lands in the dead-letter queue. Name a field here and the run ends as skipped instead, with the reason recorded. Leave blank to send it anyway.',
+  'editor.outSkipField': 'Skip sending when this field of the result',
   'editor.test': 'Try the fetch',
   'editor.testEvent': 'Sample event (JSON) — fills places like {{id}} in the URL',
   'editor.testRun': 'Fetch',
@@ -1060,6 +1064,10 @@ const ko: Dict = {
   'editor.skipIs.nonEmpty': '이미 채워짐',
   'editor.skipIs.empty': '비어 있음',
   'editor.skipIfHint': '같은 레코드를 두 번 처리하지 않기 위한 방어입니다. 큐는 재전달하고, 재전달이 모델 턴을 한 번 더 쓰면 안 됩니다. 비워두면 검사하지 않습니다.',
+  'editor.outSkip': '결과가 비었을 때',
+  'editor.outSkipHint':
+    '"근거가 없으면 빈 배열을 반환하라"고 시킨 프롬프트는 그대로 지켜지고, 검증도 그것을 통과시킵니다 — 모델은 시킨 대로 했으니까요. 그런데 빈 값을 거절하는 저장소는 400을 주고, 큐는 그것을 재시도할 만한 실패로 읽어 같은 답이 계속 돌아옵니다. 결국 dead letter 로 밀립니다. 여기에 항목을 적으면 그 대신 건너뜀으로 끝나고 이유가 기록에 남습니다. 비워두면 그대로 보냅니다.',
+  'editor.outSkipField': '결과의 이 항목이',
   'editor.test': '조회 시험',
   'editor.testEvent': '샘플 이벤트 (JSON) — URL의 {{id}} 같은 자리를 채웁니다',
   'editor.testRun': '조회',
