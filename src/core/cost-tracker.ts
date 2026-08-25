@@ -55,7 +55,8 @@ export class CostTracker {
     cur.dispatches += 1;
     this.byIssue.set(identifier, cur);
     this.persist();
-    this.budget?.record(run);
+    // The development pillar — the cost tracker only ever sees issue work (CRL-110).
+    this.budget?.record(run, 'development');
   }
 
   get(identifier: string): CostEntry | undefined {
