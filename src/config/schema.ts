@@ -375,6 +375,14 @@ export const ConfigSchema = z.object({
    * what it meant.)
    */
   spec_mode: z.enum(['single', 'split']).default('single'),
+  /**
+   * Ceiling on implementation turns in `split` mode — one per task.
+   *
+   * A bound rather than a target: the cost is the number of tasks the plan actually
+   * describes, and this only stops a malformed or runaway list from buying a turn per line.
+   * Hitting it hands the rest to the human instead of continuing quietly.
+   */
+  max_task_rounds: z.number().int().positive().default(20),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;

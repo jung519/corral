@@ -11,6 +11,7 @@ import { Liquid } from 'liquidjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { SCRATCH, SPEC, WORKFLOW_FILE } from '../core/paths.js';
+import type { SpecTask } from '../core/spec-tasks.js';
 import type { Issue } from '../core/types.js';
 import type { Translator } from '../profile/i18n.js';
 
@@ -128,6 +129,25 @@ export function specStagePrompt(issue: Issue, stage: SpecStage, workflowFile: st
   return [
     `You are Corral's worker for issue ${issue.identifier}.`,
     `Follow ${workflowFile}, branch ${branch} (${stage}), and write ${file}.`,
+  ].join(' ');
+}
+
+/**
+ * Ask for exactly one task from `tasks.md`.
+ *
+ * Self-contained on purpose. The loop continues the session so the agent keeps the
+ * repository it just read, but a session breaks whenever the stage routes to a different
+ * provider or the core restarts — and CRL-88 was what happens when a turn's instructions
+ * assume a memory that is no longer there. Everything the task needs is in the prompt.
+ */
+export function taskPrompt(task: SpecTask, position: number, total: number): string {
+  return [
+    `Follow ${WORKFLOW_FILE}, branch C, and do ONE task: ${task.id} (${position} of ${total}).`,
+    `${task.id} — ${task.title}`,
+    `It serves ${task.requires.join(', ')}; read those in ${SPEC.requirements}, and ${SPEC.design} for how.`,
+    `Implement only this task and commit it.`,
+    `Then tick its line in ${SPEC.tasks} from \`- [ ]\` to \`- [x]\` and include that in the same commit.`,
+    `Leave every other task's line alone — another turn owns each of them.`,
   ].join(' ');
 }
 
