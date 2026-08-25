@@ -27,11 +27,15 @@ a doubtful answer is held back with a link rather than written.
 Both are **provider-neutral** (Claude / Gemini / GPT), **BYOK** (bring your own keys;
 nothing is embedded), and **self-hostable**.
 
-Corral began as a rebuild of a Slack-driven harness built on [OpenAI's Symphony](https://github.com/openai/symphony): review
-requests, three candidate plans to choose from, and completion reports all arrived as Slack
-messages, and nothing showed what was where. Only the concept carried over — the core here
-was written from scratch — and the missing piece became the point of the project: a UI that
-shows each issue's stage, what it is waiting on, and what it has spent.
+Corral is built to [OpenAI's Symphony](https://github.com/openai/symphony) spec (Apache-2.0),
+written from scratch in TypeScript — the "make your own" route that repository offers, rather
+than a fork of its Elixir reference implementation.
+
+It started as a rebuild of a Slack-driven harness on that spec: review requests, three
+candidate plans to choose from, and completion reports all arrived as Slack messages, and
+nothing showed what was where. So Corral goes past the spec exactly where the spec stops — a
+rich UI is one of Symphony's stated non-goals — and that is the point of the project: a
+dashboard that shows each issue's stage, what it is waiting on, and what it has spent.
 
 ## ⬇ Download
 
