@@ -12,6 +12,7 @@ import { BrowserWindow } from 'electron';
 import { readRemote, saveRemoteToken, writeRemote } from '../remote-store.js';
 import { LocalTransport } from './local.js';
 import { RemoteTransport } from './remote.js';
+import { SshTunnel, type TunnelConfig, type TunnelStatus } from './tunnel.js';
 import type { CoreMessage, CoreTransport, LinkState } from './types.js';
 
 let transport: CoreTransport | undefined;
@@ -22,6 +23,16 @@ const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Err
 let readyWaiters: Array<{ resolve: () => void; reject: (e: Error) => void }> = [];
 /** Last denial from a remote core (wrong code / revoked token) — surfaced to the UI. */
 let lastDenial: string | undefined;
+/**
+ * The tunnel, when the saved settings ask us to open one.
+ *
+ * It sits **above** the socket deliberately. `remote.ts` retries with backoff, but against
+ * a missing tunnel that retry can only ever say "reconnecting" about a port that is not
+ * there. So the socket is started when the tunnel is up and stopped when it is not, and
+ * the tunnel's own status travels with the link state (CRL-114).
+ */
+let tunnel: SshTunnel | undefined;
+let tunnelStatus: TunnelStatus = { state: 'off' };
 
 function resolveReady(): void {
   ready = true;
@@ -81,7 +92,12 @@ function onDown(reason: string): void {
 
 function onState(state: LinkState): void {
   // The UI shows this for remote links; harmless for local.
-  broadcast('core-link-state', { state, denial: lastDenial });
+  broadcastLink(state);
+}
+
+/** One shape for every link update, so the tunnel is never missing from it. */
+function broadcastLink(state: LinkState): void {
+  broadcast('core-link-state', { state, denial: lastDenial, tunnelStatus });
 }
 
 const handlers = { onMessage, onDown, onState };
@@ -101,7 +117,7 @@ function createTransport(): CoreTransport {
     onPaired: (token) => saveRemoteToken(token),
     onDenied: (reason) => {
       lastDenial = reason;
-      broadcast('core-link-state', { state: 'disconnected', denial: reason });
+      broadcastLink('disconnected');
     },
   });
 }
@@ -110,8 +126,34 @@ function createTransport(): CoreTransport {
 export function startOrchestrator(): void {
   if (transport) return;
   ready = false;
+  const remote = readRemote();
+  // Built either way: `orchestratorRunning()` and `callCore` must not see "not running"
+  // while we are merely waiting for a tunnel to come up.
   transport = createTransport();
+
+  if (remote.mode === 'remote' && remote.url && remote.tunnel) {
+    tunnel = openTunnel(remote.tunnel);
+    tunnel.start();
+    return;
+  }
   transport.start();
+}
+
+/** Supervise a tunnel and gate the socket on it. */
+function openTunnel(cfg: TunnelConfig): SshTunnel {
+  return new SshTunnel(
+    {
+      onStatus: (status) => {
+        tunnelStatus = status;
+        // Only run the socket while there is something to talk to. Letting it spin against
+        // a dead port is exactly the "reconnecting forever" that hid the real cause.
+        if (status.state === 'up') transport?.start();
+        else transport?.stop();
+        broadcastLink(status.state === 'up' ? (transport?.state ?? 'connecting') : 'disconnected');
+      },
+    },
+    cfg,
+  );
 }
 
 /** Stop + start — used after setup, or when the connection settings change. */
@@ -123,6 +165,11 @@ export function restartOrchestrator(): void {
 export function stopOrchestrator(): void {
   transport?.stop();
   transport = undefined;
+  // The tunnel's lifetime is the app's (CRL-114 decision 3) — never leave an orphan ssh
+  // holding the local port, or the next start cannot bind it.
+  tunnel?.stop();
+  tunnel = undefined;
+  tunnelStatus = { state: 'off' };
   ready = false;
 }
 
@@ -130,9 +177,9 @@ export function orchestratorRunning(): boolean {
   return transport !== undefined;
 }
 
-/** Current link state (for the UI): connection state plus any refusal reason. */
-export function linkStatus(): { state: LinkState; denial?: string } {
-  return { state: transport?.state ?? 'disconnected', denial: lastDenial };
+/** Current link state (for the UI): connection state, any refusal reason, and the tunnel. */
+export function linkStatus(): { state: LinkState; denial?: string; tunnelStatus: TunnelStatus } {
+  return { state: transport?.state ?? 'disconnected', denial: lastDenial, tunnelStatus };
 }
 
 /**
@@ -142,11 +189,23 @@ export function linkStatus(): { state: LinkState; denial?: string } {
  * never persisted, so it can't live in the saved settings the way a URL does. Once the
  * token is stored, normal startup authenticates with it and the code is irrelevant.
  */
-export async function pairRemote(opts: { url: string; code: string; label?: string }): Promise<{
-  ok: boolean;
-  error?: string;
-}> {
+export async function pairRemote(opts: {
+  url: string;
+  code: string;
+  label?: string;
+  tunnel?: TunnelConfig;
+}): Promise<{ ok: boolean; error?: string; tunnelStatus?: TunnelStatus }> {
   stopOrchestrator(); // don't leave a local core (or an old link) running underneath
+
+  // The tunnel has to exist before anything can be paired through it. Opening it here —
+  // rather than telling the operator to open one — is the point of CRL-114.
+  if (opts.tunnel) {
+    const opened = await raiseTunnel(opts.tunnel);
+    if (!opened.ok) {
+      startOrchestrator();
+      return { ok: false, error: 'tunnel', tunnelStatus: opened.status };
+    }
+  }
 
   const result = await new Promise<{ ok: boolean; error?: string }>((resolve) => {
     let settled = false;
@@ -157,7 +216,7 @@ export async function pairRemote(opts: { url: string; code: string; label?: stri
       probe.stop();
       resolve(r);
     };
-    const timer = setTimeout(() => finish({ ok: false, error: '연결할 수 없습니다 — 주소와 터널을 확인하세요.' }), 10_000);
+    const timer = setTimeout(() => finish({ ok: false, error: 'unreachable' }), 10_000);
 
     const probe = new RemoteTransport(
       { onMessage: () => {}, onDown: () => {} },
@@ -175,13 +234,62 @@ export async function pairRemote(opts: { url: string; code: string; label?: stri
     probe.start();
   });
 
+  // The pairing tunnel is holding the local port. `startOrchestrator` opens its own, and
+  // two ssh processes cannot bind the same port — the second would die with
+  // `cannot listen to port`, which `classifyStderr` (rightly) calls fatal. Hand the port
+  // over cleanly instead.
+  const pairedStatus = tunnelStatus;
+  tunnel?.stop();
+  tunnel = undefined;
+  tunnelStatus = { state: 'off' };
+
   if (result.ok) {
-    writeRemote({ mode: 'remote', url: opts.url, label: opts.label });
+    writeRemote({ mode: 'remote', url: opts.url, label: opts.label, tunnel: opts.tunnel });
     startOrchestrator(); // reconnect properly, this time with the stored token
   } else {
     startOrchestrator(); // restore whatever mode was configured before
   }
-  return result;
+  return { ...result, tunnelStatus: result.ok ? tunnelStatus : pairedStatus };
+}
+
+/**
+ * Bring a tunnel up (or say why not) before pairing through it.
+ *
+ * Bounded on purpose: a pairing code is valid for five minutes and the operator is sitting
+ * in front of the screen, so waiting forever on a host that will never answer is worse
+ * than coming back with a cause they can act on.
+ */
+function raiseTunnel(cfg: TunnelConfig, timeoutMs = 20_000): Promise<{ ok: boolean; status: TunnelStatus }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok, status: tunnelStatus });
+    };
+    const timer = setTimeout(() => {
+      tunnel?.stop();
+      tunnel = undefined;
+      tunnelStatus = { state: 'failed', code: 'timeout' };
+      finish(false);
+    }, timeoutMs);
+
+    const probe = new SshTunnel(
+      {
+        onStatus: (status) => {
+          tunnelStatus = status;
+          broadcastLink('connecting');
+          if (status.state === 'up') finish(true);
+          // A fatal cause (no ssh, rejected key) will not improve by waiting it out.
+          else if (status.state === 'failed' && status.fatal) finish(false);
+        },
+      },
+      cfg,
+    );
+    tunnel = probe;
+    probe.start();
+  });
 }
 
 /** Send a request to the core and await its reply (correlated by id). Waits briefly

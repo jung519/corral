@@ -152,11 +152,13 @@ pnpm start corral.yaml                  # control plane on ws://127.0.0.1:4410
 ```
 
 It prints a **6-digit pairing code**. In the desktop app: **Settings → Core connection →
-Another computer**, enter the address and the code.
+Another computer**, give it the server (`user@host`) and the code.
 
 There is no HTTP dashboard and no port to open in a browser — the desktop app *is* the
-client. Binding stays on `127.0.0.1`, so reaching it from elsewhere means an SSH tunnel;
-`--control-plane [host:]port` overrides the address.
+client. Binding stays on `127.0.0.1`, and the app carries the connection over SSH itself —
+so there is nothing to open in a firewall and no terminal to leave running. Uncheck that
+if you already have a tunnel or an overlay network and want the address used as-is.
+`--control-plane [host:]port` overrides the address the core binds.
 
 If you already have a `corral.yaml`, secrets come from the environment as
 `CORRAL_<SERVICE>_<ACCOUNT>` — the account is the one named in that credential's config

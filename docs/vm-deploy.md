@@ -6,10 +6,10 @@ when you want to look, approve a plan, or start an issue.
 
 This guide goes from a bare Linux machine to "the app on my laptop is driving it".
 
-Every Corral command below was run against a fresh clone and behaves as printed. The two
-things that need your machines rather than Corral's — the systemd unit and the SSH
-tunnel — are standard for those tools and are the only steps not exercised here, along
-with the provider login marked ⚠.
+Every Corral command below was run against a fresh clone and behaves as printed. The one
+thing that needs your machine rather than Corral's — the systemd unit — is standard for
+that tool and is the only step not exercised here, along with the provider login marked ⚠.
+The SSH tunnel used to be on this list; the app opens it now (step 6).
 
 ---
 
@@ -25,8 +25,9 @@ with the provider login marked ⚠.
 ```
 
 The core listens on **loopback only**. The tunnel is what makes it reachable, so there is
-no port on the public internet and no TLS to configure. Close the laptop and the server
-keeps going; reopen it and the app reconnects on its own.
+no port on the public internet and no TLS to configure — **and the app opens that tunnel
+itself**, so it isn't a step you have to keep alive. Close the laptop and the server keeps
+going; reopen it and the app reopens the tunnel and reconnects on its own.
 
 ---
 
@@ -157,20 +158,23 @@ This is the step that bites. Pick whichever fits your provider:
 
 ## 6. Connect from your laptop
 
-Open the tunnel:
+In the Corral desktop app:
 
-```bash
-ssh -N -L 4410:127.0.0.1:4410 you@your-server
-```
+**Settings → Core connection → Another computer** → server `you@your-server` → paste the
+6-digit code → **Connect**.
 
-Then in the Corral desktop app:
+That's the whole step. The app opens the SSH tunnel itself and keeps it up for as long as
+it is running, so there is no command to leave in a terminal and nothing to open in a
+firewall — the connection rides on port 22, which you already use.
 
-**Settings → Core connection → Another computer** → address `ws://127.0.0.1:4410` →
-paste the 6-digit code → **Connect**.
+After pairing, the app stores a long-lived token in your OS keychain and never needs the
+code again. If the tunnel drops — sleep, a network change — the app reopens it and
+reconnects. If it *can't*, the connection screen says why (no `ssh` on your machine, the
+server refused the key, the local port is taken) instead of just going quiet.
 
-The address is `127.0.0.1` because that's your end of the tunnel. After pairing, the app
-stores a long-lived token in your OS keychain and never needs the code again; leave the
-tunnel command running and the app reconnects by itself whenever it drops.
+> **Already have a tunnel?** Uncheck **Let Corral open the connection** and give it the
+> address directly (`ws://127.0.0.1:4410`). That's the path for an existing tunnel, a VPN,
+> or an overlay network like Tailscale.
 
 From here the app behaves exactly as it does locally — except the setup wizard now
 configures the server: Docker detection reports the *server's* Docker, secrets land in the

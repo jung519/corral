@@ -5,6 +5,7 @@
  * starting the orchestrator after the setup wizard completes.
  */
 import { contextBridge, ipcRenderer } from 'electron';
+import type { TunnelConfig, TunnelStatus } from './core-link/tunnel.js';
 
 const api = {
   /** Host OS platform ('darwin' | 'win32' | 'linux'). Lets the wizard pick
@@ -47,17 +48,35 @@ const api = {
       url: string;
       label: string;
       paired: boolean;
+      /** Saved tunnel settings, or null when the address is used as-is. */
+      tunnel: TunnelConfig | null;
       state: 'connected' | 'connecting' | 'disconnected';
       denial?: string;
+      tunnelStatus: TunnelStatus;
     }> => ipcRenderer.invoke('remote:get'),
-    setMode: (mode: 'local' | 'remote', url?: string, label?: string): Promise<{ ok: boolean }> =>
-      ipcRenderer.invoke('remote:setMode', mode, url, label),
-    pair: (url: string, code: string, label?: string): Promise<{ ok: boolean; error?: string }> =>
-      ipcRenderer.invoke('remote:pair', url, code, label),
+    setMode: (
+      mode: 'local' | 'remote',
+      url?: string,
+      label?: string,
+      tunnel?: TunnelConfig,
+    ): Promise<{ ok: boolean }> => ipcRenderer.invoke('remote:setMode', mode, url, label, tunnel),
+    pair: (
+      url: string,
+      code: string,
+      label?: string,
+      tunnel?: TunnelConfig,
+    ): Promise<{ ok: boolean; error?: string; tunnelStatus?: TunnelStatus }> =>
+      ipcRenderer.invoke('remote:pair', url, code, label, tunnel),
     unpair: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('remote:unpair'),
-    /** Live connection state (a remote link reconnects on its own). Returns an unsubscribe fn. */
-    onState: (cb: (s: { state: string; denial?: string }) => void): (() => void) => {
-      const listener = (_e: unknown, payload: { state: string; denial?: string }): void => cb(payload);
+    /**
+     * Live connection state. Carries the tunnel's own status because "reconnecting" and
+     * "there is no tunnel" are different facts and only one of them is actionable.
+     */
+    onState: (cb: (s: { state: string; denial?: string; tunnelStatus?: TunnelStatus }) => void): (() => void) => {
+      const listener = (
+        _e: unknown,
+        payload: { state: string; denial?: string; tunnelStatus?: TunnelStatus },
+      ): void => cb(payload);
       ipcRenderer.on('core-link-state', listener);
       return () => ipcRenderer.off('core-link-state', listener);
     },

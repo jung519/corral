@@ -4,9 +4,13 @@
   import CopyButton from './lib/CopyButton.svelte';
   import PasteButton from './lib/PasteButton.svelte';
   import { t } from './lib/i18n.svelte';
+  import type { TunnelConfig, TunnelStatus } from './corral-bridge';
 
   /** What to run on the machine that will host the engine, to get a pairing code. */
   const PAIR_COMMAND = 'node dist/main.js corral.yaml --control-plane 4410 --pair';
+
+  /** Default control-plane port — the one the core binds when nothing overrides it. */
+  const DEFAULT_PORT = 4410;
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
 
@@ -21,6 +25,61 @@
   let busy = $state(false);
   let error = $state('');
 
+  // The app opens the tunnel itself (CRL-114). Off is for someone who already has one —
+  // their own ssh, or an overlay network — and just wants the address used as-is.
+  let useTunnel = $state(true);
+  let sshTarget = $state('');
+  let remotePort = $state(DEFAULT_PORT);
+  let localPort = $state(DEFAULT_PORT);
+  let identityFile = $state('');
+  let showAdvanced = $state(false);
+  let tunnelStatus = $state<TunnelStatus>({ state: 'off' });
+
+  /** With a tunnel, the address is ours to derive — it is our end of the pipe. */
+  const effectiveUrl = $derived(useTunnel ? `ws://127.0.0.1:${localPort}` : url.trim());
+  const tunnelCfg = $derived.by((): TunnelConfig | undefined =>
+    useTunnel && sshTarget.trim()
+      ? {
+          target: sshTarget.trim(),
+          remotePort,
+          localPort,
+          identityFile: identityFile.trim() || undefined,
+        }
+      : undefined,
+  );
+  /** Enough to try with: a destination when we tunnel, an address when we don't. */
+  const ready = $derived(useTunnel ? !!sshTarget.trim() : !!url.trim());
+
+  /** The command that does by hand what the app is trying to do — the named fallback. */
+  const tunnelCommand = $derived(
+    `ssh -N -T -L ${localPort}:127.0.0.1:${remotePort} ${sshTarget.trim() || 'user@host'}`,
+  );
+
+  /**
+   * What to say about the tunnel.
+   *
+   * A failed tunnel must read as a failed tunnel. Before this, a missing tunnel showed up
+   * as a socket that reconnected forever, so the screen said "reconnecting" about a port
+   * that was never there.
+   */
+  const tunnelLine = $derived.by(() => {
+    if (!useTunnel || mode !== 'remote') return '';
+    if (tunnelStatus.state === 'up') return t('link.tunnelUp');
+    if (tunnelStatus.state === 'starting') return t('link.tunnelStarting');
+    if (tunnelStatus.state === 'off') return '';
+    const key =
+      tunnelStatus.code === 'ssh-not-found'
+        ? 'link.tunnelErrNoSsh'
+        : tunnelStatus.code === 'auth-failed'
+          ? 'link.tunnelErrAuth'
+          : tunnelStatus.code === 'forward-failed'
+            ? 'link.tunnelErrForward'
+            : tunnelStatus.code === 'timeout'
+              ? 'link.tunnelErrTimeout'
+              : 'link.tunnelErrExited';
+    return t(key);
+  });
+
   const stateKey = $derived(
     linkState === 'connected' ? 'link.connected' : linkState === 'connecting' ? 'link.connecting' : 'link.disconnected',
   );
@@ -33,6 +92,15 @@
     paired = r.paired;
     linkState = r.state;
     denial = r.denial;
+    tunnelStatus = r.tunnelStatus ?? { state: 'off' };
+    // No saved tunnel means the address was meant to be used as-is; don't second-guess it.
+    useTunnel = !!r.tunnel;
+    if (r.tunnel) {
+      sshTarget = r.tunnel.target;
+      remotePort = r.tunnel.remotePort;
+      localPort = r.tunnel.localPort;
+      identityFile = r.tunnel.identityFile ?? '';
+    }
   }
 
   onMount(() => {
@@ -42,6 +110,7 @@
     return window.corral?.remote.onState((s) => {
       linkState = s.state as typeof linkState;
       denial = s.denial;
+      if (s.tunnelStatus) tunnelStatus = s.tunnelStatus;
     });
   });
 
@@ -58,11 +127,11 @@
 
   /** Already paired: just switch to remote — the stored token authenticates us. */
   async function useRemote() {
-    if (!url.trim()) return;
+    if (!ready) return;
     busy = true;
     error = '';
     try {
-      await window.corral!.remote.setMode('remote', url.trim());
+      await window.corral!.remote.setMode('remote', effectiveUrl, undefined, tunnelCfg);
       await refresh();
     } finally {
       busy = false;
@@ -70,12 +139,15 @@
   }
 
   async function pair() {
-    if (!url.trim() || !code.trim()) return;
+    if (!ready || !code.trim()) return;
     busy = true;
     error = '';
     try {
-      const r = await window.corral!.remote.pair(url.trim(), code.trim());
-      if (!r.ok) error = r.error ?? t('link.pairFailed');
+      // One button: it opens the tunnel and pairs through it. If the tunnel is the thing
+      // that failed, say so by name rather than reporting a generic pairing failure.
+      const r = await window.corral!.remote.pair(effectiveUrl, code.trim(), undefined, tunnelCfg);
+      if (r.tunnelStatus) tunnelStatus = r.tunnelStatus;
+      if (!r.ok) error = r.error === 'tunnel' ? '' : r.error === 'unreachable' ? t('link.unreachable') : (r.error ?? t('link.pairFailed'));
       else code = '';
       await refresh();
     } finally {
@@ -124,16 +196,80 @@
 
     {#if mode === 'remote'}
       <div class="remote">
-        <label class="field">
-          <span>{t('link.url')}</span>
-          <input type="text" bind:value={url} placeholder="ws://127.0.0.1:4410" spellcheck="false" disabled={busy} />
+        <!-- The app opens the tunnel (CRL-114). Unchecking is for someone who already has
+             one — their own ssh, a VPN, an overlay network — and wants the address used
+             as-is. Telling everyone else to "use a tunnel" and stopping there was the bug. -->
+        <label class="check">
+          <input type="checkbox" bind:checked={useTunnel} disabled={busy} />
+          <span class="checkText">
+            <strong>{t('link.useTunnel')}</strong>
+            <span class="sub">{t('link.useTunnelHint')}</span>
+          </span>
         </label>
+
+        {#if useTunnel}
+          <!-- Ask what the operator knows (which machine), not what we can work out
+               (which loopback port our end of the tunnel landed on). -->
+          <label class="field">
+            <span>{t('link.sshTarget')}</span>
+            <div class="row">
+              <input
+                type="text"
+                bind:value={sshTarget}
+                placeholder="user@your-server"
+                spellcheck="false"
+                disabled={busy}
+              />
+              <PasteButton onpaste={(v) => (sshTarget = v.trim())} />
+            </div>
+          </label>
+          <details bind:open={showAdvanced}>
+            <summary>{t('link.advanced')}</summary>
+            <label class="field">
+              <span>{t('link.corePort')}</span>
+              <input type="number" bind:value={remotePort} min="1" max="65535" disabled={busy} />
+            </label>
+            <label class="field">
+              <span>{t('link.localPort')}</span>
+              <input type="number" bind:value={localPort} min="1" max="65535" disabled={busy} />
+            </label>
+            <label class="field">
+              <span>{t('link.identityFile')}</span>
+              <input
+                type="text"
+                bind:value={identityFile}
+                placeholder="~/.ssh/id_ed25519"
+                spellcheck="false"
+                disabled={busy}
+              />
+            </label>
+          </details>
+        {:else}
+          <label class="field">
+            <span>{t('link.url')}</span>
+            <input type="text" bind:value={url} placeholder="ws://127.0.0.1:4410" spellcheck="false" disabled={busy} />
+          </label>
+        {/if}
+
+        <!-- A dead tunnel has to read as a dead tunnel. It used to show up as a socket
+             reconnecting forever against a port that was never there. -->
+        {#if tunnelLine}
+          <p class="tunnel {tunnelStatus.state}">{tunnelLine}</p>
+          {#if tunnelStatus.detail}<p class="hint detail">{tunnelStatus.detail}</p>{/if}
+          {#if tunnelStatus.state === 'failed'}
+            <details>
+              <summary>{t('link.manualTunnel')}</summary>
+              <p class="hint">{t('link.manualTunnelHint')}</p>
+              <CopyButton value={tunnelCommand} label={t('link.copyTunnelCommand')} reveal />
+            </details>
+          {/if}
+        {/if}
 
         {#if paired}
           <div class="row">
             <span class="state {linkState}">● {t(stateKey)}</span>
             <span class="spacer"></span>
-            <Button onclick={useRemote} disabled={busy || !url.trim()}>{t('link.apply')}</Button>
+            <Button onclick={useRemote} disabled={busy || !ready}>{t('link.apply')}</Button>
             <Button onclick={unpair} disabled={busy}>{t('link.unpair')}</Button>
           </div>
         {:else}
@@ -150,7 +286,7 @@
               disabled={busy}
             />
             <PasteButton onpaste={(v) => (code = v.replace(/\D/g, '').slice(0, 6))} />
-            <Button class="primary" onclick={pair} disabled={busy || !url.trim() || !code.trim()}>
+            <Button class="primary" onclick={pair} disabled={busy || !ready || !code.trim()}>
               {busy ? t('link.pairing') : t('link.pair')}
             </Button>
           </div>
@@ -198,6 +334,42 @@
   .hint.err {
     color: var(--red, #f85149);
     margin: 8px 0 0;
+  }
+  .hint.detail {
+    margin: 4px 0 0;
+    font-family: var(--mono, ui-monospace, monospace);
+    font-size: 11px;
+    word-break: break-all;
+  }
+  .check {
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .checkText {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .checkText .sub {
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+  /* The tunnel gets its own line: it is a different fact from the socket's state, and the
+     one the operator can act on. */
+  .tunnel {
+    margin: 8px 0 0;
+    font-size: 12px;
+  }
+  .tunnel.up {
+    color: var(--green, #3fb950);
+  }
+  .tunnel.starting {
+    color: var(--text-dim);
+  }
+  .tunnel.failed {
+    color: var(--red, #f85149);
   }
   /* Two columns, unconditionally — the same rule the mode picker and the wizard's
      two-way choices use. This is a choice between two and it stays a choice between two,
