@@ -22,6 +22,7 @@
   import Button from './lib/Button.svelte';
   import * as api from './lib/api';
   import { t } from './lib/i18n.svelte';
+  import { readContextRows, writeContextRows, type ContextRow, type HttpAuth } from './lib/context-rows';
 
   interface Props {
     onclose: () => void;
@@ -140,14 +141,6 @@
    * One per block, not one shared: a pipeline that reads from one API and writes to
    * another authenticates twice, with two different secrets.
    */
-  interface HttpAuth {
-    service: string;
-    account: string;
-    value: string;
-    saved: boolean;
-    header: string;
-    prefix: string;
-  }
   const AUTH_HEADER = 'authorization';
   const AUTH_PREFIX = 'Bearer ';
   function newAuth(): HttpAuth {
@@ -223,9 +216,14 @@
     el.scrollIntoView({ block: 'nearest' });
   }
 
-  /** A context row's fetch, described the same way the input's is. */
-  function contextRequest(row: { url: string }): Record<string, unknown> {
-    return { method: 'GET', url: row.url, headers: {}, timeout_ms: inputTimeout };
+  /**
+   * A context row's fetch, described the same way the input's is.
+   *
+   * Carries the row's credential: a trial that skipped it would fail on exactly the APIs
+   * this box was added for, and the button exists to prove the URL and path (CRL-71).
+   */
+  function contextRequest(row: ContextRow): Record<string, unknown> {
+    return { method: 'GET', url: row.url, headers: {}, timeout_ms: inputTimeout, ...authFields(row.auth) };
   }
 
   /**
@@ -389,10 +387,10 @@
    * Declared above the prompt rather than below it: you name a list, then write the sentence
    * that uses it, and reading the screen top to bottom is the same order.
    */
-  let contextRows = $state<Array<{ name: string; url: string; select: string }>>([]);
+  let contextRows = $state<ContextRow[]>([]);
 
   function addContext(): void {
-    contextRows = [...contextRows, { name: '', url: '', select: '' }];
+    contextRows = [...contextRows, { name: '', url: '', select: '', auth: newAuth() }];
   }
 
   function removeContext(i: number): void {
@@ -623,11 +621,8 @@
     systemPrompt = String(prompt.system ?? '');
     userTemplate = String(prompt.user_template ?? '');
     schemaText = JSON.stringify(agent.schema ?? {}, null, 2);
-    contextRows = Object.entries(obj(agent.context)).map(([name, source]) => ({
-      name,
-      url: String(obj(obj(source).source).url ?? ''),
-      select: String(obj(source).select ?? ''),
-    }));
+    contextRows = readContextRows(agent.context, loadAuth);
+    for (const row of contextRows) void refreshAuthSaved(row.auth);
 
     const validate = obj(agent.validate);
     const allowed = obj(validate.allowed_values);
@@ -741,11 +736,7 @@
         ? { kind: 'http', request, select, require, skip_if }
         : { kind: 'none', select, require, skip_if };
 
-    const context: Record<string, unknown> = {};
-    for (const row of contextRows) {
-      if (!row.name.trim() || !row.url.trim()) continue;
-      context[row.name.trim()] = { source: { url: row.url.trim() }, select: row.select.trim() || undefined };
-    }
+    const context = writeContextRows(contextRows, authFields);
 
     const validate: Record<string, unknown> = {};
     if (allowedField.trim()) {
@@ -840,6 +831,7 @@
       }
       // The same split for the HTTP steps: the store gets the secret, the file gets the name.
       if (inputKind === 'http') await persistAuth(inputAuth);
+      for (const row of contextRows) await persistAuth(row.auth);
       if (outputKind === 'http') await persistAuth(outputAuth);
       // Overwrite only when editing. Creating still refuses to land on an existing key —
       // that check is what stops a new pipeline from replacing one that is running.
@@ -1196,6 +1188,10 @@
               >
               <button class="minus" onclick={() => removeContext(i)} aria-label={t('editor.contextRemove')}>−</button>
             </div>
+            <!-- The same box the input and output blocks use. A vocabulary API behind auth
+                 is the ordinary case, and a second way of asking for a credential would be
+                 a second thing to learn (CRL-96). -->
+            {@render httpAuth(row.auth, false)}
             {#if row.name.trim() && row.url.trim()}
               <button
                 class="plus"
