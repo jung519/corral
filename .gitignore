@@ -13,6 +13,12 @@ coverage/
 .env.*
 !.env.example
 .DS_Store
+# Editor and vault state. Local to whoever is working, regenerated on demand, and it
+# names files that may not exist any more — nothing a reader of this repo can use.
+.obsidian/
+.vscode/
+.idea/
+
 .corral-state/
 corral.yaml
 corral.local.yaml
