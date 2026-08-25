@@ -47,6 +47,8 @@ declare global {
         write(json: string): Promise<void>;
         clear(): Promise<void>;
       };
+      /** Third-party attribution text, or null when the build did not ship it. */
+      thirdPartyLicenses(): Promise<string | null>;
       direction: {
         read(): Promise<string>;
         write(text: string): Promise<void>;

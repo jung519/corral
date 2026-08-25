@@ -36,6 +36,8 @@ const api = {
   },
   /** Global Direction (free-text "방향성") persisted to userData/direction.md. The core
    *  reads the same file to inject it into prompts (from Phase 1). */
+  /** Third-party attribution text, or null when the build did not ship it. */
+  thirdPartyLicenses: (): Promise<string | null> => ipcRenderer.invoke('licenses:read'),
   direction: {
     read: (): Promise<string> => ipcRenderer.invoke('direction:read'),
     write: (text: string): Promise<void> => ipcRenderer.invoke('direction:write', text),

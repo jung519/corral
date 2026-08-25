@@ -23,13 +23,14 @@ License is provided in the LICENSE file and at:
 Third-party software:
 
 This product depends on software distributed under separate, compatible
-open-source licenses. Each dependency retains its own license; the applicable
-license and copyright are in that package's own metadata and license file.
+open-source licenses. Each dependency retains its own license.
 
-Distributed builds carry the runtime dependencies with them, so those licenses
-travel with the build. Assembling them into one attribution list that ships with
-the application is tracked as an open item, not something this file claims is
-already done.
+THIRD-PARTY-LICENSES.txt lists every third-party package a distributed build
+carries, with the license text that package ships. It is generated from the
+production dependency trees by scripts/licenses.mjs (`pnpm licenses`), it is
+kept in the repository so it can be read without building anything, and the
+packaged application ships it and shows it under "Open source licenses" in the
+About screen.
 
 Corral integrates with third-party AI providers, trackers, and repositories
 using credentials supplied by the user (BYOK). Corral does not bundle any

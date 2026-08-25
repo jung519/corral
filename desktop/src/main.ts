@@ -106,6 +106,23 @@ function registerIpc(): void {
   ipcMain.handle('draft:write', (_e, json: string) => native.draftWrite(json));
   ipcMain.handle('draft:clear', () => native.draftClear());
 
+  /**
+   * The third-party attribution list. Shipped as a resource so it travels with the build —
+   * MIT/ISC ask for their text in binary distributions, and `NOTICE` used to point at a
+   * screen that did not exist (CRL-118).
+   */
+  ipcMain.handle('licenses:read', () => {
+    const file = app.isPackaged
+      ? join(process.resourcesPath, 'THIRD-PARTY-LICENSES.txt')
+      : join(app.getAppPath(), '..', 'THIRD-PARTY-LICENSES.txt');
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      // Say so rather than showing an empty panel: a missing list is a build problem.
+      return null;
+    }
+  });
+
   ipcMain.handle('direction:read', () => native.directionRead());
   ipcMain.handle('direction:write', (_e, text: string) => native.directionWrite(text));
 

@@ -10,6 +10,23 @@
       /* browser preview — no bridge */
     }
   });
+
+  // The attribution list, loaded when asked for. It is ~900 lines, so it stays out of the
+  // way until someone opens it — but it has to be reachable, which is the point: `NOTICE`
+  // named this screen before the screen existed (CRL-118).
+  let licenses = $state<string | null | undefined>(undefined);
+  let loading = $state(false);
+  async function loadLicenses() {
+    if (licenses !== undefined || loading) return;
+    loading = true;
+    try {
+      licenses = (await window.corral?.thirdPartyLicenses()) ?? null;
+    } catch {
+      licenses = null;
+    } finally {
+      loading = false;
+    }
+  }
 </script>
 
 <div class="view">
@@ -35,11 +52,53 @@
     <dt>{t('about.repo')}</dt>
     <dd><a href="https://github.com/jung519/corral" target="_blank" rel="noreferrer">github.com/jung519/corral</a></dd>
   </dl>
+
+  <details class="oss" ontoggle={loadLicenses}>
+    <summary>{t('about.oss')}</summary>
+    {#if loading}
+      <p class="hint">{t('about.ossLoading')}</p>
+    {:else if licenses}
+      <pre>{licenses}</pre>
+    {:else if licenses === null}
+      <p class="hint warn">{t('about.ossMissing')}</p>
+    {/if}
+  </details>
 </div>
 
 <style>
   .view {
     padding: 24px 28px;
+  }
+  .oss {
+    margin-top: 18px;
+    font-size: 13px;
+  }
+  .oss summary {
+    cursor: pointer;
+    color: var(--text-dim);
+  }
+  /* Long, pre-formatted, and not something to reflow — let it scroll in its own box
+     rather than stretching the page. */
+  .oss pre {
+    margin: 10px 0 0;
+    max-height: 320px;
+    overflow: auto;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: var(--surface);
+    font-size: 11px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .hint {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin: 10px 0 0;
+  }
+  .hint.warn {
+    color: var(--warning, #d29922);
   }
   h1 {
     font-size: 22px;

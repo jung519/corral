@@ -631,6 +631,9 @@ const en: Dict = {
   'link.unreachable': 'Could not reach the engine at that address.',
   'about.version': 'Version',
   'about.license': 'License',
+  'about.oss': 'Open source licenses',
+  'about.ossLoading': 'Loading…',
+  'about.ossMissing': 'This build did not ship the attribution list. Run `pnpm licenses` and package again.',
   'about.repo': 'Repository',
   'about.byok': 'BYOK · provider-neutral · self-hostable. No keys are embedded, and provider CLIs are detected on your machine rather than shipped with the app.',
 };
@@ -1256,6 +1259,9 @@ const ko: Dict = {
   'link.unreachable': '그 주소에서 엔진에 닿지 못했습니다.',
   'about.version': '버전',
   'about.license': '라이선스',
+  'about.oss': '오픈소스 라이선스',
+  'about.ossLoading': '불러오는 중…',
+  'about.ossMissing': '이 빌드에 표시 목록이 담기지 않았습니다. `pnpm licenses` 를 돌리고 다시 패키징하세요.',
   'about.repo': '저장소',
   'about.byok': 'BYOK · 프로바이더 중립 · 직접 호스팅. 키를 심어두지 않고, 프로바이더 CLI는 이 컴퓨터에서 찾아 쓸 뿐 앱에 같이 넣어 배포하지 않습니다.',
 };
