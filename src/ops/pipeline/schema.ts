@@ -271,9 +271,15 @@ export const AgentStepSchema = z.object({
   provider: z.enum(['claude', 'gemini', 'gpt']).optional(),
   model: z.string().optional(),
   max_tokens: z.number().int().positive().default(4096),
+  /**
+   * Both halves take `{{field}}` placeholders, filled from the selected input fields and
+   * from whatever `context` fetched.
+   *
+   * The system half used to be passed through raw, which made the obvious place to put a
+   * fetched vocabulary the one place it did not work (CRL-97).
+   */
   prompt: z.object({
     system: z.string().min(1),
-    /** `{{field}}` placeholders are filled from the selected input fields. */
     user_template: z.string().min(1),
   }),
   /**

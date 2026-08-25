@@ -286,3 +286,47 @@ describe('checking an answer', () => {
     expect(schemaInstruction(schema)).toContain('"confidence"');
   });
 });
+
+/**
+ * `agent.context` exists so the model is handed the vocabulary instead of inventing it
+ * (CRL-64). The natural place to put that material is the system prompt — it is background,
+ * not per-item input — and that was the one half not filled: the model got the literal
+ * `{{vocabulary}}`, made values up, and `allowed_values` discarded every one. The feature's
+ * own failure mode, reached by using it the obvious way, and reading on screen as "the
+ * model is bad" (CRL-97).
+ */
+describe('placeholders in the system prompt', () => {
+  const runner = (seen: NeutralMessage[][]) =>
+    new OneTurnOperationRunner({ clients: [client('claude', GOOD, seen)], modelFor: () => undefined });
+
+  it('fills them from the same fields as the user template', async () => {
+    const seen: NeutralMessage[][] = [];
+    await runner(seen).run(step({ prompt: { system: 'Use only: {{vocabulary}}', user_template: 'x' } }), {
+      vocabulary: ['alpha', 'beta'],
+    });
+    const system = seen[0]![0]!.content;
+    expect(system).toContain('["alpha","beta"]');
+    expect(system).not.toContain('{{vocabulary}}');
+  });
+
+  it('leaves a system prompt without placeholders byte for byte', async () => {
+    const seen: NeutralMessage[][] = [];
+    const text = 'You label records. Answer with {"key": "value"} shapes only.';
+    await runner(seen).run(step({ prompt: { system: text, user_template: 'x' } }), { title: 't' });
+    expect(seen[0]![0]!.content.startsWith(text)).toBe(true);
+  });
+
+  it('still fills the user template', async () => {
+    const seen: NeutralMessage[][] = [];
+    await runner(seen).run(step(), { title: 'a record' });
+    expect(seen[0]![1]!.content).toBe('Title: a record');
+  });
+
+  it('empties an unknown name in the system half, as it always has in the user half', async () => {
+    // Consistency is the point: the same name behaved differently depending on which half
+    // it was written in, and nothing said so.
+    const seen: NeutralMessage[][] = [];
+    await runner(seen).run(step({ prompt: { system: 'Use: {{missing}}.', user_template: 'x' } }), {});
+    expect(seen[0]![0]!.content).toContain('Use: .');
+  });
+});

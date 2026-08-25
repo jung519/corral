@@ -149,7 +149,8 @@ export class CliTurnOperationRunner implements OperationRunner {
           // development AI (D12).
           handle: WORKDIR,
           io: NO_IO,
-          prompt: `${step.prompt.system}\n\n${fillTemplate(step.prompt.user_template, fields)}\n\n${textInstruction(step.schema)}`,
+          // Filled on both halves, same as the API path — see the note in one-turn.ts.
+          prompt: `${fillTemplate(step.prompt.system, fields)}\n\n${fillTemplate(step.prompt.user_template, fields)}\n\n${textInstruction(step.schema)}`,
           // The development AI's rules for editing a repository. An operational run has
           // no repository, and with no tools it could not read the file anyway.
           workflow: '',
