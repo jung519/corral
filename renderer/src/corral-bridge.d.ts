@@ -2,6 +2,27 @@
  * inside the Electron app — undefined in a plain browser (the wizard degrades). */
 export {};
 
+/**
+ * How the app reaches a remote core. Mirrors `desktop/src/core-link/tunnel.ts` — the
+ * renderer never imports from the desktop package, so the shape is restated at the
+ * boundary the same way every other bridge type is.
+ */
+export interface TunnelConfig {
+  /** ssh destination: `user@host`, or a host alias from the user's ssh config. */
+  target: string;
+  remotePort: number;
+  localPort: number;
+  identityFile?: string;
+}
+
+export interface TunnelStatus {
+  state: 'off' | 'starting' | 'up' | 'failed';
+  code?: 'ssh-not-found' | 'auth-failed' | 'forward-failed' | 'exited' | 'timeout';
+  detail?: string;
+  /** Retrying cannot help — the operator has to act. */
+  fatal?: boolean;
+}
+
 declare global {
   interface Window {
     corral?: {
@@ -36,13 +57,26 @@ declare global {
           url: string;
           label: string;
           paired: boolean;
+          /** Saved tunnel settings; null when the address is used as-is. */
+          tunnel: TunnelConfig | null;
           state: 'connected' | 'connecting' | 'disconnected';
           denial?: string;
+          tunnelStatus: TunnelStatus;
         }>;
-        setMode(mode: 'local' | 'remote', url?: string, label?: string): Promise<{ ok: boolean }>;
-        pair(url: string, code: string, label?: string): Promise<{ ok: boolean; error?: string }>;
+        setMode(
+          mode: 'local' | 'remote',
+          url?: string,
+          label?: string,
+          tunnel?: TunnelConfig,
+        ): Promise<{ ok: boolean }>;
+        pair(
+          url: string,
+          code: string,
+          label?: string,
+          tunnel?: TunnelConfig,
+        ): Promise<{ ok: boolean; error?: string; tunnelStatus?: TunnelStatus }>;
         unpair(): Promise<{ ok: boolean }>;
-        onState(cb: (s: { state: string; denial?: string }) => void): () => void;
+        onState(cb: (s: { state: string; denial?: string; tunnelStatus?: TunnelStatus }) => void): () => void;
       };
       secret: {
         set(service: string, account: string, value: string): Promise<void>;

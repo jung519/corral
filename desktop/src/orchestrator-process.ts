@@ -14,3 +14,4 @@ export {
   startOrchestrator,
   stopOrchestrator,
 } from './core-link/index.js';
+export type { TunnelConfig, TunnelStatus } from './core-link/tunnel.js';

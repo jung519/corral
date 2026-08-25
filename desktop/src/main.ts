@@ -20,6 +20,7 @@ import {
   restartOrchestrator,
   startOrchestrator,
   stopOrchestrator,
+  type TunnelConfig,
 } from './orchestrator-process.js';
 import {
   EXPECT_SCRIPT,
@@ -116,15 +117,23 @@ function registerIpc(): void {
       url: saved.url ?? '',
       label: saved.label ?? '',
       paired: !!saved.token, // drives whether the UI asks for a pairing code
+      // Null rather than undefined: the renderer distinguishes "no tunnel configured"
+      // (someone with their own tunnel or an overlay network) from "not answered yet".
+      tunnel: saved.tunnel ?? null,
       ...linkStatus(),
     };
   });
-  ipcMain.handle('remote:setMode', (_e, mode: 'local' | 'remote', url?: string, label?: string) => {
-    writeRemote({ mode, url, label });
-    restartOrchestrator(); // pick up the new mode immediately
-    return { ok: true, ...linkStatus() };
-  });
-  ipcMain.handle('remote:pair', (_e, url: string, code: string, label?: string) => pairRemote({ url, code, label }));
+  ipcMain.handle(
+    'remote:setMode',
+    (_e, mode: 'local' | 'remote', url?: string, label?: string, tunnel?: TunnelConfig) => {
+      writeRemote({ mode, url, label, tunnel });
+      restartOrchestrator(); // pick up the new mode immediately
+      return { ok: true, ...linkStatus() };
+    },
+  );
+  ipcMain.handle('remote:pair', (_e, url: string, code: string, label?: string, tunnel?: TunnelConfig) =>
+    pairRemote({ url, code, label, tunnel }),
+  );
   ipcMain.handle('remote:unpair', () => {
     // Forget this device's token; the next remote connection needs a fresh code.
     clearRemoteToken();

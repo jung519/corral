@@ -12,6 +12,7 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { deleteSecret, getSecret, setSecret } from './keychain.js';
+import type { TunnelConfig } from './core-link/tunnel.js';
 
 /** Keychain coordinates for the control-plane token. */
 const TOKEN_SERVICE = 'corral-remote';
@@ -29,6 +30,12 @@ export interface RemoteSettings {
   token?: string;
   /** Set for one connection attempt when pairing; not persisted. */
   pairingCode?: string;
+  /**
+   * How to reach that machine. When present the app opens the tunnel itself; when absent
+   * the address is used as-is, which is what someone who already has a tunnel — or an
+   * overlay network — wants (CRL-114).
+   */
+  tunnel?: TunnelConfig;
 }
 
 function file(): string {
@@ -48,12 +55,18 @@ export function readRemote(): RemoteSettings {
     mode,
     url: stored.url,
     label: stored.label,
+    tunnel: stored.tunnel,
     token: readToken() ?? undefined,
   };
 }
 
-/** Persist mode/url/label. The token is handled separately (keychain). */
-export function writeRemote(settings: { mode: CoreMode; url?: string; label?: string }): void {
+/** Persist mode/url/label/tunnel. The token is handled separately (keychain). */
+export function writeRemote(settings: {
+  mode: CoreMode;
+  url?: string;
+  label?: string;
+  tunnel?: TunnelConfig;
+}): void {
   const path = file();
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, JSON.stringify(settings, null, 2), 'utf8');
