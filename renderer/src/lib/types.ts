@@ -17,6 +17,8 @@ export interface IssueRuntime {
   prs?: IssuePr[];
   stuck?: boolean;
   cost: number;
+  /** Task counts while a spec-mode implementation runs. Absent otherwise (CRL-107). */
+  taskProgress?: { done: number; total: number; warnings: number };
 }
 
 export interface PendingAction {
@@ -90,4 +92,11 @@ export interface HistoryRecord {
   agentProvider: string;
   failoverUsed?: boolean;
   qa?: { q: string; a: string; ts: number; phase?: string }[];
+}
+
+/** One approved spec document, markdown and rendered HTML (CRL-107). */
+export interface SpecDoc {
+  stage: 'requirements' | 'design' | 'tasks';
+  markdown: string;
+  html: string;
 }

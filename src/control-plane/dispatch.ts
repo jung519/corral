@@ -232,6 +232,8 @@ export async function dispatch(
       return o
         ? await o.listCandidates({ cursor: a.cursor as string | undefined, limit: a.limit as number | undefined })
         : { candidates: [] };
+    case 'specDocs':
+      return { docs: o ? await o.specDocs(id()) : [] };
     case 'diffs':
       return { diffs: deps.channel.getDiffs(String(a.id ?? '')) };
     case 'start':

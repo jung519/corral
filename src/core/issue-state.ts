@@ -77,6 +77,14 @@ export interface IssueRuntime {
    * read: no field, no split (plan doc §10).
    */
   specStage?: 'requirements' | 'design' | 'tasks';
+  /**
+   * Task counts for the dashboard, refreshed by the task loop.
+   *
+   * Recorded where the loop already re-reads `tasks.md` each round, so showing progress
+   * costs no extra I/O — and because it is persisted, the count survives a restart and is
+   * there before the loop has run again (CRL-107).
+   */
+  taskProgress?: { done: number; total: number; warnings: number };
 }
 
 export class IssueStateStore {

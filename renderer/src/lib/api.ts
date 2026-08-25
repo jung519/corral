@@ -3,7 +3,7 @@
  * (`window.corral.core`) — there is NO HTTP server / port. Each function maps to one
  * core method; `subscribeEvents` is the live bus-event stream.
  */
-import type { Candidate, CommandResult, CorralEvent, HistoryRecord, StateResponse } from './types';
+import type { Candidate, CommandResult, CorralEvent, HistoryRecord, SpecDoc, StateResponse } from './types';
 
 function bridge() {
   const c = typeof window !== 'undefined' ? window.corral : undefined;
@@ -28,6 +28,11 @@ export async function isConfigured(): Promise<boolean> {
 
 export async function getState(): Promise<StateResponse> {
   return call<StateResponse>('state');
+}
+
+/** The approved spec documents, rendered by the core (it owns the markdown parser). */
+export async function getSpecDocs(id: string): Promise<SpecDoc[]> {
+  return (await call<{ docs: SpecDoc[] }>('specDocs', { id })).docs;
 }
 
 export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
