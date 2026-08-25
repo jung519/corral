@@ -36,8 +36,34 @@ export interface BudgetVerdict {
   reason?: string;
 }
 
+/**
+ * Which pillar spent a call.
+ *
+ * The ceiling stays shared (D12, the operator's own decision — splitting it would leave
+ * one side idle while the other is blocked). What was missing is *visibility*: the
+ * operational design says the ceiling must be on screen at all times so that "the
+ * development AI is eating the shared budget shows immediately", and with no attribution
+ * the screen could only say the day was spent, never by whom. A quiet pipeline with a full
+ * queue looked exactly like a quiet pipeline with no work (CRL-110).
+ */
+export type BudgetPillar = 'development' | 'operations';
+
+/** Per-pillar tallies. Absent entries mean "spent before this was recorded", not zero. */
+export type PillarUsage = Partial<Record<BudgetPillar, TokenUsage>>;
+
 export interface BudgetSnapshot extends TokenUsage {
   date: string;
+  /** What each pillar spent today, as far as it is known. */
+  byPillar: PillarUsage;
+  /**
+   * Tokens today that predate attribution — a counter file written by an older build.
+   *
+   * Reported rather than folded into either side or silently treated as zero: showing
+   * `development 0 / operations 0` against a total of 500k would be a false statement, and
+   * the same reasoning as an absent `criteria` block (CRL-108) or an unreadable HEAD
+   * (CRL-109). It disappears on its own when the day rolls over.
+   */
+  unattributed: TokenUsage;
   limits: TokenLimits;
   /** 0–1 of the tightest configured ceiling; 0 when none is set. */
   used: number;
@@ -51,6 +77,8 @@ interface Persisted extends TokenUsage {
   date: string;
   /** Thresholds already announced today. */
   announced: number[];
+  /** Added in CRL-110; absent in a file written by an older build. */
+  byPillar?: PillarUsage;
 }
 
 function today(now: number): string {
@@ -75,7 +103,13 @@ export class TokenBudget {
   }
 
   private load(): Persisted {
-    const fresh = (): Persisted => ({ date: today(this.now()), inputTokens: 0, outputTokens: 0, announced: [] });
+    const fresh = (): Persisted => ({
+      date: today(this.now()),
+      inputTokens: 0,
+      outputTokens: 0,
+      announced: [],
+      byPillar: {},
+    });
     try {
       const saved = JSON.parse(readFileSync(this.file, 'utf8')) as Persisted;
       // Yesterday's tally is not today's. A stale file is a new day, not a spent one.
@@ -100,7 +134,7 @@ export class TokenBudget {
   private roll(): void {
     const date = today(this.now());
     if (this.state.date !== date) {
-      this.state = { date, inputTokens: 0, outputTokens: 0, announced: [] };
+      this.state = { date, inputTokens: 0, outputTokens: 0, announced: [], byPillar: {} };
       this.save();
     }
   }
@@ -121,13 +155,46 @@ export class TokenBudget {
     return { ok: true };
   }
 
-  /** Add what a call actually spent, from whichever pillar spent it. */
-  record(usage: Partial<TokenUsage>): void {
+  /**
+   * Add what a call actually spent, and which pillar spent it.
+   *
+   * The pillar is tallied alongside the total, never instead of it — the ceiling is still
+   * checked against the shared figure, so nothing about when work stops changes here.
+   */
+  record(usage: Partial<TokenUsage>, pillar: BudgetPillar): void {
     this.roll();
-    this.state.inputTokens += usage.inputTokens ?? 0;
-    this.state.outputTokens += usage.outputTokens ?? 0;
+    const input = usage.inputTokens ?? 0;
+    const output = usage.outputTokens ?? 0;
+    this.state.inputTokens += input;
+    this.state.outputTokens += output;
+    const byPillar = (this.state.byPillar ??= {});
+    const side = (byPillar[pillar] ??= { inputTokens: 0, outputTokens: 0 });
+    side.inputTokens += input;
+    side.outputTokens += output;
     this.save();
     this.announce();
+  }
+
+  /** Today's spend that no pillar claims — written before attribution existed. */
+  private unattributed(): TokenUsage {
+    const claimed = Object.values(this.state.byPillar ?? {}).reduce(
+      (a, u) => ({ inputTokens: a.inputTokens + u.inputTokens, outputTokens: a.outputTokens + u.outputTokens }),
+      { inputTokens: 0, outputTokens: 0 },
+    );
+    return {
+      inputTokens: Math.max(0, this.state.inputTokens - claimed.inputTokens),
+      outputTokens: Math.max(0, this.state.outputTokens - claimed.outputTokens),
+    };
+  }
+
+  /** `development 120k/4k · operations 30k/2k · unattributed 350k/9k` — omitting empty parts. */
+  private breakdown(): string {
+    const parts = Object.entries(this.state.byPillar ?? {}).map(
+      ([k, u]) => `${k} ${u.inputTokens}/${u.outputTokens}`,
+    );
+    const un = this.unattributed();
+    if (un.inputTokens > 0 || un.outputTokens > 0) parts.push(`unattributed ${un.inputTokens}/${un.outputTokens}`);
+    return parts.join(' · ');
   }
 
   /** Fraction of the tightest configured ceiling, 0 when nothing is configured. */
@@ -146,7 +213,9 @@ export class TokenBudget {
     for (const mark of THRESHOLDS) {
       if (percent < mark || this.state.announced.includes(mark)) continue;
       this.state.announced.push(mark);
-      const spent = `in ${this.state.inputTokens} / out ${this.state.outputTokens}`;
+      // Who spent it, not just how much. Without this the operator sees a stopped pipeline
+      // and a spent day with nothing connecting the two (CRL-110).
+      const spent = `in ${this.state.inputTokens} / out ${this.state.outputTokens} — ${this.breakdown()}`;
       bus.emitEvent({
         identifier: 'token-budget',
         kind: mark >= 100 ? 'error' : 'notice',
@@ -169,6 +238,8 @@ export class TokenBudget {
       outputTokens: this.state.outputTokens,
       limits: this.limits,
       used: this.ratio(),
+      byPillar: { ...this.state.byPillar },
+      unattributed: this.unattributed(),
     };
   }
 

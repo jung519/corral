@@ -121,7 +121,7 @@ describe('over the control plane', () => {
 
   it('carries the shared budget even when no pipeline caused the usage', async () => {
     const budget = new TokenBudget({ dailyInputTokens: 1000 }, dir);
-    budget.record({ inputTokens: 400, outputTokens: 0 }); // as if an issue had been planned
+    budget.record({ inputTokens: 400, outputTokens: 0 }, 'development'); // as if an issue had been planned
     const d = deps(await startOpsHost({ stateDir: dir, budget }));
 
     const view = (await dispatch('opsPipelines', {}, d)) as any;

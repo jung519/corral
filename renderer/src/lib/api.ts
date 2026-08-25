@@ -113,6 +113,14 @@ export interface OpsBudget {
   limits: { dailyInputTokens?: number; dailyOutputTokens?: number };
   /** 0–1 of the tightest configured ceiling; 0 when none is set. */
   used: number;
+  /**
+   * What each pillar spent today. The operational design requires the ceiling on screen at
+   * all times so that development eating the shared budget shows immediately (D12) — the
+   * total alone could never say that (CRL-110).
+   */
+  byPillar?: Partial<Record<'development' | 'operations', { inputTokens: number; outputTokens: number }>>;
+  /** Spend from before attribution existed. Shown as unknown, never folded into a pillar. */
+  unattributed?: { inputTokens: number; outputTokens: number };
 }
 
 export interface OpsOverview {

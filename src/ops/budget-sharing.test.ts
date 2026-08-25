@@ -55,7 +55,8 @@ describe('development spending blocks operational runs', () => {
 
   it('leaves the run as its own outcome, not a failure', async () => {
     const budget = new TokenBudget({ dailyInputTokens: 1 }, dir);
-    budget.record({ inputTokens: 5, outputTokens: 0 });
+    // Development spending, per this block's premise — the ceiling is shared (D12).
+    budget.record({ inputTokens: 5, outputTokens: 0 }, 'development');
     const host = await startOpsHost({ stateDir: dir, budget, operation: spends(10, 5) });
 
     const { run } = await host.runManually('classify', {});

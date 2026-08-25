@@ -148,7 +148,7 @@ export class OpsHost {
       validator: options.validator ?? new RuleAnswerValidator({ store: lists }),
       // Read through, like `operation` — the config that carries the limits arrives after
       // the operational AI has started.
-      budget: { check: () => this.budget?.check() ?? { ok: true }, record: (u) => this.budget?.record(u) },
+      budget: { check: () => this.budget?.check() ?? { ok: true }, record: (u) => this.budget?.record(u, 'operations') },
       now: options.now,
     });
   }

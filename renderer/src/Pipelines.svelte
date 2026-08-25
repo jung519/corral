@@ -32,6 +32,29 @@
   const hasLimit = $derived(Boolean(budget?.limits.dailyInputTokens || budget?.limits.dailyOutputTokens));
   const usedPercent = $derived(Math.round((budget?.used ?? 0) * 100));
 
+  /** `개발 120k · 운영 30k · 출처 미상 350k` — input tokens, the tighter ceiling in practice. */
+  const split = $derived.by(() => {
+    const parts: string[] = [];
+    for (const [pillar, key] of [
+      ['development', 'ops.pillar.development'],
+      ['operations', 'ops.pillar.operations'],
+    ] as const) {
+      const u = budget?.byPillar?.[pillar];
+      if (u && u.inputTokens > 0) parts.push(`${t(key)} ${compact(u.inputTokens)}`);
+    }
+    // Reported rather than folded in or shown as zero: a counter written before this
+    // existed says nothing about who spent it, and claiming otherwise would be a guess.
+    const un = budget?.unattributed?.inputTokens ?? 0;
+    if (un > 0) parts.push(`${t('ops.pillar.unknown')} ${compact(un)}`);
+    return parts.join(' · ');
+  });
+
+  function compact(n: number): string {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${Math.round(n / 1_000)}k`;
+    return String(n);
+  }
+
   async function refresh() {
     try {
       overview = await api.getOverview();
@@ -124,6 +147,11 @@
     <div class="budget" class:warn={usedPercent >= 80}>
       <div class="bar"><span style:width="{Math.min(100, usedPercent)}%"></span></div>
       <span class="budget-text">{t('ops.limitUsed')} {usedPercent}%</span>
+      {#if split}
+        <!-- Which side spent it. A stopped pipeline and a spent day are two facts; without
+             this there is nothing on screen connecting them (CRL-110). -->
+        <span class="budget-split">{split}</span>
+      {/if}
     </div>
   {/if}
 
@@ -234,6 +262,11 @@
   }
   .budget.warn .bar span {
     background: var(--red, #f85149);
+  }
+  .budget-split {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin-left: 8px;
   }
   .budget-text {
     font-size: 12px;
