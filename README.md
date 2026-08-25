@@ -115,7 +115,7 @@ Every external integration sits behind an adapter interface, selected by a
 | Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local | Development |
 | Channel | `ChannelAdapter` | Web | Development |
 | Trigger | `TriggerAdapter` | Manual, Schedule (cron), Google Pub/Sub | Operations |
-| Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) | Both |
+| Agent | `AgentAdapter` (provider × transport) | Claude · Gemini · GPT (api/cli each) | Both |
 
 Adding an integration = one adapter implementation + one config schema variant
 + one registry registration.

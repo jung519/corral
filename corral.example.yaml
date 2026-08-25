@@ -88,4 +88,4 @@ workspace:
 #   daily_output_tokens: 200000
 
 channel:
-  kind: web               # web | slack. `web` = the app itself is the channel (no port).
+  kind: web               # the app itself is the channel — no port, nothing to open.

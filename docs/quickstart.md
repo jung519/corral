@@ -33,18 +33,26 @@ Edit `corral.yaml`: set your Notion database id + property/state names, your
 `owner/name` repo, and your agent provider/transport. **Secrets do not go in this
 file** — they come from environment variables:
 
+The variable name is `CORRAL_<SERVICE>_<ACCOUNT>`, and **the account is the one you wrote
+in that credential's `account:` field** — not always `default`. The example config names two
+GitHub accounts, so it asks for two variables:
+
 ```bash
-export CORRAL_NOTION_DEFAULT=secret_xxx        # Notion integration token
-export CORRAL_GITHUB_DEFAULT=ghp_xxx           # GitHub token
-export CORRAL_ANTHROPIC_DEFAULT=sk-ant-xxx     # API key (omit if using a logged-in CLI)
+export CORRAL_NOTION_DEFAULT=secret_xxx        # tracker.credential  → account: default
+export CORRAL_GITHUB_SERVER=ghp_xxx            # repositories[0]     → account: server
+export CORRAL_GITHUB_APP=ghp_xxx               # repositories[1]     → account: app
+export CORRAL_ANTHROPIC_DEFAULT=sk-ant-xxx     # agent.credential    → account: default
+                                               #   (omit if using a logged-in CLI)
 ```
+
+Change an `account:` and the variable name changes with it. One token for everything? Name
+every account `default` and export `CORRAL_GITHUB_DEFAULT` once.
 
 > Environment first, then `<state dir>/credentials.json` (mode 0600, written by the setup
 > wizard). The environment wins, so a server can override a laptop's saved value without
 > touching it. Corral does not read `.env` itself — Compose, systemd or your shell puts
 > those variables in the environment.
 
-(The variable name is `CORRAL_<SERVICE>_<ACCOUNT>`, uppercased.)
 
 ## 4. Run
 

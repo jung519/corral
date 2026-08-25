@@ -6,11 +6,14 @@
  * resolved through a Registry (see ./registry.ts).
  *
  *   axis        interface                          reference impls
- *   tracker     TrackerAdapter                     notion
- *   repository  RepositoryAdapter                  github
- *   agent       AgentAdapter                       claude (provider × transport, see ../agent/types.ts)
+ *   tracker     TrackerAdapter                     notion, github_issues, jira
+ *   repository  RepositoryAdapter                  github, gitlab, bitbucket
+ *   agent       AgentAdapter                       claude · gemini · gpt × api · cli (see ../agent/types.ts)
  *   workspace   WorkspaceAdapter + WorkspaceIO     docker, local
- *   channel     ChannelAdapter                     web, slack
+ *   channel     ChannelAdapter                     web
+ *
+ * The operational pillar adds a sixth axis of its own — `TriggerAdapter`
+ * (../ops/trigger/types.ts): manual, schedule, pubsub.
  *
  * Each signature is the narrowest thing the orchestrator needs, so an adapter can be
  * written against it without reading the core.
@@ -310,7 +313,7 @@ export interface ChannelAdapter {
   sendApproval(req: ApprovalRequest): Promise<string>;
   /** Plain notification / reply to the user (no approval semantics). */
   notify(identifier: string, text: string): Promise<void>;
-  /** Provide a unified diff for the issue (web shows inline / slack uploads). */
+  /** Provide a unified diff for the issue — the web channel shows it inline. */
   uploadDiff(identifier: string, filename: string, diff: string): Promise<void>;
   /** Approval granted (optionally with a selected option + notes). */
   onApprove(cb: (approvalId: string, detail?: ApprovalDetail) => void): void;
