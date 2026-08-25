@@ -453,8 +453,26 @@ export class PipelineRunner {
       if (!sink) {
         return done('output_failed', { stage: 'output', reason: `no sink for output kind "${pipeline.output.kind}"`, ...spend, lowConfidence });
       }
+
+      // What the sink is about to receive. Named before the guard so the condition is
+      // judged on exactly the bag that would have been sent.
+      const outgoing = { ...material, ...answer };
+
+      // Nothing worth sending. `skipped`, not `completed`: `completed` reads as "it was
+      // sent". Not `rejected` either — the model did as it was told (CRL-92).
+      const outSkip = 'skip_if' in pipeline.output ? pipeline.output.skip_if : undefined;
+      if (outSkip && conditionHolds(outSkip, outgoing)) {
+        return done('skipped', {
+          stage: 'output',
+          reason: `skip_if matched (${outSkip.field} is ${outSkip.is})`,
+          ...spend,
+          dropped,
+          lowConfidence,
+        });
+      }
+
       try {
-        await sink.send(pipeline.output, { ...material, ...answer });
+        await sink.send(pipeline.output, outgoing);
       } catch (err) {
         // The turn is already spent, so this is the expensive failure — it has to be
         // distinguishable from the cheap ones when someone reads the history.

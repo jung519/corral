@@ -426,6 +426,10 @@
   let outputHeaders = $state<Array<{ name: string; value: string }>>([]);
   let outputTopic = $state('');
   let outputMessage = $state('');
+  // CRL-92. Blank field = don't guard. `empty` is the default because the whole reason
+  // this exists is "the answer came back empty, don't write a blank".
+  let outSkipField = $state('');
+  let outSkipIs = $state<'non_empty' | 'empty'>('empty');
   let pubCredService = $state('');
   let pubCredAccount = $state('default');
   let pubCredValue = $state('');
@@ -644,6 +648,9 @@
 
     const output = obj(d.output);
     outputKind = output.kind === 'http' || output.kind === 'pubsub' ? output.kind : 'none';
+    const outSkip = obj(output.skip_if);
+    outSkipField = String(outSkip.field ?? '');
+    outSkipIs = outSkip.is === 'non_empty' ? 'non_empty' : 'empty';
     if (output.kind === 'http') {
       const request = obj(output.request);
       outputMethod = request.method === 'POST' ? 'POST' : request.method === 'PUT' ? 'PUT' : 'PATCH';
@@ -777,9 +784,12 @@
       body: parsePairs(outputBody),
       timeout_ms: outputTimeout,
     };
+    // Unset unless a field is named, so a pipeline that never asked for this keeps a
+    // document without the key.
+    const outSkipIf = outSkipField.trim() ? { field: outSkipField.trim(), is: outSkipIs } : undefined;
     const output =
       outputKind === 'http'
-        ? { kind: 'http', request: outRequest }
+        ? { kind: 'http', request: outRequest, skip_if: outSkipIf }
         : outputKind === 'pubsub'
           ? {
               kind: 'pubsub',
@@ -788,6 +798,7 @@
               credential: pubCredService.trim()
                 ? { service: pubCredService.trim(), account: pubCredAccount.trim() || 'default' }
                 : undefined,
+              skip_if: outSkipIf,
             }
           : { kind: 'none' };
 
@@ -1337,6 +1348,30 @@
           {@render pubsubCredential()}
         {:else}
           <p class="hint">{t('editor.output.noneHint')}</p>
+        {/if}
+
+        <!-- CRL-92. An answer the prompt asked to be empty passes validation, and then a
+             store that refuses blanks answers 400 — which a queue reads as retryable, so
+             the same honest answer loops to the dead-letter queue. This is how a pipeline
+             says "nothing to write" instead. -->
+        {#if outputKind !== 'none'}
+          <div class="block">
+            <p class="blockTitle">{t('editor.outSkip')}</p>
+            <p class="hint">{t('editor.outSkipHint')}</p>
+            <div class="two">
+              <label class="field"
+                ><span>{t('editor.outSkipField')}</span>
+                <input bind:value={outSkipField} spellcheck="false" placeholder="items" /></label
+              >
+              <label class="field narrow"
+                ><span>{t('editor.skipIs')}</span>
+                <select bind:value={outSkipIs}>
+                  <option value="empty">{t('editor.skipIs.empty')}</option>
+                  <option value="non_empty">{t('editor.skipIs.nonEmpty')}</option>
+                </select></label
+              >
+            </div>
+          </div>
         {/if}
 
         <!-- D14. The hold-back already worked; nothing here ever set the link, so a held

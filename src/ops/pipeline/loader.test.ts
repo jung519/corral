@@ -66,6 +66,7 @@ agent:
 
 output:
   kind: http
+  skip_if: { field: items, is: empty }
   request:
     method: PATCH
     url: "https://example.test/api/records/{{id}}"
@@ -91,6 +92,9 @@ describe('a valid definition', () => {
     expect(p.agent.prompt.user_template).toContain('{{title}}');
     expect(p.agent.validate.min_confidence).toEqual({ field: 'confidence', threshold: 0.7 });
     expect(p.output).toMatchObject({ kind: 'http', request: { method: 'PATCH' } });
+    // A definition can say "nothing to write" without inventing a second vocabulary for it
+    // — the same condition shape the input uses (CRL-92).
+    expect(p.output).toMatchObject({ skip_if: { field: 'items', is: 'empty' } });
     expect(p.on_low_confidence.action).toBe('report');
   });
 
