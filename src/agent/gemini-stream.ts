@@ -28,6 +28,8 @@ export interface GeminiEvent {
 const MAX = 2000;
 
 export class GeminiStreamParser implements CliStreamParser<GeminiEvent> {
+  readonly provider = 'gemini' as const;
+
   /** Accumulates assistant text deltas until a newline (or overflow) flushes a line. */
   private buf = '';
 
@@ -68,7 +70,9 @@ export class GeminiStreamParser implements CliStreamParser<GeminiEvent> {
     if (event.type === 'result' && event.stats) {
       if (typeof event.stats.input_tokens === 'number') acc.inputTokens += event.stats.input_tokens;
       if (typeof event.stats.output_tokens === 'number') acc.outputTokens += event.stats.output_tokens;
-      // The CLI stream-json format does not report a USD cost; leave acc.costUsd at 0.
+      // The stream reports neither a USD cost nor a cached count, so the estimate prices
+      // every input token as fresh and reads high on a long session. High is the safe
+      // direction for a ceiling — it stops early rather than late (CRL-86).
     }
   }
 

@@ -28,6 +28,7 @@ import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from 
 
 /** Maps Claude Code's stream-json output to normalized events. */
 const claudeParser: CliStreamParser<StreamEvent> = {
+  provider: 'claude',
   answerText,
   parse: parseStreamLine,
   activity: activityEvents,

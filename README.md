@@ -4,7 +4,8 @@
 > pipelines for the work that repeats.**
 
 Corral does two jobs on one setup. They share your provider, your keys and a single daily
-token ceiling; the app shows one at a time so the other's screens stay out of the way.
+ceiling — in tokens, in dollars, or both; the app shows one at a time so the other's screens
+stay out of the way.
 
 **Development — an issue becomes a pull request.**
 `tracker → plan → your approval → code → self-review → pull request`

@@ -111,11 +111,16 @@ export class GeminiChatClient implements ChatClient {
     let text = '';
     let inputTokens = 0;
     let outputTokens = 0;
+    let cacheRead = 0;
     try {
       for await (const data of sseData(res, opts?.signal)) {
         const chunk = JSON.parse(data) as {
           candidates?: { content?: { parts?: Part[] } }[];
-          usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+          usageMetadata?: {
+            promptTokenCount?: number;
+            candidatesTokenCount?: number;
+            cachedContentTokenCount?: number;
+          };
         };
         for (const p of chunk.candidates?.[0]?.content?.parts ?? []) {
           if (typeof p.text === 'string') {
@@ -127,6 +132,9 @@ export class GeminiChatClient implements ChatClient {
         if (chunk.usageMetadata) {
           inputTokens = chunk.usageMetadata.promptTokenCount ?? inputTokens;
           outputTokens = chunk.usageMetadata.candidatesTokenCount ?? outputTokens;
+          // Part of `promptTokenCount`, charged at a discount. Gemini caches implicitly, so
+          // this arrives without anything being asked of it (CRL-86).
+          cacheRead = chunk.usageMetadata.cachedContentTokenCount ?? cacheRead;
         }
       }
     } catch (e) {
@@ -138,6 +146,7 @@ export class GeminiChatClient implements ChatClient {
       toolCalls: fnCalls.map((fc, i) => ({ id: `gem_${i}_${fc.name}`, name: fc.name, args: fc.args ?? {} })),
       inputTokens,
       outputTokens,
+      input: { cacheRead },
     };
   }
 }

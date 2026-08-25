@@ -11,7 +11,7 @@
  * works before any real key runs.
  */
 import type { WorkspaceHandle, WorkspaceIO } from '../core/types.js';
-import { priceFor } from './pricing.js';
+import { priceFor, type InputBreakdown } from './pricing.js';
 import type { AgentEvent, AgentErrorKind, AgentProviderId, AgentTurnSpec, PreflightResult } from './types.js';
 
 /** A tool the model may call. `parameters` is a JSON Schema object. */
@@ -42,8 +42,17 @@ export interface NeutralMessage {
 export interface ChatTurn {
   text: string;
   toolCalls: NeutralToolCall[];
+  /** Every input token the turn was charged for, cache included — what the ceiling counts. */
   inputTokens: number;
   outputTokens: number;
+  /**
+   * How that input divided between fresh and cached, when the provider says.
+   *
+   * Carried alongside the total rather than instead of it: the ceiling wants one number
+   * (CRL-58) and pricing wants the split, because a cache read costs a tenth of a fresh
+   * token and an agent loop is nearly all cache reads after its first call (CRL-86).
+   */
+  input?: InputBreakdown;
 }
 
 /** Options for one `send`: cancellation + a streaming text callback. */
@@ -454,7 +463,7 @@ export async function runApiAgent(
       });
       // Per-turn token deltas (GenericAgent sums them); cumulative cost (GenericAgent keeps
       // the latest as the run total). Pricing is approximate — see pricing.ts.
-      costUsd += priceFor(client.provider, spec.model, res.inputTokens, res.outputTokens);
+      costUsd += priceFor(client.provider, spec.model, res.inputTokens, res.outputTokens, res.input);
       onEvent({ type: 'usage', inputTokens: res.inputTokens, outputTokens: res.outputTokens, costUsd });
       if (res.text && !streamed) onEvent({ type: 'text', text: res.text });
       if (res.toolCalls.length === 0) break; // no tool calls → the model is done

@@ -29,8 +29,8 @@ describe('per-pillar tallies', () => {
     b.record({ inputTokens: 20, outputTokens: 1 }, 'development');
 
     const s = b.snapshot();
-    expect(s.byPillar.development).toEqual({ inputTokens: 120, outputTokens: 11 });
-    expect(s.byPillar.operations).toEqual({ inputTokens: 30, outputTokens: 5 });
+    expect(s.byPillar.development).toEqual({ inputTokens: 120, outputTokens: 11, costUsd: 0 });
+    expect(s.byPillar.operations).toEqual({ inputTokens: 30, outputTokens: 5, costUsd: 0 });
     // The ceiling is still checked against this, so nothing about when work stops changes.
     expect([s.inputTokens, s.outputTokens]).toEqual([150, 16]);
   });
@@ -65,7 +65,7 @@ describe('a counter file written before attribution existed', () => {
     );
     const s = budget().snapshot();
     expect(s.byPillar).toEqual({});
-    expect(s.unattributed).toEqual({ inputTokens: 500_000, outputTokens: 9_000 });
+    expect(s.unattributed).toEqual({ inputTokens: 500_000, outputTokens: 9_000, costUsd: 0 });
   });
 
   it('does not fold later attributed spend into the unknown part', () => {
@@ -84,7 +84,7 @@ describe('a counter file written before attribution existed', () => {
   it('reports nothing unknown once every token is accounted for', () => {
     const b = budget();
     b.record({ inputTokens: 10, outputTokens: 2 }, 'operations');
-    expect(b.snapshot().unattributed).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect(b.snapshot().unattributed).toEqual({ inputTokens: 0, outputTokens: 0, costUsd: 0 });
   });
 });
 

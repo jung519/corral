@@ -1011,6 +1011,13 @@
           <input inputmode="numeric" bind:value={s.dailyOutputTokens} placeholder="100000" spellcheck="false" /></label
         >
       </div>
+      <div class="two">
+        <!-- `decimal`, not `numeric`: a day's work can cost well under a dollar. -->
+        <label class="field"
+          ><span>{t('field.dailyCost')}</span>
+          <input inputmode="decimal" bind:value={s.dailyCostUsd} placeholder="20" spellcheck="false" /></label
+        >
+      </div>
       <p class="hint">{t('field.limitsHint')}</p>
     {/if}
 

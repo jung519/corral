@@ -214,6 +214,7 @@
         {@render row(t('field.stack'), s.stack)}
         {@render row(t('field.dailyInput'), s.dailyInputTokens || t('field.noLimit'))}
         {@render row(t('field.dailyOutput'), s.dailyOutputTokens || t('field.noLimit'))}
+        {@render row(t('field.dailyCost'), s.dailyCostUsd ? `$${s.dailyCostUsd}` : t('field.noLimit'))}
       {/if}
     </div>
   {:else if configured === undefined}

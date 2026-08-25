@@ -27,8 +27,15 @@ output: { kind: none }
 `;
 
 /** A model step that spends a known amount. */
-const spends = (inputTokens: number, outputTokens: number): OperationRunner => ({
-  run: async () => ({ ok: true, answer: { answer: 'ok' }, inputTokens, outputTokens, tokens: inputTokens + outputTokens }),
+const spends = (inputTokens: number, outputTokens: number, costUsd?: number): OperationRunner => ({
+  run: async () => ({
+    ok: true,
+    answer: { answer: 'ok' },
+    inputTokens,
+    outputTokens,
+    tokens: inputTokens + outputTokens,
+    costUsd,
+  }),
 });
 
 beforeEach(() => {
@@ -107,5 +114,64 @@ describe('what gets counted', () => {
     await host.runManually('nope', {}); // unknown pipeline
 
     expect(budget.snapshot()).toMatchObject({ inputTokens: 0, outputTokens: 0 });
+  });
+});
+
+/**
+ * The same door, in the unit people actually budget in.
+ *
+ * Nobody sets a limit in tokens because nobody knows what a token costs; the questions
+ * being asked are "can I afford to run this tonight" and "was this issue worth it", and
+ * both are money (CRL-86). So the ceiling has a third door, and it has to shut as hard as
+ * the other two — through the real pipeline lifecycle, not through `check()` alone.
+ */
+describe('the ceiling in dollars', () => {
+  it('stops a pipeline once an issue has spent the day\'s money', async () => {
+    const budget = new TokenBudget({ dailyCostUsd: 1 }, dir);
+    const host = await startOpsHost({ stateDir: dir, budget, operation: spends(10, 5, 0.01) });
+
+    expect((await host.runManually('classify', {})).run?.outcome).toBe('completed');
+
+    // An issue being planned — no token ceiling is set at all, so only the money can stop it.
+    new CostTracker(dir, budget).add('ISS-1', { costUsd: 1.5, inputTokens: 200, outputTokens: 0 });
+
+    const { run } = await host.runManually('classify', {});
+    expect(run).toMatchObject({ outcome: 'over_budget', stage: 'agent' });
+    expect(run?.reason).toMatch(/daily cost limit reached \(\$1\.51\/\$1\.00\)/);
+  });
+
+  it('closes the door on development after enough pipeline runs', async () => {
+    const budget = new TokenBudget({ dailyCostUsd: 0.05 }, dir);
+    const host = await startOpsHost({ stateDir: dir, budget, operation: spends(10, 5, 0.03) });
+
+    expect(budget.check().ok).toBe(true);
+    await host.runManually('classify', {});
+    await host.runManually('classify', {});
+
+    // What the orchestrator checks before dispatching an issue.
+    expect(budget.check()).toMatchObject({ ok: false, reason: expect.stringContaining('cost limit') });
+  });
+
+  it('carries an operational run\'s own cost into the shared total', async () => {
+    const budget = new TokenBudget({ dailyCostUsd: 10 }, dir);
+    const host = await startOpsHost({ stateDir: dir, budget, operation: spends(10, 5, 0.25) });
+
+    await host.runManually('classify', {});
+
+    const s = budget.snapshot();
+    expect(s.costUsd).toBeCloseTo(0.25);
+    expect(s.byPillar.operations?.costUsd).toBeCloseTo(0.25);
+    expect(s.unpricedCalls).toBe(0);
+  });
+
+  it('says so when a run spent tokens the runner could not price', async () => {
+    // Not the same as a free run. The day's money is then a floor, and the screen has to
+    // be able to say that rather than present it as the total.
+    const budget = new TokenBudget({ dailyCostUsd: 10 }, dir);
+    const host = await startOpsHost({ stateDir: dir, budget, operation: spends(10, 5) });
+
+    await host.runManually('classify', {});
+
+    expect(budget.snapshot()).toMatchObject({ costUsd: 0, unpricedCalls: 1, inputTokens: 10 });
   });
 });

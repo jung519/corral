@@ -110,7 +110,11 @@ export interface OpsBudget {
   date: string;
   inputTokens: number;
   outputTokens: number;
-  limits: { dailyInputTokens?: number; dailyOutputTokens?: number };
+  /** Estimated dollars for the priced part of the day. */
+  costUsd?: number;
+  /** Calls that spent tokens with no price. Above zero, `costUsd` is a floor. */
+  unpricedCalls?: number;
+  limits: { dailyInputTokens?: number; dailyOutputTokens?: number; dailyCostUsd?: number };
   /** 0–1 of the tightest configured ceiling; 0 when none is set. */
   used: number;
   /**
@@ -118,7 +122,9 @@ export interface OpsBudget {
    * all times so that development eating the shared budget shows immediately (D12) — the
    * total alone could never say that (CRL-110).
    */
-  byPillar?: Partial<Record<'development' | 'operations', { inputTokens: number; outputTokens: number }>>;
+  byPillar?: Partial<
+    Record<'development' | 'operations', { inputTokens: number; outputTokens: number; costUsd?: number }>
+  >;
   /** Spend from before attribution existed. Shown as unknown, never folded into a pillar. */
   unattributed?: { inputTokens: number; outputTokens: number };
 }

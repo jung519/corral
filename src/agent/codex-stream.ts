@@ -41,6 +41,8 @@ export interface CodexEvent {
 const MAX = 2000;
 
 export class CodexStreamParser implements CliStreamParser<CodexEvent> {
+  readonly provider = 'gpt' as const;
+
   /** Captured from thread.started — the session id to resume next turn. */
   threadId: string | undefined;
 
@@ -70,7 +72,14 @@ export class CodexStreamParser implements CliStreamParser<CodexEvent> {
       if (typeof event.usage.input_tokens === 'number') acc.inputTokens += event.usage.input_tokens;
       const out = (event.usage.output_tokens ?? 0) + (event.usage.reasoning_output_tokens ?? 0);
       if (out) acc.outputTokens += out;
-      // The CLI JSONL stream does not report a USD cost; leave acc.costUsd at 0.
+      // A subset of `input_tokens`, not an addition to it. Measured on codex-cli: one turn
+      // reported 14,293 input; the same session with ~7.5k tokens of extra text reported
+      // 21,813 — a delta that matches the added text, which it could not if the 5,504
+      // cached tokens sat outside the total.
+      //
+      // Half price rather than full. The stream reports no money at all, so this is what
+      // the estimate has to work from (CRL-86).
+      acc.input = { cacheRead: event.usage.cached_input_tokens ?? 0 };
     }
   }
 

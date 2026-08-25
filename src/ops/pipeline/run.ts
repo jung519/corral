@@ -401,7 +401,15 @@ export class PipelineRunner {
       // below a `return` for the failure path, so a pipeline whose model never matched the
       // schema billed all day against a ceiling reading zero — the spend control bypassed
       // by the shape of the code rather than by any decision.
-      this.deps.budget?.record({ inputTokens: operation.inputTokens ?? 0, outputTokens: operation.outputTokens ?? 0 });
+      this.deps.budget?.record({
+        inputTokens: operation.inputTokens ?? 0,
+        outputTokens: operation.outputTokens ?? 0,
+        // Left off until CRL-86, so every operational turn reached the shared ceiling as a
+        // token count and $0.00 — the pillar that runs all day looked free next to the one
+        // that runs on demand. Passed through undefined when the runner had no price, so
+        // the day can say how much of itself is unpriced rather than pretend otherwise.
+        costUsd: operation.costUsd,
+      });
 
       // What the turn cost, carried to whichever ending this run reaches — including the
       // endings where there is no answer to show for it.
