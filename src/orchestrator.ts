@@ -18,7 +18,7 @@
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
-import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, taskPrompt, type SpecStage } from './agent/prompt-builder.js';
+import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, SPEC_STAGES, taskPrompt, type SpecStage } from './agent/prompt-builder.js';
 import { parseSpecTasks } from './core/spec-tasks.js';
 import { nextTaskStep, type TaskLoopState } from './core/task-loop.js';
 import { isUnbacked, taskEvidence, type RepoHeads, type TaskEvidence } from './core/task-evidence.js';
@@ -1348,9 +1348,16 @@ export class Orchestrator {
         bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `⚠️ tasks.md — ${w}` });
       }
 
+      // Recorded here rather than read on demand: the dashboard polls, and re-reading the
+      // file per issue per poll would put file I/O on that path. The loop is already
+      // holding the parse (CRL-107).
+      rt.taskProgress = tasks ? { done: tasks.done, total: tasks.total, warnings: tasks.warnings.length } : undefined;
+      this.store.upsert(rt);
+
       const step = nextTaskStep(tasks, state, this.config.max_task_rounds);
       switch (step.kind) {
         case 'downgrade':
+          this.clearTaskProgress(rt);
           log.warn(`task loop unavailable (${step.reason}) — falling back to a single implementation turn`);
           bus.emitEvent({
             identifier: rt.identifier,
@@ -1376,6 +1383,7 @@ export class Orchestrator {
                 .join('; ')}`,
             );
           }
+          this.clearTaskProgress(rt);
           await this.reviewAfterImplement(rt, issue);
           return true;
 
@@ -1419,6 +1427,34 @@ export class Orchestrator {
         }
       }
     }
+  }
+
+  /**
+   * The three spec documents for an issue, rendered.
+   *
+   * The approval card is gone once it is approved, and these are what was approved — the
+   * only record of the requirements a reviewer would want to check a PR against. Rendered
+   * here because the core owns the markdown parser; putting one in the window would copy
+   * a responsibility that deliberately lives on this side.
+   */
+  async specDocs(identifier: string): Promise<Array<{ stage: SpecStage; markdown: string; html: string }>> {
+    const handle = this.handles.get(identifier);
+    if (!handle) return [];
+    const out: Array<{ stage: SpecStage; markdown: string; html: string }> = [];
+    for (const stage of SPEC_STAGES) {
+      const markdown = await this.workspace.io.readFile(handle, specDoc(stage)).catch(() => null);
+      // A stage that has not run yet simply has no document; an empty entry would render as
+      // an empty tab and read as "there is nothing to say here", which is different.
+      if (markdown?.trim()) out.push({ stage, markdown, html: renderMarkdown(markdown) });
+    }
+    return out;
+  }
+
+  /** Drop the counts once the loop is done, so a later cycle cannot show yesterday's. */
+  private clearTaskProgress(rt: IssueRuntime): void {
+    if (!rt.taskProgress) return;
+    rt.taskProgress = undefined;
+    this.store.upsert(rt);
   }
 
   /**

@@ -2,6 +2,7 @@
   import { onMount, tick } from 'svelte';
   import ApprovalCard from './ApprovalCard.svelte';
   import PhaseBar from './PhaseBar.svelte';
+  import SpecDocs from './SpecDocs.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
   import Button from './lib/Button.svelte';
   import PageHeader from './lib/PageHeader.svelte';
@@ -13,6 +14,7 @@
   import { loadDraft, type WizardState } from './lib/wizard';
 
   let view: StateResponse = $state({ issues: [], pending: [], events: [] });
+  let specFor = $state<string | null>(null);
   let live: CorralEvent[] = $state([]);
   let candidates: Candidate[] = $state([]);
   let candCursor = $state<string | undefined>(undefined);
@@ -164,6 +166,16 @@
             <span class="waiting" title={wl}><span class="pulse" aria-hidden="true"></span>{wl}</span>
           {/if}
           <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase, view.specMode))}</span>
+          {#if issue.taskProgress}
+            <span class="tasks" title={t('dash.tasks.hint')}>
+              {t('dash.tasks')} {issue.taskProgress.done}/{issue.taskProgress.total}
+              {#if issue.taskProgress.warnings > 0}
+                <!-- A clean count over a partly unreadable file is the misreading CRL-105
+                     and CRL-106 both guarded against; it must not stop at the number. -->
+                <span class="warn" title={t('dash.tasks.warn.hint')}>⚠️ {issue.taskProgress.warnings}</span>
+              {/if}
+            </span>
+          {/if}
           <span class="cost">${issue.cost.toFixed(4)}</span>
         </div>
         <div class="bar-row"><PhaseBar phase={issue.phase} specMode={view.specMode} /></div>
@@ -174,6 +186,10 @@
           {/each}
           {#if issue.prs?.length}<Button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</Button>{/if}
           {#if issue.stuck}<Button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</Button>{/if}
+          {#if issue.taskProgress || view.specMode === 'split'}
+            <!-- The approval cards are gone once approved, and these are what was approved. -->
+            <Button onclick={() => (specFor = issue.identifier)}>{t('spec.open')}</Button>
+          {/if}
           <Button onclick={() => restart(issue.identifier)}>{t('dash.restart')}</Button>
           <Button onclick={() => remove(issue.identifier)}>{t('dash.remove')}</Button>
         </div>
@@ -224,6 +240,10 @@
       <button onclick={() => (showCandidates = false)}>{t('dash.close')}</button>
     </div>
   </div>
+{/if}
+
+{#if specFor}
+  <SpecDocs identifier={specFor} onClose={() => (specFor = null)} />
 {/if}
 
 <style>
@@ -328,6 +348,14 @@
   .cost {
     color: var(--text-dim);
     font-size: 12px;
+  }
+  .tasks {
+    color: var(--accent-text);
+    font-size: 12px;
+  }
+  .tasks .warn {
+    color: var(--amber, #d29922);
+    margin-left: 4px;
   }
   .bar-row {
     margin: 10px 0;
