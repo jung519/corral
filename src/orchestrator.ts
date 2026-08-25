@@ -801,6 +801,10 @@ export class Orchestrator {
 
     // First stage only: a fresh session. The later ones continue so the agent still has the
     // repository it just inspected, and they read the approved documents off disk anyway.
+    // Clear the previous stage's options: the file is not stage-scoped, and a leftover
+    // would answer for a stage that never wrote one (the same staleness CRL-87 fixed for
+    // critique files).
+    await this.workspace.io.writeFile(handle, SCRATCH.planOptions, '');
     const fresh = stage === 'requirements';
     const draft = await this.dispatch(rt, issue, specStagePrompt(issue, stage), !fresh, 'planning');
     if (!draft.ok) return;
@@ -856,7 +860,11 @@ export class Orchestrator {
       kind: stage,
       title: issue.title,
       body,
-      options: await this.planOptionsFor(handle),
+      // Only the design stage is told to write options (guide A2); requirements and tasks
+      // are not. Attaching them everywhere meant the task card offered the design
+      // alternatives again — a choice the human already made, presented as still open, and
+      // carried into the implementation prompt as "Implement the X option" (CRL-113).
+      options: stage === 'design' ? await this.planOptionsFor(handle) : undefined,
     });
     rt.phase = phase;
     this.store.upsert(rt);
@@ -1263,6 +1271,18 @@ export class Orchestrator {
 
     if (rt.phase === 'question_sent') {
       this.clearApproval(rt);
+      const stage = rt.specStage as SpecStage | undefined;
+      if (stage) {
+        // A spec stage asked the question, so the answer belongs to that stage — the guide
+        // tells the agent to write a question instead of the document when it needs a
+        // decision, and that happens (it did on the first measured A1 run). Routing the
+        // answer through the single-plan path instead left the reply, and the turn it
+        // bought, going to `pending_plan.md`, which does not exist in split mode: the run
+        // stopped with "Plan file is empty" (CRL-113).
+        const answered = await this.dispatch(rt, issue, text, true, 'planning');
+        if (answered.ok) await this.vetAndSendSpec(rt, issue, this.handles.get(rt.identifier)!, stage);
+        return;
+      }
       const result = await this.dispatch(rt, issue, text, true, 'planning', [SCRATCH.pendingPlan]);
       if (result.ok) await this.afterPlanProduced(rt, issue, 'plan');
       return;
@@ -1847,7 +1867,9 @@ export class Orchestrator {
       kind,
       title: issue.title,
       body,
-      options: kind === 'review' || kind === 'pr_plan' ? undefined : await this.planOptionsFor(handle),
+      // Same rule as the first send: only the kinds whose branch writes the file get
+      // options, so a revised task list does not re-offer the design's alternatives.
+      options: kind === 'plan' || kind === 'design' ? await this.planOptionsFor(handle) : undefined,
     });
     rt.approvalId = approvalId;
     this.store.upsert(rt);
