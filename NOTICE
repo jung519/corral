@@ -3,9 +3,13 @@ Copyright 2026 Corral contributors
 
 Corral is an independent work. The source in this repository was written for
 this project: it is not a derivative of, and contains no code from, any prior
-internal or third-party codebase. Its approach to orchestrating coding agents
-was learned from OpenAI's Symphony, and that influence is conceptual only — no
-Symphony code is present here.
+internal or third-party codebase.
+
+Its approach to orchestrating coding agents follows the specification OpenAI
+published as Symphony (https://github.com/openai/symphony), which is licensed
+Apache-2.0 — the same license as this project. That influence is conceptual, and
+checkable: Symphony's reference implementation is written in Elixir and Corral is
+TypeScript, so there is no shared code to have taken.
 
 Some source comments refer to "the pre-rename implementation". That is this same
 codebase before it was named Corral, when it still used the `symphony` name in

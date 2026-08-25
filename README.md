@@ -27,7 +27,7 @@ a doubtful answer is held back with a link rather than written.
 Both are **provider-neutral** (Claude / Gemini / GPT), **BYOK** (bring your own keys;
 nothing is embedded), and **self-hostable**.
 
-Corral began as a rebuild of a Slack-driven harness built on OpenAI's Symphony: review
+Corral began as a rebuild of a Slack-driven harness built on [OpenAI's Symphony](https://github.com/openai/symphony): review
 requests, three candidate plans to choose from, and completion reports all arrived as Slack
 messages, and nothing showed what was where. Only the concept carried over — the core here
 was written from scratch — and the missing piece became the point of the project: a UI that
