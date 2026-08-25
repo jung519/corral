@@ -31,7 +31,9 @@ tracker:
     # plan_review: "Plan review"   # optional refinement
     # in_review: "In review"       # optional refinement
   scope:
-    type: checkbox       # only issues with this checkbox are picked up
+    # checkbox | select | multi_select | status. `select`/`multi_select`/`status` take a
+    # `values: [...]` list instead; this one picks up issues whose checkbox is ticked.
+    type: checkbox
     property: "Corral"
 
 # All repos are cloned side by side into the workspace (each under its <key>/).
@@ -93,3 +95,37 @@ workspace:
 
 channel:
   kind: web               # the app itself is the channel — no port, nothing to open.
+
+# How the desktop app reaches a core running somewhere else. Off by default: the app forks
+# the core itself for a single-machine install. Binding stays on loopback because the plane
+# is authenticated but NOT encrypted — the app opens an SSH tunnel to carry it.
+# The `--control-plane [host:]port` flag overrides this for one run.
+# control_plane:
+#   enabled: true
+#   host: 127.0.0.1
+#   port: 4410
+
+# Issues worked on at once. Each gets its own workspace, so this is disk and CPU as much
+# as it is money.
+# max_active_issues: 3
+
+# Self-review after implementation. `rounds` are independent passes (fresh session each).
+# `max_fix_rounds: 0` means review runs once and then a human decides — auto-fixing costs
+# Opus output twice over, which was the expensive part.
+# review:
+#   rounds: 1
+#   max_fix_rounds: 0
+#   auto_pr_when_clean: false
+#   semgrep: { config: ["p/default"], paths: ["."] }   # omit to skip; detected on PATH
+
+# Independent critics vetting the plan before you see it.
+# plan_review:
+#   enabled: true
+#   rounds: 1
+#   heavy_labels: []      # labels that get `heavy_rounds` instead
+#   heavy_rounds: 2
+
+# `single` = one plan document, approved once (default). `split` = the three spec gates
+# (requirements → design → tasks), each approved on its own. Roughly 2.4x the model calls
+# per issue, and the daily ceiling is shared with the operational AI — hence the default.
+# spec_mode: single
