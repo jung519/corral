@@ -105,7 +105,14 @@ export class OneTurnOperationRunner implements OperationRunner {
 
   async run(step: PipelineAgentStep, fields: Fields): Promise<OperationOutcome> {
     const messages: NeutralMessage[] = [
-      { role: 'system', content: `${step.prompt.system}\n\n${schemaInstruction(step.schema)}` },
+      // Both halves are filled. The natural place to put the material `agent.context`
+      // fetched — a vocabulary list, a set of allowed labels — is the system prompt, since
+      // it is background rather than per-item input. Leaving it unfilled handed the model
+      // the literal `{{vocabulary}}`, so it invented values and `allowed_values` discarded
+      // all of them: the exact failure `agent.context` exists to prevent, arrived at by the
+      // most natural way of using it, and showing up on screen as "the model is bad"
+      // (CRL-97).
+      { role: 'system', content: `${fillTemplate(step.prompt.system, fields)}\n\n${schemaInstruction(step.schema)}` },
       { role: 'user', content: fillTemplate(step.prompt.user_template, fields) },
     ];
 

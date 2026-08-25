@@ -113,6 +113,34 @@ describe('the reply is the answer', () => {
     expect(seen[0]!.prompt).toContain('You label records.');
     expect(seen[0]!.prompt).toContain('Title: a record');
   });
+
+  /**
+   * Both halves, same as the API path. The system prompt is where anyone would put the
+   * vocabulary `agent.context` fetched, and it was the one half passed through raw — so the
+   * model saw `{{vocabulary}}`, invented values, and `allowed_values` threw them all away
+   * (CRL-97).
+   */
+  it('fills placeholders in the system prompt too', async () => {
+    const seen: AgentTurnSpec[] = [];
+    const runner = new CliTurnOperationRunner({ transports: [replies('claude', GOOD, seen)] });
+
+    await runner.run(step({ prompt: { system: 'Use only: {{vocabulary}}', user_template: 'x' } }), {
+      vocabulary: ['alpha', 'beta'],
+    });
+
+    expect(seen[0]!.prompt).toContain('["alpha","beta"]');
+    expect(seen[0]!.prompt).not.toContain('{{vocabulary}}');
+  });
+
+  it('leaves a system prompt without placeholders alone', async () => {
+    const seen: AgentTurnSpec[] = [];
+    const runner = new CliTurnOperationRunner({ transports: [replies('claude', GOOD, seen)] });
+    const text = 'You label records. Answer with {"key": "value"} shapes only.';
+
+    await runner.run(step({ prompt: { system: text, user_template: 'x' } }), { title: 't' });
+
+    expect(seen[0]!.prompt).toContain(text);
+  });
 });
 
 describe('the turn has no tools', () => {
