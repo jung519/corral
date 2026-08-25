@@ -29,10 +29,23 @@
   let adding = $state(false);
 
   const budget = $derived(overview.budget);
-  const hasLimit = $derived(Boolean(budget?.limits.dailyInputTokens || budget?.limits.dailyOutputTokens));
+  const hasLimit = $derived(
+    Boolean(budget?.limits.dailyInputTokens || budget?.limits.dailyOutputTokens || budget?.limits.dailyCostUsd),
+  );
+  /**
+   * `~$0.84`, or `≥$0.84` while some of the day went unpriced.
+   *
+   * Empty when nothing has been priced at all — `$0.00` beside a spent day reads as a free
+   * day rather than an unmeasured one (CRL-86).
+   */
+  const money = $derived.by(() => {
+    const cost = budget?.costUsd ?? 0;
+    if (cost <= 0) return '';
+    return `${(budget?.unpricedCalls ?? 0) > 0 ? '≥' : '~'}$${cost.toFixed(2)}`;
+  });
   const usedPercent = $derived(Math.round((budget?.used ?? 0) * 100));
 
-  /** `개발 120k · 운영 30k · 출처 미상 350k` — input tokens, the tighter ceiling in practice. */
+  /** `개발 120k ~$0.84 · 운영 30k ~$0.19 · 출처 미상 350k` — input tokens and what they cost. */
   const split = $derived.by(() => {
     const parts: string[] = [];
     for (const [pillar, key] of [
@@ -40,7 +53,10 @@
       ['operations', 'ops.pillar.operations'],
     ] as const) {
       const u = budget?.byPillar?.[pillar];
-      if (u && u.inputTokens > 0) parts.push(`${t(key)} ${compact(u.inputTokens)}`);
+      if (u && u.inputTokens > 0) {
+        const cost = u.costUsd ?? 0;
+        parts.push(`${t(key)} ${compact(u.inputTokens)}${cost > 0 ? ` ~$${cost.toFixed(2)}` : ''}`);
+      }
     }
     // Reported rather than folded in or shown as zero: a counter written before this
     // existed says nothing about who spent it, and claiming otherwise would be a guess.
@@ -115,9 +131,15 @@
 <PageHeader
   title={t('nav.pipelines')}
   {online}
-  meta={hasLimit
-    ? `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0} · ${usedPercent}%`
-    : `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0}`}
+  meta={[
+    `${t('ops.usage')} ${budget?.inputTokens ?? 0}/${budget?.outputTokens ?? 0}`,
+    // Money next to the counts, not instead of them: the tokens are what was measured and
+    // the dollars are what the person budgets in (CRL-86).
+    money,
+    hasLimit ? `${usedPercent}%` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')}
 >
   <Button class="primary" onclick={() => (adding = true)}>{t('ops.add')}</Button>
 </PageHeader>

@@ -138,7 +138,7 @@ export class OneTurnOperationRunner implements OperationRunner {
         spent.add({
           inputTokens: turn.inputTokens,
           outputTokens: turn.outputTokens,
-          costUsd: priceFor(client.provider, model, turn.inputTokens, turn.outputTokens),
+          costUsd: priceFor(client.provider, model, turn.inputTokens, turn.outputTokens, turn.input),
         });
         const checked = checkAnswer(step.schema, turn.text);
         if (!checked.ok) {

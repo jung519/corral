@@ -108,3 +108,56 @@ describe('GeminiChatClient (streaming)', () => {
     expect(turn).toMatchObject({ text: 'done', inputTokens: 15, outputTokens: 4 });
   });
 });
+
+/**
+ * What the three clients say about cache, and what the ceiling counts.
+ *
+ * Two separate facts travel out of one turn: `inputTokens` is the sum, because that is the
+ * number the daily ceiling counts (CRL-58), and `input` is the same tokens split by how
+ * they were charged, because pricing all of them fresh overstates a cache-heavy turn by
+ * around an order of magnitude (CRL-86).
+ */
+describe('the cache split each client reports', () => {
+  it('anthropic: the sum includes the cached parts, and the split names them', async () => {
+    // Measured shape. `input_tokens` alone is 2 of the 4,037 tokens the prompt actually was.
+    mockSse([
+      '{"type":"message_start","message":{"usage":{"input_tokens":2,"cache_creation_input_tokens":4035,"cache_read_input_tokens":1000}}}',
+      '{"type":"message_delta","usage":{"output_tokens":9}}',
+      '{"type":"message_stop"}',
+    ]);
+    const turn = await new AnthropicChatClient('k').send(convo, [BASH_TOOL], 'sonnet');
+
+    expect(turn.inputTokens).toBe(5037);
+    expect(turn.input).toEqual({ cacheWrite: 4035, cacheRead: 1000 });
+  });
+
+  it('openai: the cached count is part of the total, not an addition to it', async () => {
+    mockSse([
+      '{"choices":[{"delta":{}}],"usage":{"prompt_tokens":12000,"completion_tokens":7,"prompt_tokens_details":{"cached_tokens":9000}}}',
+    ]);
+    const turn = await new OpenAiChatClient('k').send(convo, [BASH_TOOL], 'gpt-5-mini');
+
+    expect(turn.inputTokens).toBe(12_000);
+    expect(turn.input).toEqual({ cacheRead: 9000 });
+  });
+
+  it('gemini: likewise, and it caches without being asked to', async () => {
+    mockSse([
+      '{"candidates":[{"content":{"parts":[{"text":"ok"}]}}],"usageMetadata":{"promptTokenCount":15000,"candidatesTokenCount":4,"cachedContentTokenCount":12000}}',
+    ]);
+    const turn = await new GeminiChatClient('k').send(convo, [BASH_TOOL], 'flash');
+
+    expect(turn.inputTokens).toBe(15_000);
+    expect(turn.input).toEqual({ cacheRead: 12_000 });
+  });
+
+  it('reports no cache rather than a false zero when the vendor said nothing', async () => {
+    mockSse(['{"choices":[{"delta":{}}],"usage":{"prompt_tokens":12,"completion_tokens":7}}']);
+    const turn = await new OpenAiChatClient('k').send(convo, [BASH_TOOL], 'gpt-5-mini');
+
+    // A zero here is the honest reading: the field is the vendor's own, and its absence
+    // from a response that carried usage means none was served from cache.
+    expect(turn.input).toEqual({ cacheRead: 0 });
+    expect(turn.inputTokens).toBe(12);
+  });
+});

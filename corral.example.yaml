@@ -79,13 +79,17 @@ workspace:
   #   mount_host_login: true      # mount ~/.claude into the container (no API key needed).
   #                               # set false to authenticate with an agent API key instead.
 
-# Daily token ceiling, SHARED by the development and operational AI (first come, first
-# served — when the day's tokens are gone, both stop). Counted in tokens rather than
-# money: a price table belongs to the vendor and the vendor changes it, while token
-# counts come back from the response itself. Omit for no ceiling.
+# Daily ceiling, SHARED by the development and operational AI (first come, first served —
+# when the day's budget is gone, both stop). The token counts are the figure of record:
+# they come back from the response itself and are exactly what was spent, while a price
+# table belongs to the vendor and the vendor changes it. `daily_cost_usd` is estimated
+# from that table — a guard rail in the unit you actually budget in, not an invoice.
+# Set any of the three on its own; whichever runs out first stops the work.
+# Omit for no ceiling.
 # limits:
 #   daily_input_tokens: 2000000
 #   daily_output_tokens: 200000
+#   daily_cost_usd: 20
 
 channel:
   kind: web               # web | slack. `web` = the app itself is the channel (no port).

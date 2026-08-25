@@ -48,7 +48,14 @@ describe('stream-json parsing', () => {
       acc,
     );
 
-    expect(acc).toEqual({ costUsd: 0.08092, inputTokens: 4037, outputTokens: 4 });
+    expect(acc).toEqual({
+      costUsd: 0.08092,
+      inputTokens: 4037,
+      outputTokens: 4,
+      // The same tokens a second way, for pricing only — the sum above is what the ceiling
+      // counts (CRL-86).
+      input: { cacheWrite: 4035, cacheRead: 0 },
+    });
   });
 
   it('counts a cache read too — cheaper than the rest, not free', () => {
@@ -72,7 +79,7 @@ describe('stream-json parsing', () => {
     applyUsage({ type: 'assistant', usage }, acc);
     applyUsage({ type: 'result', total_cost_usd: 0.42, usage }, acc);
 
-    expect(acc).toEqual({ costUsd: 0.42, inputTokens: 4037, outputTokens: 4 });
+    expect(acc).toEqual({ costUsd: 0.42, inputTokens: 4037, outputTokens: 4, input: { cacheWrite: 4035, cacheRead: 0 } });
   });
 
   it('leaves the tally alone for an event that carries no usage', () => {

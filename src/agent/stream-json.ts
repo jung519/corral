@@ -4,6 +4,7 @@
  *
  * Lifted/adapted from upstream's inline parser, emitting normalized AgentEvents.
  */
+import type { InputBreakdown } from './pricing.js';
 import type { AgentEvent } from './types.js';
 
 export interface StreamEvent {
@@ -77,6 +78,14 @@ export interface UsageAcc {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * How the input splits, for the CLIs whose cost has to be estimated.
+   *
+   * `inputTokens` above is the sum and stays the sum — that is what the ceiling counts
+   * (CRL-58). This is the same tokens seen a second way, and only the price cares
+   * (CRL-86).
+   */
+  input?: InputBreakdown;
 }
 
 /**
@@ -100,6 +109,10 @@ export function applyUsage(event: StreamEvent, acc: UsageAcc): void {
   acc.inputTokens =
     (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
   acc.outputTokens = usage.output_tokens ?? 0;
+  acc.input = {
+    cacheWrite: usage.cache_creation_input_tokens ?? 0,
+    cacheRead: usage.cache_read_input_tokens ?? 0,
+  };
 }
 
 /** Whether the text indicates an auth/credential failure (non-retryable). */

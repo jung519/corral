@@ -118,6 +118,7 @@ export async function startCoreHost(opts: CoreHostOptions): Promise<CoreHost> {
         {
           dailyInputTokens: config.limits.daily_input_tokens,
           dailyOutputTokens: config.limits.daily_output_tokens,
+          dailyCostUsd: config.limits.daily_cost_usd,
         },
         stateDir,
       );

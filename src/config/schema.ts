@@ -279,16 +279,23 @@ export const ChannelSchema = z
 // ──────────────────────────────────────────────────────────────────── limits
 
 /**
- * Daily token ceiling, shared by the development and operational AI (first come, first
- * served). Counted in tokens rather than money: a price table belongs to the vendor and
- * the vendor changes it, while token counts come back from the response itself.
+ * Daily ceiling, shared by the development and operational AI (first come, first served).
  *
+ * The token counts are the figure of record: they come back from the response itself and
+ * are exactly what was spent, whereas a price table belongs to the vendor and the vendor
+ * changes it. The dollar ceiling is there because a token count is not a number anyone
+ * budgets in — "2,000,000 tokens" does not answer "what will tonight cost" (CRL-86). It is
+ * estimated from `agent/pricing.ts`, so treat it as a guard rail, not an invoice.
+ *
+ * Any of the three may be set on its own; whichever runs out first stops the work.
  * Unset = no ceiling.
  */
 export const LimitsSchema = z
   .object({
     daily_input_tokens: z.number().int().nonnegative().optional(),
     daily_output_tokens: z.number().int().nonnegative().optional(),
+    /** Dollars. Fractional on purpose — a day's work can be well under $1. */
+    daily_cost_usd: z.number().nonnegative().optional(),
   })
   .default({});
 
