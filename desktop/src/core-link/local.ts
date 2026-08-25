@@ -3,7 +3,7 @@
  * Node IPC channel — **no TCP port**. This is the default and what a single-machine
  * install uses.
  *
- * Lifted from the original `orchestrator-process.ts` with the spawn behaviour unchanged;
+ * Split out of this app's own `orchestrator-process.ts` with the spawn behaviour unchanged;
  * only the plumbing around it (request correlation, event relay) moved out.
  */
 import { app } from 'electron';

@@ -1,7 +1,7 @@
 /**
  * A restart used to buy the same critique twice.
  *
- * The measured case (2026-08-23, SOJAN-465): round 1 finished at 07:41 and wrote its file;
+ * The measured case (2026-08-23, on a real issue): round 1 finished at 07:41 and wrote its file;
  * the very next dispatch hit the daily token limit; the core was restarted to RAISE that
  * limit; recovery re-ran round 1 from scratch for 1,966,042 input tokens and $2.49, plus
  * eight minutes of someone waiting. The finished file was deleted on the way in.
