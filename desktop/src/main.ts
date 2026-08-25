@@ -415,7 +415,7 @@ function importCodexAuth(): { ok: boolean; b64?: string; error?: string } {
 }
 
 /**
- * Version gate (§update). Blocks a too-old app (forced) or nudges an out-of-date one
+ * Version gate. Blocks a too-old app (forced) or nudges an out-of-date one
  * (recommended), based on the remote manifest. Returns false only when the app must NOT
  * continue (forced → we open the download page and quit). Fail-open: offline / fetch error
  * → proceed, so a network blip never bricks the app.

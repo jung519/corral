@@ -1,10 +1,10 @@
 # Corral Design System
 
-Single source of truth for Corral's visual language, shared across the **PC application**
-(desktop orchestrator) and the **mobile app** (control + sync companion).
+Single source of truth for Corral's visual language. There is one surface today — the
+desktop app — and `renderer/src/app.css` is where these tokens actually live.
 
-> Principle: **one accent, two surfaces.** The coral accent, type scale, iconography, and
-> status semantics are identical on every platform. Only layout density and navigation differ.
+> Principle: **coral is a spark, not a flood.** The accent carries brand and interaction;
+> everything structural is slate.
 
 ---
 
@@ -127,32 +127,9 @@ because nothing consumes them. Use tokens, never raw hex.
 
 ---
 
-## 7. Platform guidance
+## 7. The desktop app
 
-**Shared (identical on both):** color tokens, type scale, iconography, status semantics, radius, the
-coral accent and its ≤10% rule.
-
-### PC application — desktop orchestrator
-- Information-dense. Dark theme default.
+- Information-dense. One dark theme.
 - Layout: action panel + run timeline + progress indicators + collapsible logs (multi-column).
-- Current template-based UI is acceptable until user count grows; tokens above still apply so the
-  later redesign is a re-skin, not a rebuild.
-
-### Mobile app — control + sync companion
-- Focused, not dense. Single column, bottom nav.
-- Core jobs: monitor runs, act on approval gates, view sync status. No full orchestration authoring.
-- Needs full wireframes + component library in Figma before build (see §8).
-
----
-
-## 8. Figma structure (file: Corral)
-
-Build foundations first, then components, then screens (mind starter-tier rate limits).
-
-1. **Color styles:** `accent/50…700`, `ink/50…900`, `semantic/info|success|warning|danger`.
-2. **Variables (modes: Light / Dark):** `bg`, `surface`, `text`, `text-muted`, `border`, `accent`.
-3. **Text styles:** display, h1, h2, h3, body, small, caption, mono.
-4. **Components:** Button (variants), Input, Card, Badge/StatusPill, ApprovalBanner, NavItem.
-5. **Screens:** PC dashboard frames, then mobile app flows (monitor → approve → sync).
-
-Keep Figma style/variable names matching the token names in §2–§4 so design and code stay in sync.
+- The current UI is template-based and that is acceptable for now; the tokens above are what
+  make a later redesign a re-skin rather than a rebuild.

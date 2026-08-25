@@ -74,7 +74,7 @@ export interface IssueRuntime {
    * The critique phase is shared — there is one `plan_reviewing`, not three — so this is
    * what says *which* document is being vetted when a restart lands mid-stage. Absent means
    * the single-plan flow, which is also how state files written before spec mode existed
-   * read: no field, no split (plan doc §10).
+   * read: no field, no split.
    */
   specStage?: 'requirements' | 'design' | 'tasks';
   /**

@@ -26,7 +26,7 @@ export const SCRATCH = {
   reviewStatus: `${SCRATCH_DIR}/review_status.json`,
   /** Agent's answer to a read-only Q&A question (structured markdown, preserved verbatim). */
   qaAnswer: `${SCRATCH_DIR}/qa_answer.md`,
-  /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}` (§15). */
+  /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}`. */
   directionCheck: `${SCRATCH_DIR}/direction_check.json`,
   /** Agent's question to the human (when it can't proceed). */
   question: `${SCRATCH_DIR}/question.md`,

@@ -72,7 +72,7 @@ export function turnPrompt(message: string): string {
 }
 
 /**
- * Safety check for a user-written "Direction" text (§15). The agent judges ONLY the text
+ * Safety check for a user-written "Direction" text. The agent judges ONLY the text
  * — not any code — and writes a strict JSON verdict. REJECT covers illicit/abusive intent
  * and things an AI coding agent cannot actually do; APPROVE covers legitimate direction.
  */
