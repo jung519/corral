@@ -51,6 +51,19 @@ export interface SendOptions {
   signal?: AbortSignal;
   /** Invoked with each text fragment as it streams in, for the live timeline. */
   onText?: (delta: string) => void;
+  /**
+   * Cap on the tokens the model may produce, when the caller has one.
+   *
+   * A pipeline can declare `agent.max_tokens` and the value never left the schema, so it
+   * was accepted, validated, and ignored (CRL-93). The limit is a measured number, not a
+   * preference: too low and the JSON is cut mid-answer and the whole paid turn is thrown
+   * away by the shape check; too high and reasoning tokens spend the budget they are
+   * allowed. It also differs per model — Gemini counts its thinking against the same
+   * allowance — so one constant cannot serve every pipeline.
+   *
+   * Absent means "say nothing", which is what each provider saw before this existed.
+   */
+  maxOutputTokens?: number;
 }
 
 /** A provider's HTTP chat client — translates the neutral conversation/tool model to and

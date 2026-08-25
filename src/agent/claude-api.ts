@@ -87,7 +87,9 @@ export class AnthropicChatClient implements ChatClient {
       headers: { 'content-type': 'application/json', 'x-api-key': this.apiKey ?? '', 'anthropic-version': VERSION },
       body: JSON.stringify({
         model: resolveModel(model),
-        max_tokens: MAX_TOKENS,
+        // Anthropic requires the field, so the constant becomes the fallback rather than
+        // the answer — a pipeline that declared a limit now gets it (CRL-93).
+        max_tokens: opts?.maxOutputTokens ?? MAX_TOKENS,
         stream: true,
         // Cache the (large, stable) system prompt so repeated turns only pay to read it once.
         system: system ? [{ type: 'text', text: system, cache_control: { type: 'ephemeral' } }] : undefined,

@@ -63,6 +63,9 @@ export class OpenAiChatClient implements ChatClient {
         messages: toOpenAiMessages(messages),
         tools: toOpenAiTools(tools),
         tool_choice: 'auto',
+        // `max_completion_tokens`, not the deprecated `max_tokens`: the reasoning models
+        // this defaults to reject the old name. Sent only when the caller has a limit.
+        ...(opts?.maxOutputTokens ? { max_completion_tokens: opts.maxOutputTokens } : {}),
         stream: true,
         stream_options: { include_usage: true },
       }),

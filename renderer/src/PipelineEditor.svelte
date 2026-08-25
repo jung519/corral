@@ -325,7 +325,8 @@
   let agents = $state<Array<{ provider: string; models: string[]; defaultModel?: string }>>([]);
   let provider = $state('');
   let model = $state('');
-  let maxTokens = $state(4096);
+  /** '' = not set, so nothing is written and the provider's own behaviour applies. */
+  let maxTokens = $state<number | ''>('');
 
   const chosenAgent = $derived(agents.find((a) => a.provider === provider));
   /** Models the config named for the chosen provider. */
@@ -616,7 +617,9 @@
     const agent = obj(d.agent);
     provider = String(agent.provider ?? '');
     model = String(agent.model ?? '');
-    maxTokens = Number(agent.max_tokens ?? 4096);
+    // Empty means "leave it to the provider" — the same thing an absent key means. A
+    // number here would be written back and would narrow a pipeline nobody meant to change.
+    maxTokens = agent.max_tokens === undefined ? '' : Number(agent.max_tokens);
     const prompt = obj(agent.prompt);
     systemPrompt = String(prompt.system ?? '');
     userTemplate = String(prompt.user_template ?? '');
@@ -806,7 +809,7 @@
         context: Object.keys(context).length ? context : undefined,
         provider: provider || undefined,
         model: model.trim() || undefined,
-        max_tokens: maxTokens,
+        max_tokens: String(maxTokens).trim() ? Number(maxTokens) : undefined,
         prompt: { system: systemPrompt, user_template: userTemplate },
         schema,
         validate,
@@ -1168,7 +1171,9 @@
             </select>
           </label>
         </div>
-        <label class="field narrow"><span>max_tokens</span><input type="number" bind:value={maxTokens} /></label>
+        <label class="field narrow"
+          ><span>max_tokens</span><input type="number" bind:value={maxTokens} placeholder={t('editor.maxTokensAuto')} /></label
+        >
 
         <!-- Above the prompt, because that is the order you write it in: name the list,
              then write the sentence that uses it. -->
