@@ -96,6 +96,11 @@ export class GeminiChatClient implements ChatClient {
       headers: { 'content-type': 'application/json', 'x-goog-api-key': this.apiKey ?? '' },
       body: JSON.stringify({
         ...(system ? { systemInstruction: { parts: [{ text: system }] } } : {}),
+        // Only when asked. Gemini's own default applied before, and sending a number the
+        // caller did not choose would narrow every existing pipeline (CRL-93). This is the
+        // provider whose thinking tokens share the allowance, so it is the one where a
+        // too-small value cuts the answer in half.
+        ...(opts?.maxOutputTokens ? { generationConfig: { maxOutputTokens: opts.maxOutputTokens } } : {}),
         contents,
         tools: [{ functionDeclarations: tools.map((t) => ({ name: t.name, description: t.description, parameters: toGeminiSchema(t.parameters) })) }],
       }),
