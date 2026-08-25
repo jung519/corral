@@ -18,7 +18,9 @@
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
-import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, type SpecStage } from './agent/prompt-builder.js';
+import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, taskPrompt, type SpecStage } from './agent/prompt-builder.js';
+import { parseSpecTasks } from './core/spec-tasks.js';
+import { nextTaskStep, type TaskLoopState } from './core/task-loop.js';
 import { TimingAgent } from './agent/timing-agent.js';
 import { unrunnableProvider } from './agent/backend-compat.js';
 import type { Config } from './config/schema.js';
@@ -1308,10 +1310,80 @@ export class Orchestrator {
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'implementing', label: `🛠 Implementing${sel}` });
     await this.tracker.transitionIssue(issue, 'in_progress');
 
+    if (this.config.spec_mode === 'split' && (await this.runTaskLoop(rt, issue))) return;
+
     // Reads the approved pending_plan.md (WORKFLOW.md branch C) — produces no card file.
     const impl = await this.dispatch(rt, issue, this.planApprovalPrompt(detail), true, 'implementation');
     if (!impl.ok) return;
     await this.reviewAfterImplement(rt, issue);
+  }
+
+  /**
+   * Work `tasks.md` one task per turn, resuming wherever the file says the work stopped.
+   *
+   * Returns false when there is no readable task list, so the caller falls back to the
+   * single implementation dispatch — the plan doc's mitigation for the parser breaking on
+   * a format drift (§13). Every other outcome is handled here.
+   *
+   * The file is re-read every round rather than tracked in memory. That is the whole
+   * mechanism behind "restart resumes from the remaining tasks": there is no state to
+   * lose, so a restart that lands mid-list simply reads the ticks that are already there.
+   */
+  private async runTaskLoop(rt: IssueRuntime, issue: Issue): Promise<boolean> {
+    const log = logger.child(rt.identifier);
+    const handle = this.handles.get(rt.identifier)!;
+    const state: TaskLoopState = { rounds: 0 };
+    let announced = new Set<string>();
+
+    for (;;) {
+      const tasks = parseSpecTasks(await this.workspace.io.readFile(handle, SPEC.tasks));
+      // Said once each, not per round — the same warning every turn would bury the events
+      // that matter. Surfaced at all because a progress bar over a partly-unreadable file
+      // is the misreading CRL-105 exists to prevent.
+      for (const w of tasks?.warnings ?? []) {
+        if (announced.has(w)) continue;
+        announced.add(w);
+        bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `⚠️ tasks.md — ${w}` });
+      }
+
+      const step = nextTaskStep(tasks, state, this.config.max_task_rounds);
+      switch (step.kind) {
+        case 'downgrade':
+          log.warn(`task loop unavailable (${step.reason}) — falling back to a single implementation turn`);
+          bus.emitEvent({
+            identifier: rt.identifier,
+            kind: 'notice',
+            label: `↩︎ No task list to work from (${step.reason}) — implementing in one turn`,
+          });
+          return false;
+
+        case 'halt':
+          await this.surfaceStuck(rt, `Task loop stopped: ${step.reason}`, true);
+          return true;
+
+        case 'done':
+          bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `✅ All ${tasks!.total} task(s) complete` });
+          await this.reviewAfterImplement(rt, issue);
+          return true;
+
+        case 'run': {
+          const task = tasks!.next!;
+          bus.emitEvent({
+            identifier: rt.identifier,
+            kind: 'phase',
+            phase: 'implementing',
+            label: `🛠 ${task.id} (${step.position}/${step.total}) — ${task.title.slice(0, 60)}`,
+          });
+          // Declares nothing: every later task reads the same three spec documents, and a
+          // turn that cleared them would take the next task's input with it (CRL-88).
+          const run = await this.dispatch(rt, issue, taskPrompt(task, step.position, step.total), true, 'implementation');
+          if (!run.ok) return true; // dispatch already surfaced why; the ticks so far survive
+          state.lastTaskId = task.id;
+          state.rounds += 1;
+          break;
+        }
+      }
+    }
   }
 
   /** Resume an implement / review-fix run that a restart interrupted (continue the session). */
@@ -1321,6 +1393,10 @@ export class Orchestrator {
     this.store.upsert(rt);
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'implementing', label: '🛠 Resuming implementation (interrupted run)' });
     await this.tracker.transitionIssue(issue, 'in_progress').catch(() => {});
+
+    // In spec mode the task file already says where the work stopped, so the resume is just
+    // the loop again — no prompt about "continuing" and no memory of what came before.
+    if (this.config.spec_mode === 'split' && (await this.runTaskLoop(rt, issue))) return;
 
     // A plain resume left the agent re-deriving what it had already done — six minutes of
     // it, in the measured run. If the last check saw edits with no commit, say so up front

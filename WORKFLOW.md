@@ -238,8 +238,11 @@ First read what was approved and implement exactly that — a different agent wr
 on the file, not memory of the planning chat.
 
 - **Spec mode**: `.corral/spec/requirements.md`, `.corral/spec/design.md` and
-  `.corral/spec/tasks.md`. Work the tasks in order and tick each `- [ ]` to `- [x]` as you
-  commit it, so an interrupted run can be picked up from where it stopped.
+  `.corral/spec/tasks.md`. **The prompt names one task — do that one and stop.** Implement
+  it, commit it, and in the same commit tick its line in `tasks.md` from `- [ ]` to `- [x]`.
+  Leave every other line exactly as it is; a separate turn owns each of them, and the file
+  is how the orchestrator knows where the work stopped. Do not tick a task you did not
+  finish: the tick is the claim that the code is committed.
 - Otherwise: `.corral/pending_plan.md`.
 {% if reference_path %}Before writing any code, (re)check the skills/conventions repo at
 `{{ reference_path }}` and follow its rules as you implement.
