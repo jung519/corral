@@ -22,6 +22,10 @@ export type AgentTransportId = 'api' | 'cli';
 /** Per-stage model mapping, provider-neutral (e.g. planning→opus, implementation→sonnet). */
 export type StageModels = Partial<Record<AgentStage, string>>;
 
+/** How hard the model thinks before acting, per stage. claude's own scale (CRL-131). */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type StageEfforts = Partial<Record<AgentStage, Effort>>;
+
 export type AgentErrorKind = 'timeout' | 'auth' | 'login_required' | 'crashed' | 'budget' | 'rate_limit';
 
 /**
@@ -54,6 +58,15 @@ export interface AgentTurnSpec {
   workflow: string;
   /** Resolved model id for this stage, if any. */
   model?: string;
+  /**
+   * Reasoning effort for this turn, if the deployment set one for this stage.
+   *
+   * Measured: thinking was 55.6% of one issue's planning wall time, and `low` removed the
+   * thinking blocks entirely while leaving the number of tool calls unchanged — it changes
+   * how deeply the model deliberates, not how much it looks at. Absent means the transport's
+   * own default, which is every run today (CRL-131).
+   */
+  effort?: Effort;
   /** Keep session memory across turns (provider's "continue" semantics). */
   continueSession: boolean;
   maxTurns?: number;
