@@ -52,6 +52,18 @@ export interface TunnelConfig {
   localPort: number;
   /** Optional identity file, when the user's default key isn't the right one. */
   identityFile?: string;
+  /**
+   * Extra hop for a host that is not reachable directly — a bastion, or a cloud's own
+   * tunnel. Passed to ssh as `-o ProxyCommand=…`.
+   *
+   * Without this the app could only reach hosts a plain `ssh user@host` reaches, so a
+   * server whose firewall admits only a jump path had to be described in the user's
+   * `~/.ssh/config` instead. That put the setting outside the app — a UI product sending
+   * people to a terminal (CRL-120). No cloud is named here: the value is whatever command
+   * the operator writes, which is also what makes it work for a bastion or a corporate
+   * jump box.
+   */
+  proxyCommand?: string;
 }
 
 /**
@@ -63,7 +75,7 @@ export type TunnelState = 'off' | 'starting' | 'up' | 'failed';
 export interface TunnelStatus {
   state: TunnelState;
   /** Machine-readable cause, for the UI to translate. Set when `state === 'failed'`. */
-  code?: 'ssh-not-found' | 'auth-failed' | 'forward-failed' | 'exited' | 'timeout';
+  code?: 'ssh-not-found' | 'auth-failed' | 'host-key' | 'forward-failed' | 'exited' | 'timeout';
   /** Raw tail of ssh's stderr. Shown as detail, never the only thing shown. */
   detail?: string;
   /** True when retrying cannot help and the operator has to act. */
@@ -91,6 +103,9 @@ export function tunnelArgs(cfg: TunnelConfig): string[] {
     `${cfg.localPort}:127.0.0.1:${cfg.remotePort}`,
   ];
   if (cfg.identityFile) args.push('-i', cfg.identityFile, '-o', 'IdentitiesOnly=yes');
+  // One argv element, unquoted: `spawn` does not go through a shell, so quoting here would
+  // become part of the command ssh runs.
+  if (cfg.proxyCommand?.trim()) args.push('-o', `ProxyCommand=${cfg.proxyCommand.trim()}`);
   args.push(cfg.target);
   return args;
 }
@@ -109,6 +124,13 @@ export function classifyStderr(text: string): { code: TunnelStatus['code']; fata
   }
   if (t.includes('cannot listen to port') || t.includes('address already in use')) {
     return { code: 'forward-failed', fatal: true };
+  }
+  // ssh will not talk to a host it has no key for, and `BatchMode` turns the usual prompt
+  // into this. Retrying cannot change it — someone has to decide the host is the right one.
+  // Accepting keys on the operator's behalf is not this app's call, so it says so and stops
+  // (measured: a jump command reached the server and looped here until it was classified).
+  if (t.includes('host key verification failed') || t.includes('remote host identification has changed')) {
+    return { code: 'host-key', fatal: true };
   }
   return { code: 'exited', fatal: false };
 }

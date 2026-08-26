@@ -76,6 +76,36 @@ describe('tunnelArgs', () => {
   it('maps differing ports', () => {
     expect(tunnelArgs({ ...cfg, localPort: 5555, remotePort: 4410 })).toContain('5555:127.0.0.1:4410');
   });
+
+  it('carries a jump command when the host needs one', () => {
+    // A server behind a bastion, or a cloud that admits only its own tunnel. Before this
+    // the only place to say so was the user's own ssh config — outside the app (CRL-120).
+    const args = tunnelArgs({ ...cfg, proxyCommand: 'ssh -W %h:%p bastion.example.com' });
+    expect(args).toContain('ProxyCommand=ssh -W %h:%p bastion.example.com');
+  });
+
+  it('passes it as one argv element, unquoted', () => {
+    // `spawn` does not go through a shell, so quotes here would become part of the command
+    // ssh runs. A value with spaces must survive as a single element.
+    const args = tunnelArgs({ ...cfg, proxyCommand: 'gcloud compute start-iap-tunnel box %p --listen-on-stdin' });
+    const found = args.filter((a) => a.startsWith('ProxyCommand='));
+    expect(found).toHaveLength(1);
+    expect(found[0]).toBe('ProxyCommand=gcloud compute start-iap-tunnel box %p --listen-on-stdin');
+    expect(args.join(' ')).not.toContain('"');
+  });
+
+  it('leaves the option out when there is no jump', () => {
+    expect(tunnelArgs(cfg).join(' ')).not.toContain('ProxyCommand');
+  });
+
+  it('ignores a blank jump command', () => {
+    expect(tunnelArgs({ ...cfg, proxyCommand: '   ' }).join(' ')).not.toContain('ProxyCommand');
+  });
+
+  it('still puts the destination last', () => {
+    // ssh takes the destination positionally; an option appended after it is not read.
+    expect(tunnelArgs({ ...cfg, proxyCommand: 'ssh -W %h:%p b' }).at(-1)).toBe('me@box');
+  });
 });
 
 describe('classifyStderr', () => {
@@ -89,6 +119,19 @@ describe('classifyStderr', () => {
   it('treats a busy local port as fatal', () => {
     expect(classifyStderr('bind: Address already in use\ncannot listen to port: 4410')).toEqual({
       code: 'forward-failed',
+      fatal: true,
+    });
+  });
+
+  it('treats an unknown host key as fatal — retrying cannot decide trust', () => {
+    // Measured: a jump command reached the server and ssh stopped here, then the tunnel
+    // retried forever because this was classified as transient (CRL-120).
+    expect(classifyStderr('Host key verification failed.')).toEqual({ code: 'host-key', fatal: true });
+  });
+
+  it('treats a changed host key the same way', () => {
+    expect(classifyStderr('@@@ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! @@@')).toEqual({
+      code: 'host-key',
       fatal: true,
     });
   });
