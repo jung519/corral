@@ -256,7 +256,15 @@ export const WorkspaceSchema = z
         mount_host_login: z.boolean().default(true),
         memory: z.string().optional(),
         cpus: z.string().optional(),
-        /** Extra env injected into the worker container. */
+        /**
+         * Extra env injected into the worker container.
+         *
+         * **Not for secrets.** These are set when the container is created, and docker keeps
+         * them in the container's own configuration — `docker inspect` reads them back for as
+         * long as the container lives, no matter how they were passed in. There is no way to
+         * hide them, so agent credentials go a different route entirely (`CliSpawnSpec.secretEnv`,
+         * CRL-125). Put build configuration here, not keys.
+         */
         env: z.record(z.string()).optional(),
       })
       .optional(),

@@ -80,6 +80,10 @@ workspace:
   #   auto_build: true            # analyze repos → generate Dockerfile → build (default)
   #   mount_host_login: true      # mount ~/.claude into the container (no API key needed).
   #                               # set false to authenticate with an agent API key instead.
+  #   env:                        # extra env for the worker container — NOT for secrets.
+  #     CI: "true"                 # docker keeps these in the container's own config, so
+  #                               # `docker inspect` reads them back for as long as the
+  #                               # container lives. Agent credentials never go here.
 
 # Daily ceiling, SHARED by the development and operational AI (first come, first served —
 # when the day's budget is gone, both stop). The token counts are the figure of record:

@@ -11,7 +11,7 @@
  */
 import { logger } from '../core/logger.js';
 import { containerName, WORKER_USER } from '../workspace/docker-io.js';
-import { type CliSpawnSpec, runCliTurn, shq } from './cli-runner.js';
+import { type CliSpawnSpec, runCliTurn, SECRET_ENV_PATH, shq } from './cli-runner.js';
 import { GeminiStreamParser } from './gemini-stream.js';
 import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from './types.js';
 
@@ -49,18 +49,22 @@ export class GeminiCliTransport implements AgentTransport {
       // Prompt is the positional query (the -p flag is deprecated upstream).
       return { command: 'gemini', args: [...flags, spec.prompt], cwd: spec.handle.workdir, env: this.localEnv() };
     }
-    // docker: run inside the container as the worker user; inject the key via -e.
+    // docker: run inside the container as the worker user.
     const geminiCmd = ['gemini', ...flags.map(shq), shq(spec.prompt)].join(' ');
-    const envArgs = this.apiKey ? ['-e', `GEMINI_API_KEY=${this.apiKey}`] : [];
+    // On a file descriptor, not in the arguments: a command line is world-readable and
+    // published the key to every account on the host (CRL-125).
+    const secretEnv = this.apiKey ? { GEMINI_API_KEY: this.apiKey } : undefined;
+    const envArgs = secretEnv ? ['--env-file', SECRET_ENV_PATH] : [];
     return {
       command: 'docker',
       args: ['exec', '--user', WORKER_USER, '-w', spec.handle.workdir, ...envArgs, containerName(spec.handle), 'bash', '-lc', geminiCmd],
+      secretEnv,
       env: this.localEnv(),
     };
   }
 
   /** Env for the local spawn: stripped of inherited Gemini/Google key vars, with the
-   *  user's BYOK key injected. (docker injects via `exec -e` instead.) */
+   *  user's BYOK key injected. (docker passes it on a file descriptor instead.) */
   private localEnv(): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {};
     for (const [k, v] of Object.entries(process.env)) {
