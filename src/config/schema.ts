@@ -362,6 +362,27 @@ export const PlanReviewSchema = z
     rounds: z.number().int().positive().default(1),
     heavy_labels: z.array(z.string()).default([]),
     heavy_rounds: z.number().int().positive().default(2),
+    /**
+     * Per-stage overrides for spec mode. Absent = use the counts above, which is what every
+     * existing config does — omitting this block changes nothing.
+     *
+     * `0` means that stage runs no critique at all, and then its consolidation is skipped
+     * too: the draft goes straight to the approval card. Worth having because the stages are
+     * not alike — `design` and `tasks` read an already-approved document, so they start from
+     * material a human has passed, while `requirements` is written from the issue text alone
+     * and is where a critique earns the most. Measured on one issue, critique + consolidation
+     * across the three stages was 43 of the 72 minutes planning took (CRL-130).
+     *
+     * Turning ALL of them off is a different decision: the critique is the only thing that
+     * checks EARS form and wrong assumptions, which is the reason CRL-100 was closed.
+     */
+    stages: z
+      .object({
+        requirements: z.number().int().nonnegative().optional(),
+        design: z.number().int().nonnegative().optional(),
+        tasks: z.number().int().nonnegative().optional(),
+      })
+      .default({}),
   })
   .default({});
 

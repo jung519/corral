@@ -122,12 +122,24 @@ channel:
 #   auto_pr_when_clean: false
 #   semgrep: { config: ["p/default"], paths: ["."] }   # omit to skip; detected on PATH
 
-# Independent critics vetting the plan before you see it.
+# Independent critics vetting the plan before you see it. A round is a fresh session, and
+# whatever it finds is folded in by a consolidation turn — so one round costs two dispatches.
 # plan_review:
 #   enabled: true
 #   rounds: 1
 #   heavy_labels: []      # labels that get `heavy_rounds` instead
 #   heavy_rounds: 2
+#   # Spec mode only: per-stage overrides. Omit and every stage uses the counts above.
+#   # `0` skips both the critique and its consolidation for that stage — the draft goes
+#   # straight to the approval card.
+#   #
+#   # Worth considering because the stages differ: `design` and `tasks` are written from a
+#   # document you already approved, while `requirements` comes from the issue text alone.
+#   # Do not turn all three off — the critique is the only check on EARS form and on
+#   # assumptions the plan made about your code.
+#   stages:
+#     design: 0
+#     tasks: 0
 
 # `single` = one plan document, approved once (default). `split` = the three spec gates
 # (requirements → design → tasks), each approved on its own. Roughly 2.4x the model calls

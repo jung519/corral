@@ -769,22 +769,25 @@ export class Orchestrator {
       phase: 'plan_reviewing',
       label: focus ? `🔍 Re-vetting plan — ${focus.slice(0, 40)}` : '🔍 Vetting plan',
     });
-    await this.planCritique.run(
-      handle,
-      issue,
-      this.planningModel(),
-      this.referencePath(),
-      (r) => this.cost.add(rt.identifier, r),
+    const critiques = await this.planCritique.run(handle, issue, {
+      model: this.planningModel(),
+      referencePath: this.referencePath(),
+      onRoundCost: (r) => this.cost.add(rt.identifier, r),
       focus,
-      this.buildDirection(),
+      direction: this.buildDirection(),
       resume,
-    );
-    // Preserve the draft — consolidation rewrites pending_plan.md from scratch.
-    await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
-    const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidatePlan, true, 'planning', [
-      SCRATCH.pendingPlan,
-    ]);
-    if (!consolidate.ok) return;
+    });
+    // Nothing to fold in means nothing to consolidate. It used to run anyway — a turn that
+    // asked the model to "fold the critiques in" with no critiques on disk, once per stage
+    // (CRL-130).
+    if (critiques.length > 0) {
+      // Preserve the draft — consolidation rewrites pending_plan.md from scratch.
+      await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
+      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidatePlan, true, 'planning', [
+        SCRATCH.pendingPlan,
+      ]);
+      if (!consolidate.ok) return;
+    }
     await this.afterPlanProduced(rt, issue, 'plan');
   }
 
@@ -843,23 +846,26 @@ export class Orchestrator {
     this.store.upsert(rt);
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'plan_reviewing', label: `🔍 Vetting ${stage}` });
 
-    await this.planCritique.run(
-      handle,
-      issue,
-      this.planningModel(),
-      this.referencePath(),
-      (r) => this.cost.add(rt.identifier, r),
-      undefined,
-      this.buildDirection(),
+    const critiques = await this.planCritique.run(handle, issue, {
+      model: this.planningModel(),
+      referencePath: this.referencePath(),
+      onRoundCost: (r) => this.cost.add(rt.identifier, r),
+      direction: this.buildDirection(),
       resume,
-      doc,
-    );
-    // Same guard the single flow uses: consolidation rewrites the document, so keep a copy
-    // to fall back on if the turn produces nothing.
-    await this.workspace.io.exec(handle, `cp ${doc} ${SCRATCH.planDraft} 2>/dev/null || true`);
-    const consolidate = await this.dispatch(rt, issue, consolidateSpecPrompt(stage), true, 'planning');
-    if (!consolidate.ok) return;
-    await this.workspace.io.exec(handle, `test -s ${doc} || cp ${SCRATCH.planDraft} ${doc} 2>/dev/null || true`);
+      target: doc,
+      // Per stage: `design` and `tasks` read a document a human already approved, so a
+      // deployment can spend its critique where it buys the most. Absent = the configured
+      // count, which is every existing config (CRL-130).
+      rounds: this.config.plan_review.stages[stage],
+    });
+    if (critiques.length > 0) {
+      // Same guard the single flow uses: consolidation rewrites the document, so keep a copy
+      // to fall back on if the turn produces nothing.
+      await this.workspace.io.exec(handle, `cp ${doc} ${SCRATCH.planDraft} 2>/dev/null || true`);
+      const consolidate = await this.dispatch(rt, issue, consolidateSpecPrompt(stage), true, 'planning');
+      if (!consolidate.ok) return;
+      await this.workspace.io.exec(handle, `test -s ${doc} || cp ${SCRATCH.planDraft} ${doc} 2>/dev/null || true`);
+    }
 
     const body = await this.readOutput(handle, doc);
     if (!body) {

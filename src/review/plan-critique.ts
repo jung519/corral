@@ -16,6 +16,38 @@ import { planCritiquePrompt } from './prompt.js';
 
 export type RoundCostFn = (result: AgentRunResult) => void;
 
+/**
+ * How one critique cycle is shaped. An options object rather than nine positionals: the
+ * call sites had reached `run(handle, issue, undefined, undefined, undefined, undefined,
+ * '', true)`, and `rounds` had nowhere to go (CRL-130).
+ */
+export interface PlanCritiqueOptions {
+  model?: string;
+  referencePath?: string;
+  onRoundCost?: RoundCostFn;
+  focus?: string;
+  direction?: string;
+  /**
+   * True when picking up a cycle that a restart interrupted, rather than starting one.
+   *
+   * The distinction is the whole fix for CRL-87. Rounds that already produced a file are
+   * finished work — a restart is not a reason to buy them again. It cost 1.97M input
+   * tokens and $2.49 to re-run a round that had completed eight minutes earlier, and the
+   * restart in question was the one made to RAISE the token limit that had blocked the
+   * next step. Never set this for a human-requested re-vet: that is a new cycle and the
+   * human is entitled to fresh critiques.
+   */
+  resume?: boolean;
+  /** The document to critique — a spec stage's file in split mode (CRL-103). */
+  target?: string;
+  /**
+   * Rounds for this cycle, overriding the configured count. `0` runs none and returns an
+   * empty list, which is how a caller turns the critique off for one spec stage.
+   */
+  rounds?: number;
+}
+
+
 export class PlanCritiqueOrchestrator {
   constructor(
     private readonly io: WorkspaceIO,
@@ -29,31 +61,24 @@ export class PlanCritiqueOrchestrator {
   async run(
     handle: WorkspaceHandle,
     issue: Issue,
-    model: string | undefined,
-    referencePath?: string,
-    onRoundCost?: RoundCostFn,
-    focus?: string,
-    direction = '',
-    /**
-     * True when picking up a cycle that a restart interrupted, rather than starting one.
-     *
-     * The distinction is the whole fix for CRL-87. Rounds that already produced a file are
-     * finished work — a restart is not a reason to buy them again. It cost 1.97M input
-     * tokens and $2.49 to re-run a round that had completed eight minutes earlier, and the
-     * restart in question was the one made to RAISE the token limit that had blocked the
-     * next step. Never set this for a human-requested re-vet: that is a new cycle and the
-     * human is entitled to fresh critiques.
-     */
-    resume = false,
-    /** The document to critique — a spec stage's file in split mode (CRL-103). */
-    target?: string,
+    opts: PlanCritiqueOptions = {},
   ): Promise<string[]> {
     const log = logger.child(issue.identifier);
     if (!this.cfg.enabled) return [];
 
-    const rounds = issue.labels.some((l) => this.cfg.heavy_labels.includes(l)) ? this.cfg.heavy_rounds : this.cfg.rounds;
+    const rounds =
+      opts.rounds ??
+      (issue.labels.some((l) => this.cfg.heavy_labels.includes(l)) ? this.cfg.heavy_rounds : this.cfg.rounds);
+    // Zero is a caller's decision, not a misconfiguration: a spec stage that reads an
+    // already-approved document can skip the critique. Returning early rather than falling
+    // through means no files are wiped and none are written, and the caller sees an empty
+    // list — which is also what tells it to skip consolidation (CRL-130).
+    if (rounds <= 0) {
+      log.info('plan critique skipped (0 rounds for this stage)');
+      return [];
+    }
 
-    if (resume) {
+    if (opts.resume) {
       // The wipe below exists so a shortened run cannot leave a higher-numbered file behind
       // for consolidation to pick up. That risk survives a restart — the config may have
       // changed in between — so drop only what is out of range, never live output. Named
@@ -69,7 +94,7 @@ export class PlanCritiqueOrchestrator {
       await this.io.exec(handle, `rm -f ${SCRATCH_DIR}/plan_critique_*.md`);
     }
 
-    const done = resume ? await this.completedRounds(handle, rounds) : new Set<number>();
+    const done = opts.resume ? await this.completedRounds(handle, rounds) : new Set<number>();
     const todo = Array.from({ length: rounds }, (_, i) => i + 1).filter((r) => !done.has(r));
 
     if (done.size > 0) {
@@ -81,10 +106,10 @@ export class PlanCritiqueOrchestrator {
       log.info(`plan critique complete: ${done.size} file(s) — all rounds already present, nothing re-run`);
       return [...done].sort((a, b) => a - b).map((r) => SCRATCH.planCritique(r));
     }
-    log.info(`plan critique rounds = ${rounds}${done.size ? ` (running ${todo.join(', ')})` : ''}${focus ? ` (focus: ${focus.slice(0, 40)})` : ''}`);
+    log.info(`plan critique rounds = ${rounds}${done.size ? ` (running ${todo.join(', ')})` : ''}${opts.focus ? ` (focus: ${opts.focus.slice(0, 40)})` : ''}`);
 
     const results = await Promise.all(
-      todo.map((r) => this.runRound(handle, issue, r, model, referencePath, onRoundCost, focus, direction, target)),
+      todo.map((r) => this.runRound(handle, issue, r, opts)),
     );
     const files = [...[...done].map((r) => SCRATCH.planCritique(r)), ...results.filter((f): f is string => f !== null)];
     log.info(`plan critique complete: ${files.length} file(s)`);
@@ -117,28 +142,18 @@ export class PlanCritiqueOrchestrator {
     return done;
   }
 
-  private async runRound(
-    handle: WorkspaceHandle,
-    issue: Issue,
-    round: number,
-    model: string | undefined,
-    referencePath?: string,
-    onRoundCost?: RoundCostFn,
-    focus?: string,
-    direction = '',
-    target?: string,
-  ): Promise<string | null> {
+  private async runRound(handle: WorkspaceHandle, issue: Issue, round: number, opts: PlanCritiqueOptions): Promise<string | null> {
     const log = logger.child(issue.identifier);
     try {
       const result = await this.agent.run(handle, issue, {
         stage: 'planning',
         workflow: '',
-        prompt: planCritiquePrompt(issue, round, this.profile, referencePath, focus, direction, target),
+        prompt: planCritiquePrompt(issue, round, this.profile, opts.referencePath, opts.focus, opts.direction ?? '', opts.target),
         continueSession: false,
-        model,
+        model: opts.model,
         turnTimeoutMs: this.turnTimeoutMs,
       });
-      onRoundCost?.(result);
+      opts.onRoundCost?.(result);
       if (!result.ok) {
         log.warn(`plan critique round ${round} failed (${result.error ?? 'unknown'})`);
         return null;
