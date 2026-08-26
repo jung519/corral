@@ -72,7 +72,7 @@ function build(files: Record<string, string>, cfgRounds = 2) {
 describe('a fresh cycle', () => {
   it('clears everything and runs every round', async () => {
     const { orch, execs, rounds } = build({ [SCRATCH.planCritique(1)]: 'old critique' });
-    await orch.run(handle, issue, undefined);
+    await orch.run(handle, issue);
     expect(execs.some((c) => c.includes('plan_critique_*.md'))).toBe(true);
     expect(rounds.sort()).toEqual([1, 2]);
   });
@@ -84,7 +84,7 @@ describe('a fresh cycle', () => {
       [SCRATCH.planCritique(1)]: 'critique',
       [SCRATCH.planCritique(2)]: 'critique',
     });
-    await orch.run(handle, issue, undefined, undefined, undefined, 'check the migration');
+    await orch.run(handle, issue, { focus: 'check the migration' });
     expect(rounds.sort()).toEqual([1, 2]);
   });
 });
@@ -96,7 +96,7 @@ describe('resuming an interrupted cycle', () => {
       [SCRATCH.planCritique(1)]: 'critique',
       [SCRATCH.planCritique(2)]: 'critique',
     });
-    const files = await orch.run(handle, issue, undefined, undefined, undefined, undefined, '', true);
+    const files = await orch.run(handle, issue, { resume: true });
     expect(rounds).toEqual([]);
     expect(files).toEqual([SCRATCH.planCritique(1), SCRATCH.planCritique(2)]);
   });
@@ -104,7 +104,7 @@ describe('resuming an interrupted cycle', () => {
   it('runs only the rounds that are missing', async () => {
     // Rounds go out via Promise.all, so a partial result is the normal interrupted state.
     const { orch, rounds } = build({ [SCRATCH.planCritique(1)]: 'critique' });
-    await orch.run(handle, issue, undefined, undefined, undefined, undefined, '', true);
+    await orch.run(handle, issue, { resume: true });
     expect(rounds).toEqual([2]);
   });
 
@@ -115,7 +115,7 @@ describe('resuming an interrupted cycle', () => {
       [SCRATCH.planCritique(1)]: '   \n',
       [SCRATCH.planCritique(2)]: 'critique',
     });
-    await orch.run(handle, issue, undefined, undefined, undefined, undefined, '', true);
+    await orch.run(handle, issue, { resume: true });
     expect(rounds).toEqual([1]);
   });
 
@@ -130,7 +130,7 @@ describe('resuming an interrupted cycle', () => {
       },
       2,
     );
-    await orch.run(handle, issue, undefined, undefined, undefined, undefined, '', true);
+    await orch.run(handle, issue, { resume: true });
     expect(rounds).toEqual([]);
     expect(files[SCRATCH.planCritique(3)]).toBeUndefined();
     expect(files[SCRATCH.planCritique(1)]).toBe('critique');
@@ -138,7 +138,7 @@ describe('resuming an interrupted cycle', () => {
 
   it('runs everything when the restart left nothing behind', async () => {
     const { orch, rounds } = build({});
-    await orch.run(handle, issue, undefined, undefined, undefined, undefined, '', true);
+    await orch.run(handle, issue, { resume: true });
     expect(rounds.sort()).toEqual([1, 2]);
   });
 });
