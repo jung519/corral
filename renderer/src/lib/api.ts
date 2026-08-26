@@ -47,9 +47,12 @@ export async function getState(): Promise<StateResponse> {
   return call<StateResponse>('state');
 }
 
-/** The approved spec documents, rendered by the core (it owns the markdown parser). */
-export async function getSpecDocs(id: string): Promise<SpecDoc[]> {
-  return (await call<{ docs: SpecDoc[] }>('specDocs', { id })).docs;
+/** The spec documents an issue has so far, rendered by the core (it owns the markdown
+ *  parser). Sent as `identifier`, which is the name the core reads — `id` means an
+ *  approval or history id over there, and sending it here answered "no documents" for
+ *  every issue (CRL-127). */
+export async function getSpecDocs(identifier: string): Promise<SpecDoc[]> {
+  return (await call<{ docs: SpecDoc[] }>('specDocs', { identifier })).docs;
 }
 
 export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
