@@ -294,11 +294,15 @@ criteria.
 **Consolidating cuts as well as adds.** A critique hunts for what is missing, so folding one
 in only ever grows the document unless this turn also removes: merge criteria that state the
 same rule, delete a requirement another one already covers, and drop anything the reader does
-not need to decide. Come out no longer than you went in.
+not need to decide. **Pay for what you add** — a real BLOCKER will grow a section, so name
+what came out to make room for it. Ending up meaningfully longer than you started means the
+cutting half did not happen.
 
-**The record of what changed goes in `.corral/critique_response.md`, not in the document.**
-One line per critique point and what you did about it. The vetted document is what the next
-stage reads and the human approves; a log of how it was written is neither. **Keep every `REQ-n` label attached to the same requirement** —
+**Write the record of what each critique point changed to `.corral/critique_response.md`** —
+one line per point, what you did, and why if you disagreed. **Do not put it in the document
+and do not leave it only in your reply**: the reply is not saved anywhere, and the vetted
+document is what the next stage re-reads in full and the human approves. A log of how it was
+written is neither of those. **Keep every `REQ-n` label attached to the same requirement** —
 renumbering breaks the references in the rest of the plan. A requirement dropped in
 consolidation loses its ID; a new one takes the next unused number. Do not modify code.{% if direction %} Keep the final plan aligned
 with the **Direction** above where the issue is neutral (it is guiding, not a rule).{% endif %}

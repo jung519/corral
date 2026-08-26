@@ -92,11 +92,22 @@ describe('consolidation', () => {
   it('is told to cut, not only to fold in', async () => {
     // A critique hunts for what is missing, so folding one in can only grow the document.
     expect(await render()).toMatch(/\*\*Consolidating cuts as well as adds\.\*\*/);
-    expect(await render()).toMatch(/Come out no longer than you went in/);
   });
 
-  it('puts the record of what changed beside the document, not inside it', async () => {
-    expect(await render()).toContain('.corral/critique_response.md');
+  it('does not forbid growth outright — a real BLOCKER earns room', async () => {
+    // Measured: "come out no longer than you went in" was ignored, and rightly — four
+    // blockers landed and the document grew 40%. The rule that survives is that growth is
+    // paid for, not that it never happens.
+    expect(await render()).toMatch(/\*\*Pay for what you add\*\*/);
+    expect(await render()).toMatch(/name\s+what came out to make room for it/);
+  });
+
+  it('asks for the record as a file, in the imperative the other outputs use', async () => {
+    // Measured: a descriptive "the record goes in X" produced no file at all — the agent
+    // reported the same content in its reply, which is not saved anywhere.
+    const out = await render();
+    expect(out).toMatch(/\*\*Write the record of what each critique point changed to `\.corral\/critique_response\.md`\*\*/);
+    expect(out).toMatch(/do not leave it only in your reply/);
   });
 });
 
