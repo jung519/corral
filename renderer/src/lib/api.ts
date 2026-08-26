@@ -57,9 +57,20 @@ export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
   return data.records ?? [];
 }
 
-/** One page of candidates (ID-ascending). `nextCursor` absent = last page. */
-export async function getCandidates(cursor?: string): Promise<{ candidates: Candidate[]; nextCursor?: string }> {
-  return call<{ candidates: Candidate[]; nextCursor?: string }>('candidates', cursor ? { cursor } : undefined);
+/** One page of candidates (ID-ascending). `nextCursor` absent = last page. `search`
+ *  matches a title substring, or an issue id when the term is one — the tracker does the
+ *  filtering, so it covers every candidate and not just the pages already fetched. */
+export async function getCandidates(
+  cursor?: string,
+  search?: string,
+): Promise<{ candidates: Candidate[]; nextCursor?: string }> {
+  const args: Record<string, unknown> = {};
+  if (cursor) args.cursor = cursor;
+  if (search) args.search = search;
+  return call<{ candidates: Candidate[]; nextCursor?: string }>(
+    'candidates',
+    Object.keys(args).length > 0 ? args : undefined,
+  );
 }
 
 export const startIssue = (identifier: string): Promise<CommandResult> => call('start', { identifier });

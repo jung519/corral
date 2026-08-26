@@ -319,12 +319,18 @@ export class Orchestrator {
 
   // ──────────────────────────────────────── commands (on-demand, no polling)
 
-  /** Candidate issues from the tracker that are not already in flight. */
-  async listCandidates(opts?: { cursor?: string; limit?: number }): Promise<{
+  /** Candidate issues from the tracker that are not already in flight. `search` is the
+   *  picker's search box — filtered by the tracker, not here, because a page is 10 of
+   *  however many the board holds (CRL-124). */
+  async listCandidates(opts?: { cursor?: string; limit?: number; search?: string }): Promise<{
     candidates: Array<{ identifier: string; title: string; state: string; repoKey?: string; url?: string; inFlight: boolean }>;
     nextCursor?: string;
   }> {
-    const { items, nextCursor } = await this.tracker.fetchCandidatePage({ cursor: opts?.cursor, limit: opts?.limit ?? 10 });
+    const { items, nextCursor } = await this.tracker.fetchCandidatePage({
+      cursor: opts?.cursor,
+      limit: opts?.limit ?? 10,
+      search: opts?.search,
+    });
     const candidates = items.map((i) => ({
       identifier: i.identifier,
       title: i.title,

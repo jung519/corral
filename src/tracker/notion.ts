@@ -13,7 +13,7 @@
  */
 import { z } from 'zod';
 import type { TrackerConfig } from '../config/schema.js';
-import { fetchJson, fetchRetry } from '../core/fetch-retry.js';
+import { HttpError, fetchJson, fetchRetry } from '../core/fetch-retry.js';
 import { logger } from '../core/logger.js';
 import type {
   Attachment,
@@ -109,6 +109,9 @@ export class NotionTracker implements TrackerAdapter {
   /** Kanban property type — Notion 'status' and 'select' need different filter/read/
    * write syntax. Detected once from the DB schema (cached). */
   private statusKind: 'status' | 'select' | null = null;
+  /** The database's title property name, and which filter key it accepts (CRL-124). */
+  private titleProp: string | null = null;
+  private titleFilterKey: 'title' | 'rich_text' | null = null;
 
   constructor(
     private readonly cfg: NotionConfig,
@@ -158,6 +161,26 @@ export class NotionTracker implements TrackerAdapter {
     return prop.type;
   }
 
+  /**
+   * The database's title property **name**.
+   *
+   * `titleOf` gets away with scanning a page's properties for the one typed `title`, but
+   * a query filter addresses a property by name, so the picker's search has to know it.
+   * Cached like `statusKind` — the schema does not change under us mid-run.
+   */
+  private async resolveTitleProp(): Promise<string> {
+    if (this.titleProp) return this.titleProp;
+    const json = await fetchJson<unknown>(
+      `${API}/databases/${this.cfg.database_id}`,
+      { headers: this.headers },
+      { label: 'notion.database' },
+    );
+    const found = Object.entries(DatabaseSchema.parse(json).properties).find(([, prop]) => prop.type === 'title');
+    if (!found) throw new Error('Notion database has no title property');
+    this.titleProp = found[0];
+    return this.titleProp;
+  }
+
   /** Notion query filter restricting candidates to the configured scope. */
   private scopeFilter(): Record<string, unknown> | null {
     const scope = this.cfg.scope;
@@ -171,27 +194,70 @@ export class NotionTracker implements TrackerAdapter {
     return { or: scope.values.map((v) => ({ property: scope.property, [key]: { [op]: v } })) };
   }
 
-  /** Notion query filter for candidate issues (active status + optional scope). */
-  private async candidateFilter(): Promise<Record<string, unknown>> {
+  /** Notion query filter for candidate issues (active status + optional scope + search). */
+  private async candidateFilter(extra?: Record<string, unknown> | null): Promise<Record<string, unknown>> {
     const statusProp = this.cfg.properties.status;
     const kind = await this.resolveStatusKind();
-    const statusFilter = {
+    const statusFilter: Record<string, unknown> = {
       or: this.activeStateNames().map((name) => ({ property: statusProp, [kind]: { equals: name } })),
     };
-    const scope = this.scopeFilter();
-    return scope ? { and: [statusFilter, scope] } : statusFilter;
+    // Notion nests two levels deep. Each member here is one level of `or` over leaves,
+    // so adding a member keeps the depth rather than growing it.
+    const clauses = [statusFilter, this.scopeFilter(), extra ?? null].filter(
+      (c): c is Record<string, unknown> => c !== null,
+    );
+    return clauses.length === 1 ? clauses[0]! : { and: clauses };
   }
 
-  /** One ID-ascending page for the picker — sorted server-side, body NOT fetched (start
-   *  re-fetches it via fetchIssueByIdentifier). This is what makes the picker fast. */
+  /**
+   * One ID-ascending page for the picker — sorted server-side, body NOT fetched (start
+   * re-fetches it via fetchIssueByIdentifier). This is what makes the picker fast.
+   *
+   * `search` is filtered by the tracker, not by the caller: a page is 10 issues, so
+   * filtering what has already arrived would search a tenth of the board and report
+   * "none" for everything else (CRL-124).
+   *
+   * The title filter key is discovered rather than assumed. Notion documents the
+   * rich-text conditions without ever naming `title`, while its general rule is "a key
+   * matching the property type" — which would be `title`. Betting on one and being wrong
+   * means an empty list forever, so the first search tries `title`, falls back to
+   * `rich_text` on the validation error, and remembers which one this database took.
+   */
   async fetchCandidatePage(opts: { cursor?: string; limit?: number; search?: string } = {}): Promise<CandidatePage> {
     const { cursor, limit = 10 } = opts;
+    const term = (opts.search ?? '').trim();
+    if (!term) return this.queryCandidatePage(await this.candidateFilter(), { cursor, limit });
+
+    const titleProp = await this.resolveTitleProp();
+    const idProp = this.cfg.properties.identifier;
+    const keys: Array<'title' | 'rich_text'> = this.titleFilterKey ? [this.titleFilterKey] : ['title', 'rich_text'];
+    let refused: unknown;
+    for (const key of keys) {
+      const filter = await this.candidateFilter(searchClause(term, titleProp, key, idProp));
+      try {
+        const page = await this.queryCandidatePage(filter, { cursor, limit });
+        this.titleFilterKey = key;
+        return page;
+      } catch (err) {
+        // Only a rejected filter is worth a second shape. Anything else is the caller's.
+        if (!(err instanceof HttpError) || err.status !== 400) throw err;
+        logger.warn(`notion rejected the "${key}" title filter; trying the other shape`);
+        refused = err;
+      }
+    }
+    throw refused;
+  }
+
+  private async queryCandidatePage(
+    filter: Record<string, unknown>,
+    opts: { cursor?: string; limit: number },
+  ): Promise<CandidatePage> {
     const body: Record<string, unknown> = {
-      filter: await this.candidateFilter(),
-      page_size: limit,
+      filter,
+      page_size: opts.limit,
       sorts: [{ property: this.cfg.properties.identifier, direction: 'ascending' }],
     };
-    if (cursor) body.start_cursor = cursor;
+    if (opts.cursor) body.start_cursor = opts.cursor;
     const json = await fetchJson<unknown>(
       `${API}/databases/${this.cfg.database_id}/query`,
       { method: 'POST', headers: this.headers, body: JSON.stringify(body) },
@@ -415,6 +481,46 @@ export class NotionTracker implements TrackerAdapter {
 }
 
 // ───────────────────────────────────────────────────────── pure helpers
+
+/**
+ * The issue id a search term names, or null when it does not name one.
+ *
+ * Notion cannot substring-match an id: `unique_id` takes numeric comparisons only
+ * (`equals`, `greater_than`, …), never `contains`. So an id match is exact, and only for
+ * a term that is an id and nothing else — "545", "CRL-545" (CRL-124).
+ *
+ * The prefix is capped at six letters, which is what separates an id from a phrase that
+ * ends in a number: ids are shown as a short prefix and a number, while "festival 2026"
+ * is a search for festivals. The cap is a heuristic, so it errs toward reading an id —
+ * a false positive only adds the issue carrying that number to the results, where a
+ * false negative means pasting an id you can see on screen and being told there is no
+ * such issue.
+ */
+export function searchIdOf(term: string): number | null {
+  const m = /^([A-Za-z]{1,6}[-_ ]?)?(\d{1,9})$/.exec(term.trim());
+  return m ? Number(m[2]) : null;
+}
+
+/**
+ * The picker's search clause: title substring, plus the exact id when the term is one.
+ *
+ * Pure and exported because this shape *is* the search behavior — a wrong key or a
+ * stray clause shows up as "no results", which reads like a broken search box rather
+ * than a wrong filter. `null` when there is no term, so there is nothing to add.
+ */
+export function searchClause(
+  term: string,
+  titleProp: string,
+  titleKey: 'title' | 'rich_text',
+  idProp: string,
+): Record<string, unknown> | null {
+  const trimmed = term.trim();
+  if (!trimmed) return null;
+  const byTitle = { property: titleProp, [titleKey]: { contains: trimmed } };
+  const id = searchIdOf(trimmed);
+  if (id === null) return byTitle;
+  return { or: [byTitle, { property: idProp, unique_id: { equals: id } }] };
+}
 
 /** Extract plain_text from any rich_text array nested inside a block's type object. */
 export function blockToText(block: Record<string, unknown>): string {
