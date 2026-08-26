@@ -237,7 +237,7 @@ export class NotionTracker implements TrackerAdapter {
       try {
         const page = await this.queryCandidatePage(filter, { cursor, limit });
         this.titleFilterKey = key;
-        return page;
+        return { ...page, searched: true };
       } catch (err) {
         // Only a rejected filter is worth a second shape. Anything else is the caller's.
         if (!(err instanceof HttpError) || err.status !== 400) throw err;

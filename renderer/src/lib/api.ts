@@ -63,11 +63,11 @@ export async function getHistory(outcome?: string): Promise<HistoryRecord[]> {
 export async function getCandidates(
   cursor?: string,
   search?: string,
-): Promise<{ candidates: Candidate[]; nextCursor?: string }> {
+): Promise<{ candidates: Candidate[]; nextCursor?: string; searched?: boolean }> {
   const args: Record<string, unknown> = {};
   if (cursor) args.cursor = cursor;
   if (search) args.search = search;
-  return call<{ candidates: Candidate[]; nextCursor?: string }>(
+  return call<{ candidates: Candidate[]; nextCursor?: string; searched?: boolean }>(
     'candidates',
     Object.keys(args).length > 0 ? args : undefined,
   );

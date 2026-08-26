@@ -23,6 +23,11 @@
    *  applied term, so the two cannot be the same variable. */
   let candQuery = $state('');
   let candSearch = $state('');
+  /** Whether the core said it actually applied the term. A core older than the search
+   *  box drops the parameter and answers with everything, which reads as a box that
+   *  matches anything — so an unconfirmed search is called out rather than shown as a
+   *  result (CRL-124). */
+  let candSearched = $state<boolean | undefined>(undefined);
   let candListEl = $state<HTMLElement | undefined>(undefined);
   let showCandidates = $state(false);
   let online = $state(false);
@@ -59,6 +64,7 @@
     }
     candQuery = '';
     candSearch = '';
+    candSearched = undefined;
     const r = await api.getCandidates();
     candidates = r.candidates;
     candCursor = r.nextCursor;
@@ -73,6 +79,7 @@
       const r = await api.getCandidates(undefined, candSearch || undefined);
       candidates = r.candidates;
       candCursor = r.nextCursor;
+      candSearched = candSearch ? r.searched === true : undefined;
     } finally {
       candLoading = false;
     }
@@ -249,6 +256,9 @@
         <input type="search" bind:value={candQuery} placeholder={t('dash.searchHint')} aria-label={t('dash.searchHint')} />
         <Button onclick={runCandSearch}>{t('dash.search')}</Button>
       </form>
+      {#if candSearch && candSearched === false}
+        <p class="warn">{t('dash.searchIgnored')}</p>
+      {/if}
       {#if candidates.length === 0 && !candLoading}
         <p class="dim">{candSearch ? t('dash.searchNone').replace('{q}', candSearch) : t('dash.none')}</p>
       {/if}
@@ -303,6 +313,12 @@
   .cand-search input {
     flex: 1;
     min-width: 0;
+  }
+  .warn {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.5;
+    color: var(--amber);
   }
   h2 {
     font-size: 14px;

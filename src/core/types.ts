@@ -104,6 +104,13 @@ export interface BotIdentity {
 export interface CandidatePage {
   items: Issue[];
   nextCursor?: string;
+  /** Whether a `search` term was actually applied to this page.
+   *
+   *  A tracker is allowed to ignore `search`, and an older core does not know the
+   *  parameter at all — in both cases the answer is every candidate, which looks like a
+   *  search box that matches anything rather than one that was never consulted. Saying
+   *  so is what lets the caller tell the two apart (CRL-124). */
+  searched?: boolean;
 }
 
 export interface TrackerAdapter {

@@ -325,8 +325,9 @@ export class Orchestrator {
   async listCandidates(opts?: { cursor?: string; limit?: number; search?: string }): Promise<{
     candidates: Array<{ identifier: string; title: string; state: string; repoKey?: string; url?: string; inFlight: boolean }>;
     nextCursor?: string;
+    searched?: boolean;
   }> {
-    const { items, nextCursor } = await this.tracker.fetchCandidatePage({
+    const { items, nextCursor, searched } = await this.tracker.fetchCandidatePage({
       cursor: opts?.cursor,
       limit: opts?.limit ?? 10,
       search: opts?.search,
@@ -339,7 +340,7 @@ export class Orchestrator {
       url: i.url,
       inFlight: this.store.get(i.identifier) !== undefined,
     }));
-    return { candidates, nextCursor };
+    return { candidates, nextCursor, searched };
   }
 
   /** Begin work on an issue. Creates the workspace synchronously so failures surface immediately. */
