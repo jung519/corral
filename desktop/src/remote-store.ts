@@ -60,16 +60,45 @@ export function readRemote(): RemoteSettings {
   };
 }
 
-/** Persist mode/url/label/tunnel. The token is handled separately (keychain). */
-export function writeRemote(settings: {
-  mode: CoreMode;
-  url?: string;
-  label?: string;
-  tunnel?: TunnelConfig;
-}): void {
+/** What `writeRemote` accepts. Absent means "leave it as it is", never "clear it". */
+export type RemotePatch = Partial<Pick<RemoteSettings, 'mode' | 'url' | 'label' | 'tunnel'>>;
+
+/**
+ * Change some of the saved settings, keeping the rest.
+ *
+ * This used to take the whole record and overwrite the file, which made switching mode a
+ * destructive act: the renderer called `setMode('local')` with nothing else, so `url`,
+ * `label` and `tunnel` were written as absent and the remote setup was gone from disk.
+ * Coming back then meant re-entering the server, the ports and the key path — a loss that
+ * was one stray click away, while recovering took several deliberate ones (CRL-119).
+ *
+ * So `undefined` now means "unchanged". Erasing is `clearRemote()`, which has to be asked
+ * for by name.
+ */
+export function writeRemote(patch: RemotePatch): void {
+  // Merged on VALUE, not on key presence: the IPC handler builds `{ mode, url, label,
+  // tunnel }` every time, so a key is always there and only its value says whether the
+  // caller meant anything by it.
+  const current = readRemote();
+  const next = {
+    mode: patch.mode ?? current.mode,
+    url: patch.url ?? current.url,
+    label: patch.label ?? current.label,
+    tunnel: patch.tunnel ?? current.tunnel,
+  };
+  // Drop the keys that have no value rather than writing `null`s — the file is read by
+  // people as well as by this module.
+  const body = Object.fromEntries(Object.entries(next).filter(([, v]) => v !== undefined));
   const path = file();
   mkdirSync(dirname(path), { recursive: true });
-  writeFileSync(path, JSON.stringify(settings, null, 2), 'utf8');
+  writeFileSync(path, JSON.stringify(body, null, 2), 'utf8');
+}
+
+/** Forget the remote setup entirely. The one path that is allowed to erase. */
+export function clearRemote(): void {
+  const path = file();
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify({ mode: 'local' }, null, 2), 'utf8');
 }
 
 export function readToken(): string | null {
