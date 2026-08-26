@@ -98,12 +98,21 @@
     const want = editNav.section;
     if (!want) return;
     editing = want;
-    editNav.section = '';
+    // Read on purpose, and before any early return: the sections live behind `{#if s}`, and
+    // arriving from the dashboard mounts this screen with `s` still null while the config is
+    // being fetched. Reading it here makes this effect run again when it lands.
+    const ready = s;
     void (async () => {
+      if (!ready) return; // nothing to focus yet — the request stays in `editNav`
       await tick(); // the branch for this section does not exist until the DOM updates
       const el = document.getElementById(`sec-${want}`);
-      el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
-      el?.focus();
+      if (!el) return; // same: keep the request rather than dropping it silently
+      // Cleared only once it has actually been delivered. Clearing it up front was why the
+      // dashboard route moved to Settings and then focused nothing: the one retry that
+      // would have worked had already been thrown away (CRL-121).
+      editNav.section = '';
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      el.focus();
     })();
   });
 </script>
