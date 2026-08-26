@@ -35,6 +35,20 @@
   let showAdvanced = $state(false);
   let tunnelStatus = $state<TunnelStatus>({ state: 'off' });
 
+  /**
+   * What is actually saved, as of the last read. Choosing a radio changes the selection
+   * above; it does not change this. Applying is what moves one to the other.
+   *
+   * Selecting used to save — and saving restarts the core and tears down the tunnel, which
+   * is more than a radio click should mean. It also wrote the file with the other mode's
+   * fields absent, so switching erased the remote setup (CRL-119).
+   */
+  let saved = $state<{ mode: 'local' | 'remote'; url: string; tunnel: string }>({
+    mode: 'local',
+    url: '',
+    tunnel: '',
+  });
+
   /** With a tunnel, the address is ours to derive — it is our end of the pipe. */
   const effectiveUrl = $derived(useTunnel ? `ws://127.0.0.1:${localPort}` : url.trim());
   const tunnelCfg = $derived.by((): TunnelConfig | undefined =>
@@ -49,6 +63,14 @@
   );
   /** Enough to try with: a destination when we tunnel, an address when we don't. */
   const ready = $derived(useTunnel ? !!sshTarget.trim() : !!url.trim());
+
+  /** Selection or values differ from what is saved — there is something to apply. */
+  const dirty = $derived(
+    mode !== saved.mode ||
+      (mode === 'remote' && (effectiveUrl !== saved.url || JSON.stringify(tunnelCfg ?? null) !== saved.tunnel)),
+  );
+  /** Local needs nothing typed; remote needs somewhere to go. */
+  const canApply = $derived(mode === 'local' ? dirty : ready);
 
   /** The command that does by hand what the app is trying to do — the named fallback. */
   const tunnelCommand = $derived(
@@ -101,6 +123,7 @@
       localPort = r.tunnel.localPort;
       identityFile = r.tunnel.identityFile ?? '';
     }
+    saved = { mode: r.mode, url: r.url, tunnel: JSON.stringify(r.tunnel ?? null) };
   }
 
   onMount(() => {
@@ -114,24 +137,17 @@
     });
   });
 
-  async function useLocal() {
+  /**
+   * Commit the selection. The only path that writes settings and restarts the core —
+   * choosing a radio no longer does either.
+   */
+  async function apply() {
+    if (!canApply) return;
     busy = true;
     error = '';
     try {
-      await window.corral!.remote.setMode('local');
-      await refresh();
-    } finally {
-      busy = false;
-    }
-  }
-
-  /** Already paired: just switch to remote — the stored token authenticates us. */
-  async function useRemote() {
-    if (!ready) return;
-    busy = true;
-    error = '';
-    try {
-      await window.corral!.remote.setMode('remote', effectiveUrl, undefined, tunnelCfg);
+      if (mode === 'local') await window.corral!.remote.setMode('local');
+      else await window.corral!.remote.setMode('remote', effectiveUrl, undefined, tunnelCfg);
       await refresh();
     } finally {
       busy = false;
@@ -180,14 +196,26 @@
     <div class="modes">
       <label class:on={mode === 'local'}>
         <span class="head">
-          <input type="radio" checked={mode === 'local'} disabled={busy} onchange={useLocal} />
+          <input
+            type="radio"
+            name="coreMode"
+            checked={mode === 'local'}
+            disabled={busy}
+            onchange={() => (mode = 'local')}
+          />
           <strong>{t('link.local')}</strong>
         </span>
         <span class="sub">{t('link.localHint')}</span>
       </label>
       <label class:on={mode === 'remote'}>
         <span class="head">
-          <input type="radio" checked={mode === 'remote'} disabled={busy} onchange={() => (mode = 'remote')} />
+          <input
+            type="radio"
+            name="coreMode"
+            checked={mode === 'remote'}
+            disabled={busy}
+            onchange={() => (mode = 'remote')}
+          />
           <strong>{t('link.remote')}</strong>
         </span>
         <span class="sub">{t('link.remoteHint')}</span>
@@ -269,7 +297,6 @@
           <div class="row">
             <span class="state {linkState}">● {t(stateKey)}</span>
             <span class="spacer"></span>
-            <Button onclick={useRemote} disabled={busy || !ready}>{t('link.apply')}</Button>
             <Button onclick={unpair} disabled={busy}>{t('link.unpair')}</Button>
           </div>
         {:else}
@@ -307,6 +334,17 @@
         {#if error || denial}<p class="hint">{t('link.pairFailHint')}</p>{/if}
       </div>
     {/if}
+
+    <!-- The one path that writes settings and restarts the core. Outside the remote block
+         on purpose: picking "this computer" has to be applicable too, and before this the
+         button lived inside the remote branch where that selection could never reach it. -->
+    <div class="row commit">
+      {#if dirty}<span class="unapplied">{t('link.unapplied')}</span>{/if}
+      <span class="spacer"></span>
+      <Button class={dirty ? 'primary' : ''} onclick={apply} disabled={busy || !canApply}>
+        {t('link.apply')}
+      </Button>
+    </div>
   {/if}
 </div>
 
@@ -334,6 +372,15 @@
   .hint.err {
     color: var(--red, #f85149);
     margin: 8px 0 0;
+  }
+  .commit {
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+  }
+  .unapplied {
+    color: var(--warning);
+    font-size: 12px;
   }
   .hint.detail {
     margin: 4px 0 0;

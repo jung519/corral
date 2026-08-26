@@ -32,7 +32,7 @@ import {
   splitAuthCode,
   renderText,
 } from './claude-token.js';
-import { clearRemoteToken, readRemote, writeRemote } from './remote-store.js';
+import { clearRemote, clearRemoteToken, readRemote, writeRemote } from './remote-store.js';
 import { decideGate, fetchManifest, type GateDecision } from './update-gate.js';
 import {
   fetchNotionSchema,
@@ -152,9 +152,11 @@ function registerIpc(): void {
     pairRemote({ url, code, label, tunnel }),
   );
   ipcMain.handle('remote:unpair', () => {
-    // Forget this device's token; the next remote connection needs a fresh code.
+    // Forget this device's token; the next remote connection needs a fresh code. This is
+    // the one path that erases the saved setup — `writeRemote` merges, so wiping has to be
+    // asked for by name (CRL-119).
     clearRemoteToken();
-    writeRemote({ mode: 'local' });
+    clearRemote();
     restartOrchestrator();
     return { ok: true };
   });
