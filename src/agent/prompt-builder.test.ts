@@ -59,6 +59,37 @@ describe('prompt-builder', () => {
   });
 
   /**
+   * The language rule names files, and a document added later is a document the rule does
+   * not reach. That is what happened: spec mode arrived (CRL-101/106) writing
+   * `.corral/spec/*.md`, the rule kept listing only the pre-spec files, and a Korean run
+   * came back with its acceptance criteria in English — prose, not notation (CRL-126).
+   */
+  it('brings the spec documents under the language rule', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    for (const doc of ['.corral/spec/requirements.md', '.corral/spec/design.md', '.corral/spec/tasks.md']) {
+      expect(out, `${doc} is not named in the output-language rule`).toContain(doc);
+    }
+    // And the rule must not read as a closed list, or the next new document repeats this.
+    expect(out).toContain('every file a person reads');
+  });
+
+  /**
+   * An English keyword does not make its sentence English. The keywords stay so the format
+   * stays checkable; the condition and the response are prose and follow the output
+   * language. Saying only "keep the keywords in English" left a whole criteria block in
+   * English (CRL-126).
+   */
+  it('says the body of a REQ line is prose, not notation', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    expect(out).toContain('including the body of every `REQ-n` line');
+    expect(out).toMatch(/English heading does not make the\s+text under it English/);
+    // The only worked examples are English; they must say so or they read as the rule.
+    expect(out).toContain('in English because this guide is');
+  });
+
+  /**
    * EARS is a notation, not prose. A Korean user gets the explanation in Korean and the
    * keywords in English — the same split the guide already makes for BLOCKER/SUGGESTION/NIT.
    * If the keywords translated, nothing downstream could ever check the format (CRL-98).

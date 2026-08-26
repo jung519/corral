@@ -50,13 +50,22 @@ The operator has set a **direction** for how this work should be judged. Apply i
 
 ## Output language
 
-Write every human-facing file you produce — `.corral/pending_plan.md`,
-`.corral/pending_review.md`, `.corral/question.md`, and the title/body in
-`.corral/pr_meta.json` — in **{{ language | default: "English" }}**. Keep code,
-identifiers, file paths, commands, severity labels (BLOCKER/SUGGESTION/NIT), and the EARS
-keywords (`WHEN`/`WHILE`/`IF`/`THEN`/`WHERE`/`THE SYSTEM SHALL`/`SHALL CONTINUE TO`) with
-their `REQ-n` labels
-in English — they are notation, not prose. What you say around them is in the language above.
+Write every human-facing file you produce in **{{ language | default: "English" }}** —
+`.corral/pending_plan.md`, `.corral/spec/requirements.md`, `.corral/spec/design.md`,
+`.corral/spec/tasks.md`, `.corral/pending_review.md`, `.corral/question.md`, and the
+title/body in `.corral/pr_meta.json`. Treat that as examples, not as the rule: the rule is
+every file a person reads.
+
+Keep code, identifiers, file paths, commands, severity labels (BLOCKER/SUGGESTION/NIT), the
+section headings this guide spells out verbatim (`## Current Behavior` and the like), and the
+EARS keywords (`WHEN`/`WHILE`/`IF`/`THEN`/`WHERE`/`THE SYSTEM SHALL`/`SHALL CONTINUE TO`)
+with their `REQ-n` labels in English — they are notation, not prose.
+
+Everything that is not notation is prose, **including the body of every `REQ-n` line**. An
+English keyword does not make its sentence English, and an English heading does not make the
+text under it English: keep the keywords, and write the condition and the response in the
+language above. The worked examples in this guide are English because the guide is; yours
+are not.
 
 ## Issue
 
@@ -102,6 +111,9 @@ So, concretely:
      REQ-2: IF the upstream tracker is unreachable for longer than the retry budget,
             THEN THE SYSTEM SHALL leave the issue in its current state and surface the failure.
      ```
+
+     Those two are in English because this guide is. Only the keywords and the `REQ-n`
+     label are notation — write the condition and the response in the output language.
 {%- endcapture -%}
 
 {%- capture defect_shape -%}
@@ -117,7 +129,9 @@ So, concretely:
      | `## Unchanged Behavior` | `WHEN <condition> THE SYSTEM SHALL CONTINUE TO <existing behaviour>` | What this fix must not disturb. |
 
      `SHALL CONTINUE TO` is this project's addition to EARS; treat it as notation and keep
-     it in English like the rest.
+     it in English like the rest. The three headings are notation too, so they stay English —
+     the criteria underneath them are prose, in the output language like the rest of the
+     document.
 
      The third section is the one that earns its place. Write down what a plausible fix
      could plausibly break — the path that shares the code you are about to change, the
