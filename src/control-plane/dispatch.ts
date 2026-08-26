@@ -230,7 +230,11 @@ export async function dispatch(
       };
     case 'candidates':
       return o
-        ? await o.listCandidates({ cursor: a.cursor as string | undefined, limit: a.limit as number | undefined })
+        ? await o.listCandidates({
+            cursor: a.cursor as string | undefined,
+            limit: a.limit as number | undefined,
+            search: a.search as string | undefined,
+          })
         : { candidates: [] };
     case 'specDocs':
       return { docs: o ? await o.specDocs(id()) : [] };

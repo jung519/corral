@@ -19,6 +19,15 @@
   let candidates: Candidate[] = $state([]);
   let candCursor = $state<string | undefined>(undefined);
   let candLoading = $state(false);
+  /** What is typed, and what the last request actually used — the empty state names the
+   *  applied term, so the two cannot be the same variable. */
+  let candQuery = $state('');
+  let candSearch = $state('');
+  /** Whether the core said it actually applied the term. A core older than the search
+   *  box drops the parameter and answers with everything, which reads as a box that
+   *  matches anything — so an unconfirmed search is called out rather than shown as a
+   *  result (CRL-124). */
+  let candSearched = $state<boolean | undefined>(undefined);
   let candListEl = $state<HTMLElement | undefined>(undefined);
   let showCandidates = $state(false);
   let online = $state(false);
@@ -53,10 +62,27 @@
       location.hash = '#/setup';
       return;
     }
+    candQuery = '';
+    candSearch = '';
+    candSearched = undefined;
     const r = await api.getCandidates();
     candidates = r.candidates;
     candCursor = r.nextCursor;
     showCandidates = true;
+    void fillIfNeeded();
+  }
+  /** Apply the search box. Paging restarts: the cursor belongs to the previous filter. */
+  async function runCandSearch() {
+    candSearch = candQuery.trim();
+    candLoading = true;
+    try {
+      const r = await api.getCandidates(undefined, candSearch || undefined);
+      candidates = r.candidates;
+      candCursor = r.nextCursor;
+      candSearched = candSearch ? r.searched === true : undefined;
+    } finally {
+      candLoading = false;
+    }
     void fillIfNeeded();
   }
   // Infinite scroll: fetch the next ID-ascending page and append (deduped).
@@ -64,7 +90,7 @@
     if (!candCursor || candLoading) return;
     candLoading = true;
     try {
-      const r = await api.getCandidates(candCursor);
+      const r = await api.getCandidates(candCursor, candSearch || undefined);
       const seen = new Set(candidates.map((c) => c.identifier));
       candidates = [...candidates, ...r.candidates.filter((c) => !seen.has(c.identifier))];
       candCursor = r.nextCursor;
@@ -218,7 +244,24 @@
   >
     <div class="modal" role="dialog" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
       <h2>{t('dash.candidates')}</h2>
-      {#if candidates.length === 0 && !candLoading}<p class="dim">{t('dash.none')}</p>{/if}
+      <!-- Filtered by the tracker, not by this list: one page is 10 issues, so filtering
+           what has arrived would search a tenth of the board (CRL-124). -->
+      <form
+        class="cand-search"
+        onsubmit={(e) => {
+          e.preventDefault();
+          void runCandSearch();
+        }}
+      >
+        <input type="search" bind:value={candQuery} placeholder={t('dash.searchHint')} aria-label={t('dash.searchHint')} />
+        <Button onclick={runCandSearch}>{t('dash.search')}</Button>
+      </form>
+      {#if candSearch && candSearched === false}
+        <p class="warn">{t('dash.searchIgnored')}</p>
+      {/if}
+      {#if candidates.length === 0 && !candLoading}
+        <p class="dim">{candSearch ? t('dash.searchNone').replace('{q}', candSearch) : t('dash.none')}</p>
+      {/if}
       <div class="cand-list" bind:this={candListEl} onscroll={onCandScroll}>
         {#each candidates as c (c.identifier)}
           <div class="candidate">
@@ -260,6 +303,21 @@
     border-radius: var(--radius);
     padding: 12px 16px;
     margin-top: 4px;
+    color: var(--amber);
+  }
+  .cand-search {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+  .cand-search input {
+    flex: 1;
+    min-width: 0;
+  }
+  .warn {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.5;
     color: var(--amber);
   }
   h2 {
