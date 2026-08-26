@@ -32,6 +32,7 @@
   let remotePort = $state(DEFAULT_PORT);
   let localPort = $state(DEFAULT_PORT);
   let identityFile = $state('');
+  let proxyCommand = $state('');
   let showAdvanced = $state(false);
   let tunnelStatus = $state<TunnelStatus>({ state: 'off' });
 
@@ -58,6 +59,7 @@
           remotePort,
           localPort,
           identityFile: identityFile.trim() || undefined,
+          proxyCommand: proxyCommand.trim() || undefined,
         }
       : undefined,
   );
@@ -94,6 +96,8 @@
         ? 'link.tunnelErrNoSsh'
         : tunnelStatus.code === 'auth-failed'
           ? 'link.tunnelErrAuth'
+          : tunnelStatus.code === 'host-key'
+            ? 'link.tunnelErrHostKey'
           : tunnelStatus.code === 'forward-failed'
             ? 'link.tunnelErrForward'
             : tunnelStatus.code === 'timeout'
@@ -122,6 +126,7 @@
       remotePort = r.tunnel.remotePort;
       localPort = r.tunnel.localPort;
       identityFile = r.tunnel.identityFile ?? '';
+      proxyCommand = r.tunnel.proxyCommand ?? '';
     }
     saved = { mode: r.mode, url: r.url, tunnel: JSON.stringify(r.tunnel ?? null) };
   }
@@ -271,6 +276,20 @@
                 disabled={busy}
               />
             </label>
+            <!-- For a server that a plain `ssh user@host` cannot reach: a bastion, or a
+                 cloud's own tunnel. Without this the only place to say so was the user's
+                 own ssh config — outside the app (CRL-120). -->
+            <label class="field">
+              <span>{t('link.proxyCommand')}</span>
+              <input
+                type="text"
+                bind:value={proxyCommand}
+                placeholder="ssh -W %h:%p bastion.example.com"
+                spellcheck="false"
+                disabled={busy}
+              />
+            </label>
+            <p class="hint">{t('link.proxyCommandHint')}</p>
           </details>
         {:else}
           <label class="field">

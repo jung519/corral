@@ -13,11 +13,13 @@ export interface TunnelConfig {
   remotePort: number;
   localPort: number;
   identityFile?: string;
+  /** Extra hop for a host that is not reachable directly — passed as `-o ProxyCommand=…`. */
+  proxyCommand?: string;
 }
 
 export interface TunnelStatus {
   state: 'off' | 'starting' | 'up' | 'failed';
-  code?: 'ssh-not-found' | 'auth-failed' | 'forward-failed' | 'exited' | 'timeout';
+  code?: 'ssh-not-found' | 'auth-failed' | 'host-key' | 'forward-failed' | 'exited' | 'timeout';
   detail?: string;
   /** Retrying cannot help — the operator has to act. */
   fatal?: boolean;

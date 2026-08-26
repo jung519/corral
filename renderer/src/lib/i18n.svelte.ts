@@ -622,10 +622,15 @@ const en: Dict = {
   'link.corePort': 'Engine port on the server',
   'link.localPort': 'Port on this computer',
   'link.identityFile': 'SSH key (optional)',
+  'link.proxyCommand': 'Jump command (optional)',
+  'link.proxyCommandHint':
+    'Only if a plain ssh to that server does not get through — a bastion, or a cloud that requires its own tunnel. Whatever you would put in ssh_config as ProxyCommand goes here; `%h` and `%p` are the host and port ssh fills in.',
   'link.tunnelUp': 'Connection open',
   'link.tunnelStarting': 'Opening the connection…',
   'link.tunnelErrNoSsh': 'Could not find ssh on this computer.',
   'link.tunnelErrAuth': 'The server refused the key. Check that you can ssh to it yourself.',
+  'link.tunnelErrHostKey':
+    'This machine does not know that server\u2019s host key yet, so ssh refused to continue. Connect to it once from a terminal and accept the key, then try again.',
   'link.tunnelErrForward': 'The port on this computer is already taken. Change it under More options.',
   'link.tunnelErrTimeout': 'The server did not answer in time.',
   'link.tunnelErrExited': 'The connection dropped. Retrying.',
@@ -1254,10 +1259,15 @@ const ko: Dict = {
   'link.corePort': '서버의 엔진 포트',
   'link.localPort': '이 컴퓨터의 포트',
   'link.identityFile': 'SSH 키 (선택)',
+  'link.proxyCommand': '경유 명령 (선택)',
+  'link.proxyCommandHint':
+    '그 서버에 평범한 ssh 로 닿지 않을 때만 씁니다 — bastion 이나, 자체 터널을 요구하는 클라우드. ssh_config 의 ProxyCommand 에 적을 것을 그대로 적으면 됩니다. `%h`·`%p` 는 ssh 가 채우는 호스트와 포트입니다.',
   'link.tunnelUp': '연결 열림',
   'link.tunnelStarting': '연결을 여는 중…',
   'link.tunnelErrNoSsh': '이 컴퓨터에서 ssh 를 찾지 못했습니다.',
   'link.tunnelErrAuth': '서버가 키를 거절했습니다. 직접 ssh 로 붙는지 확인해 주세요.',
+  'link.tunnelErrHostKey':
+    '이 컴퓨터가 그 서버의 호스트 키를 아직 모릅니다. ssh 가 그래서 멈췄습니다 — 터미널에서 한 번 접속해 키를 승인한 뒤 다시 시도해 주세요.',
   'link.tunnelErrForward': '이 컴퓨터의 포트가 이미 쓰이고 있습니다. 세부 설정에서 바꿔주세요.',
   'link.tunnelErrTimeout': '서버가 제때 응답하지 않았습니다.',
   'link.tunnelErrExited': '연결이 끊겼습니다. 다시 시도합니다.',
