@@ -38,6 +38,16 @@ export const SCRATCH = {
   reviewRound: (n: number): string => `${SCRATCH_DIR}/review_round_${n}.md`,
   /** Nth parallel plan-critique output. */
   planCritique: (n: number): string => `${SCRATCH_DIR}/plan_critique_${n}.md`,
+  /**
+   * Where consolidation records what each critique point changed.
+   *
+   * Beside the plan rather than inside it. That record used to be a section of the vetted
+   * document, where it was a fifth of `requirements.md` and an eighth of `design.md` — and
+   * every later stage re-read it, because each one reads the approved documents in full. It
+   * is written for whoever asks "why did this change", which is not the same reader the
+   * approval card serves (CRL-129).
+   */
+  critiqueResponse: `${SCRATCH_DIR}/critique_response.md`,
 } as const;
 
 /**

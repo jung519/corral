@@ -44,10 +44,20 @@ describe('the defect shape in the guide', () => {
     expect(out.split('is not a behaviour; it is a hope').length - 1).toBe(2);
   });
 
-  it('keeps `SHALL` out of Current Behavior', async () => {
-    // It describes what happens, not what ought to. Writing SHALL there would state the
-    // defect as a requirement.
-    expect(await render()).toMatch(/No `SHALL` here — this is what happens, not what ought to/);
+  it('keeps Current Behavior out of the numbering', async () => {
+    // It describes what happens, not what ought to — and a criterion is what the finished
+    // code is judged against. Numbering it made every defect state the same fact twice
+    // (once as "it misbehaves", once as "it SHALL not"), and the review then ruled on both.
+    // One measured plan reached forty criteria that way (CRL-129).
+    const out = await render();
+    expect(out).toMatch(/\*\*`Current Behavior` carries no `REQ-n` numbers\.\*\*/);
+    expect(out).toMatch(/\| `## Current Behavior` \| \*\*no\*\* \| prose \|/);
+  });
+
+  it('shows it as prose in the worked example, not as a REQ line', async () => {
+    // The example is what actually gets copied.
+    const example = (await render()).split('## Current Behavior')[2] ?? '';
+    expect(example.slice(0, 200)).not.toMatch(/REQ-\d+:/);
   });
 
   it('gives Unchanged Behavior its own keyword', async () => {
@@ -59,11 +69,14 @@ describe('the defect shape in the guide', () => {
     expect(ko).toMatch(/`THE SYSTEM SHALL`\/`SHALL CONTINUE TO`\)/);
   });
 
-  it('keeps one REQ number space across the three sections', async () => {
-    // Splitting the numbering would drop the unchanged behaviours out of the review's
-    // criteria check and out of the met/unmet count — the ones most worth verifying.
-    // The guide wraps, so match across the line break.
-    expect(await render()).toMatch(/one number space, so the review rules on all of\s+them/);
+  it('keeps Expected and Unchanged in one number space', async () => {
+    // This is what dropping Current's numbers must NOT disturb: splitting these two would
+    // take the unchanged behaviours out of the review's criteria check and out of the
+    // met/unmet count — the ones most worth verifying. The guide wraps, so match across
+    // the line break.
+    const out = await render();
+    expect(out).toMatch(/Number `Expected` and `Unchanged` straight through in one\s+space/);
+    expect(out).toMatch(/\| `## Unchanged Behavior` \| `REQ-n` \|/);
   });
 
   it('is a branch, not a replacement — feature issues keep the single list', async () => {

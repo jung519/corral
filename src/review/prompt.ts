@@ -38,6 +38,12 @@ export function planCritiquePrompt(
     // The critic has to know the notation the plan is required to use. Without this it
     // reads EARS as awkward phrasing and "fixes" it, and the format dies in consolidation.
     `- Acceptance criteria not written in EARS notation (THE SYSTEM SHALL / WHEN / WHILE / IF-THEN / WHERE) or missing REQ-n labels. Judge the wording, not the count — do not ask for more criteria than the issue warrants.`,
+    // A critic asked only for what is missing can only grow the plan, and consolidation then
+    // adds what it found. Nothing ever removed: one measured plan reached forty criteria for
+    // one rule applied across twelve files, and became unreadable (CRL-129). So the same
+    // pass looks for what should come out.
+    `- Criteria that say the SAME rule at different call sites — those belong together as one ubiquitous \`THE SYSTEM SHALL\`, and enumerating them is how a plan becomes unreadable. Say which to merge. Likewise a criterion another one already covers, and a "Current Behavior" entry that only restates its "Expected" counterpart.`,
+    `- Length that defeats the point: the human has to READ this and decide. Flag a document that cannot be read in five minutes, and say what to cut — process notes ("how each critique was addressed"), restatement of an already-approved document, commentary on the plan's own confidence.`,
     // The axis a per-item read misses. Each requirement can be sound on its own while the
     // set is impossible to satisfy — and that only shows up when they are read together.
     // A defect spec that skips this section reads as complete; the gap is only visible
@@ -142,6 +148,9 @@ export function reviewRoundPrompt(
     `Write your findings as Markdown to ${out}. Do NOT modify any source code.`,
     `Write the findings in ${profile.languageName}; keep severity labels, file paths, and code identifiers in English.`,
     `Be concise but do not omit a real BLOCKER. If you genuinely find nothing after probing, write "${profile.t('review.noIssues')}" to ${out}.`,
+    // The consolidated report has a strict layout and a person reads it in a small panel;
+    // rounds that arrive as prose walls get folded in as prose walls (CRL-129).
+    `Shape: one heading per finding, then bullets — Location, Issue, Why / Fix. ONE short sentence per bullet; split longer reasoning across more bullets rather than writing a paragraph. No preamble, no summary of the diff, no restatement of the plan.`,
   );
   return lines.join(' ');
 }
