@@ -3,7 +3,7 @@
  * config exists. Missing credentials are NOT fatal — they resolve to empty and the
  * relevant action fails later with an auth error, so the app always boots. */
 import { FailoverAgent, type FailoverMember } from './agent/failover.js';
-import { createAgent } from './agent/index.js';
+import { createAgent, transportHonoursEffort } from './agent/index.js';
 import { StageRoutingAgent } from './agent/stage-router.js';
 import { channels } from './channel/index.js';
 import { loadConfig } from './config/loader.js';
@@ -11,6 +11,7 @@ import type { AgentRoutingConfig, Config } from './config/schema.js';
 import { EnvCredentialStore } from './credentials/env-store.js';
 import type { CredentialRef, CredentialStore } from './credentials/types.js';
 import { DirectionCheckStore, DirectionStore } from './core/direction.js';
+import { logger } from './core/logger.js';
 import type { TokenBudget } from './core/token-budget.js';
 import type {
   AgentAdapter,
@@ -90,6 +91,21 @@ export async function bootstrap(config: Config, deps: BootstrapDeps = {}): Promi
     const adapter = createAgent(r, { apiKey: apiKey || null, oauthToken: oauthToken || null, io: workspace.io });
     return { adapter, label };
   };
+  // A setting that quietly does nothing is the CRL-93 failure: `agent.max_tokens` was
+  // configured, never passed, and nobody could tell. Say it once, naming who dropped it.
+  for (const [label, r] of [
+    ['agent', config.agent] as const,
+    ...Object.entries(config.agent.stages ?? {}).map(([k, v]) => [`agent.stages.${k}`, v] as const),
+  ]) {
+    const set = Object.entries(r.effort ?? {}).filter(([, v]) => v !== undefined);
+    if (set.length > 0 && !transportHonoursEffort(r)) {
+      logger.warn(
+        `${label}.effort (${set.map(([k, v]) => `${k}=${v}`).join(', ')}) is ignored: ` +
+          `${r.provider}:${r.transport} has no reasoning-effort setting. Only claude:cli does.`,
+      );
+    }
+  }
+
   const primary = await buildMember(config.agent, `${config.agent.provider}:${config.agent.transport}`);
   const fallbacks = await Promise.all(
     config.agent.fallbacks.map((f, i) => buildMember(f, `${f.provider}:${f.transport} #${i + 2}`)),

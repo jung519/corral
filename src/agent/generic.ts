@@ -6,12 +6,14 @@
  * tests with a fake transport, so it works before any real transport runs. */
 import { bus } from '../core/events.js';
 import type { AgentAdapter, AgentRunOptions, AgentRunResult, Issue, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
-import type { AgentTransport, AgentTurnSpec, StageModels } from './types.js';
+import type { AgentTransport, AgentTurnSpec, StageEfforts, StageModels } from './types.js';
 
 export interface GenericAgentOptions {
   primary: boolean;
   /** Per-stage model mapping; opts.model overrides. */
   models: StageModels;
+  /** Per-stage reasoning effort. Absent for a stage = the transport's own default. */
+  efforts?: StageEfforts;
   /** Workspace file IO, used by the transport to write the workflow guide. */
   io: WorkspaceIO;
 }
@@ -35,6 +37,7 @@ export class GenericAgent implements AgentAdapter {
       prompt: opts.prompt,
       workflow: opts.workflow,
       model: opts.model ?? this.options.models[opts.stage],
+      effort: this.options.efforts?.[opts.stage],
       continueSession: opts.continueSession,
       maxTurns: opts.maxTurns,
       maxBudgetUsd: opts.maxBudgetUsd,

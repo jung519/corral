@@ -120,6 +120,9 @@ export class ClaudeCliTransport implements AgentTransport {
 function buildFlags(spec: AgentTurnSpec): string[] {
   const flags = ['--verbose', '--output-format', 'stream-json'];
   if (spec.model) flags.push('--model', spec.model);
+  // Thinking depth. Only claude names this on the command line; the other transports warn
+  // at startup instead of dropping it in silence (CRL-131).
+  if (spec.effort) flags.push('--effort', spec.effort);
   if (spec.continueSession) flags.push('--continue');
   if (spec.maxTurns) flags.push('--max-turns', String(spec.maxTurns));
   if (spec.maxBudgetUsd) flags.push('--max-budget-usd', String(spec.maxBudgetUsd));

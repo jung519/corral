@@ -179,11 +179,38 @@ export const RepositorySchema = z.discriminatedUnion('kind', [
 
 // ─────────────────────────────────────────────────────────────── axis 3: agent
 
+/**
+ * Reasoning effort levels, as the claude CLI names them.
+ *
+ * The type itself lives in `agent/types.ts` — this is the parser for it, and exporting a
+ * second `Effort` from here would make the package's re-export ambiguous.
+ */
+export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
+
 export const StageModelsSchema = z
   .object({
     planning: z.string().optional(),
     implementation: z.string().optional(),
     review: z.string().optional(),
+  })
+  .default({});
+
+/**
+ * How hard the agent thinks before it acts, per stage.
+ *
+ * Measured across one issue's planning: 55.6% of the wall time was the model thinking
+ * between tool calls, against 31.7% writing documents and 0.1% running the tools. The
+ * levels are claude's own (`--effort low|medium|high|xhigh|max`) rather than an invented
+ * scale — there is no evidence for how another CLI's knob would map onto a scale of ours,
+ * and guessing a mapping is worse than naming the one that exists (CRL-131).
+ *
+ * Absent = the CLI's own default, which is what every run does today.
+ */
+export const StageEffortsSchema = z
+  .object({
+    planning: EffortSchema.optional(),
+    implementation: EffortSchema.optional(),
+    review: EffortSchema.optional(),
   })
   .default({});
 
@@ -201,6 +228,9 @@ export const AgentRoutingSchema = z.object({
    *  key (subscription, not pay-per-use). */
   oauth_credential: CredentialRefSchema.optional(),
   models: StageModelsSchema,
+  /** Per-stage reasoning effort. Honoured by the claude CLI transport; other transports
+   *  warn at startup rather than ignoring it in silence (CRL-93's lesson, CRL-131). */
+  effort: StageEffortsSchema,
 });
 
 const requireApiCredential = (agent: { transport: string; credential?: unknown }, ctx: z.RefinementCtx, path: (string | number)[]) => {

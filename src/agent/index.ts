@@ -39,5 +39,21 @@ agentTransports.register('gpt:api', (_config, ctx) => new OpenAiApiTransport(ctx
 
 export function createAgent(config: AgentRoutingConfig, ctx: AgentTransportCtx): AgentAdapter {
   const transport = agentTransports.create({ kind: `${config.provider}:${config.transport}` }, ctx);
-  return new GenericAgent(transport, { primary: true, models: config.models, io: ctx.io });
+  // Effort reaches only the transports that name it on the wire. Where it does not, the
+  // caller is told at startup rather than the setting disappearing (CRL-131).
+  const efforts = transportHonoursEffort(config) ? config.effort : undefined;
+  return new GenericAgent(transport, { primary: true, models: config.models, efforts, io: ctx.io });
+}
+
+/**
+ * Whether this provider × transport pair does anything with `effort`.
+ *
+ * Only the claude CLI takes it (`--effort low|medium|high|xhigh|max`, measured). codex may
+ * accept `-c model_reasoning_effort=`, but that could not be verified here — the local codex
+ * refuses its own default model — so it is left out rather than mapped on a guess. gemini's
+ * CLI has no equivalent, and the API transports reach the model directly with extended
+ * thinking off, which is a different setting with a different unit.
+ */
+export function transportHonoursEffort(config: Pick<AgentRoutingConfig, 'provider' | 'transport'>): boolean {
+  return config.provider === 'claude' && config.transport === 'cli';
 }

@@ -70,6 +70,20 @@ agent:
     planning: opus
     implementation: sonnet
     review: opus
+  # How hard the model thinks before it acts, per stage — low | medium | high | xhigh | max.
+  # Omit and the CLI's own default applies, which is what every run does today.
+  #
+  # Worth knowing before you set it: on one measured issue, thinking was 55.6% of the wall
+  # time (writing documents was 31.7%, running the tools 0.1%). `low` removed the thinking
+  # entirely and left the number of tool calls unchanged — it changes how deeply the model
+  # deliberates, not how much it looks at. The output got thinner with it.
+  #
+  # Only `claude` + `transport: cli` takes this. Set it elsewhere and corral says so at
+  # startup rather than dropping it silently.
+  # effort:
+  #   planning: high
+  #   implementation: low
+  #   review: high
 
 workspace:
   backend: local          # local | docker
