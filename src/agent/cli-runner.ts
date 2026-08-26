@@ -8,6 +8,9 @@
  * flags, env) and the CliStreamParser (how to read that CLI's stream format).
  */
 import { spawn } from 'node:child_process';
+import { closeSync, mkdtempSync, openSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import type { Logger } from '../core/logger.js';
 import { looksLikeAuth, looksLikeRateLimit, type UsageAcc } from './stream-json.js';
@@ -44,12 +47,73 @@ export interface CliStreamParser<T> {
   flush?(): AgentEvent[];
 }
 
+/**
+ * Where a container reads the turn's credentials from — the value to pass to
+ * `docker exec --env-file`.
+ *
+ * `/dev/fd/N` rather than `/proc/self/fd/N`: macOS has no `/proc` and the desktop app runs
+ * the docker backend there; on Linux the two are the same thing. Both were measured.
+ *
+ * A pipe cannot be used here. `--env-file /dev/stdin` works on macOS and fails on Linux
+ * with `no such device or address` — docker opens the path, and a pipe's fd path cannot be
+ * opened that way. So the fd behind this is a real file (see `openSecretEnv`).
+ */
+export const SECRET_ENV_PATH = '/dev/fd/3';
+/** Must match the index the fd is passed at in `stdio` below. */
+const SECRET_ENV_FD = 3;
+
 /** What to spawn for one turn. */
 export interface CliSpawnSpec {
   command: string;
   args: string[];
   cwd?: string;
   env: NodeJS.ProcessEnv;
+  /**
+   * The turn's credentials, delivered out of band rather than in `args`.
+   *
+   * Command-line arguments are not private on Linux: `/proc/<pid>/cmdline` is
+   * world-readable, and any account on the host can read it while the turn runs — measured
+   * on the operational VM with an unprivileged second account. Passing `-e TOKEN=…` therefore
+   * published the user's API key or subscription token to everyone on the box (CRL-125).
+   *
+   * The process environment is a different thing: `/proc/<pid>/environ` is owner-only. That
+   * is why the local backend still injects through `env` above and is left alone.
+   */
+  secretEnv?: Record<string, string>;
+}
+
+/**
+ * Put the credentials on a file descriptor and take the file's name away.
+ *
+ * The bytes reach disk for the moment it takes to write them — under `0600` inside a `0700`
+ * directory — and then the name is unlinked, so by the time docker runs there is no path for
+ * anyone to open and nothing left behind if this process dies. What survives is one fd,
+ * which `/proc/<pid>/fd` shows to the owner only.
+ */
+function openSecretEnv(env: Record<string, string>): { fd: number; close: () => void } {
+  const lines = Object.entries(env).map(([k, v]) => {
+    // An env-file is one `KEY=VALUE` per line with no quoting, so a line break in a value
+    // would quietly declare a second variable. None of the credentials can contain one;
+    // the check costs nothing and the alternative is finding out the hard way.
+    if (/[\r\n]/.test(v)) throw new Error(`credential ${k} contains a line break and cannot be passed to the container`);
+    return `${k}=${v}`;
+  });
+  const dir = mkdtempSync(join(tmpdir(), 'corral-env-'));
+  const file = join(dir, 'env');
+  writeFileSync(file, `${lines.join('\n')}\n`, { mode: 0o600 });
+  const fd = openSync(file, 'r');
+  unlinkSync(file);
+  rmSync(dir, { recursive: true, force: true });
+  return {
+    fd,
+    close: () => {
+      try {
+        closeSync(fd);
+      } catch {
+        // Already closed — the turn ending twice is not worth an error.
+      }
+    },
+  };
 }
 
 /** Run one CLI turn: spawn, stream-parse, and resolve after the final `done` event. */
@@ -60,6 +124,9 @@ export function runCliTurn<T>(
   onEvent: (event: AgentEvent) => void,
   log: Logger,
 ): Promise<void> {
+  // Opened before the spawn so a malformed credential fails here, with a name attached,
+  // rather than as an unexplained container error.
+  const secret = spawnSpec.secretEnv ? openSecretEnv(spawnSpec.secretEnv) : undefined;
   return new Promise<void>((resolve) => {
     const child = spawn(spawnSpec.command, spawnSpec.args, {
       cwd: spawnSpec.cwd,
@@ -67,8 +134,14 @@ export function runCliTurn<T>(
       signal: spec.signal,
       // Close stdin (none of the CLIs take piped input) — codex `exec` otherwise blocks
       // reading stdin; claude/gemini ignore it. stdout/stderr stay piped for parsing.
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // fd 3, when present, carries the credentials the container reads via
+      // `--env-file ${SECRET_ENV_PATH}` — stdin stays closed, so nothing about codex changes.
+      // One shape either way so stdout/stderr stay typed as pipes; with no credential to
+      // pass, fd 3 is simply /dev/null and no CLI looks at it.
+      stdio: ['ignore', 'pipe', 'pipe', secret ? secret.fd : 'ignore'],
     });
+    // The child has inherited it; this process has no further use for it.
+    secret?.close();
     const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
     // Accumulated across the whole turn: a long reply arrives as several text blocks.
     let answer = '';
@@ -86,7 +159,9 @@ export function runCliTurn<T>(
         }, timeoutMs)
       : undefined;
 
-    const rl = createInterface({ input: child.stdout });
+    // Both are pipes by construction; `spawn`'s narrowing overloads only cover a
+    // three-entry stdio, and fd 3 puts this past them.
+    const rl = createInterface({ input: child.stdout! });
     rl.on('line', (line) => {
       const event = parser.parse(line);
       if (!event) return;
@@ -100,7 +175,7 @@ export function runCliTurn<T>(
       if (parser.isRateLimit?.(event, line)) sawRateLimit = true;
     });
 
-    child.stderr.on('data', (d: Buffer) => {
+    child.stderr!.on('data', (d: Buffer) => {
       stderr += d.toString();
       if (looksLikeAuth(stderr)) sawAuth = true;
       if (looksLikeRateLimit(stderr)) sawRateLimit = true;
