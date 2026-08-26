@@ -90,6 +90,18 @@ So, concretely:
 - If you genuinely cannot finish, commit what works and write what is left to
   `.corral/question.md`. A stated gap is worth far more than an unfinished intention.
 
+{%- capture plan_length -%}
+   - **A human has to read this and decide.** Aim to be readable in five minutes — roughly
+     three to four pages of prose, not thirty. The same rules the review report follows
+     apply here: put a blank line between blocks, put every fact on its own bullet, and
+     NEVER write a multi-sentence paragraph that runs together into a wall of text.
+   - **Write what the next reader needs, and nothing about how you got there.** No notes on
+     which critique you addressed, no commentary on your own confidence, no restatement of
+     a document that is already approved and sitting next to this one.
+   - A longer document is not a more careful one. If it will not fit, the issue is too big —
+     say that instead.
+{%- endcapture -%}
+
 {%- capture ears_forms -%}
    - Number the acceptance criteria `REQ-1`, `REQ-2`, … and write each one in EARS
      notation — one requirement per line, picking the form that fits:
@@ -114,19 +126,40 @@ So, concretely:
 
      Those two are in English because this guide is. Only the keywords and the `REQ-n`
      label are notation — write the condition and the response in the output language.
+
+   - **One rule is one criterion, however many places it applies.** If the same rule holds
+     at several call sites, write it once in the ubiquitous form and name the sites in the
+     design — do NOT write a `WHEN` per site. A measured plan produced forty criteria for
+     one rule applied across twelve files; the work was eleven commits. The count follows
+     the rules, not the code.
+
+     ```
+     ✅ THE SYSTEM SHALL derive every calendar date from KST, never from the process timezone.
+     ❌ WHEN the review list omits a year …   ❌ WHEN the weather batch picks a base date …
+        WHEN the quota counter rolls over …      WHEN vendor entry is judged …
+     ```
+
+   - **Twelve criteria is the ceiling for an ordinary issue.** Past it, you are enumerating
+     call sites instead of stating rules — go back and merge. If an issue genuinely needs
+     more, it is more than one issue: say so in the document rather than writing them all
+     out.
 {%- endcapture -%}
 
 {%- capture defect_shape -%}
    - **If this issue is a defect report** — something already built behaves wrongly —
-     organise the criteria under three headings instead of one list. Keep numbering them
-     `REQ-1`, `REQ-2`, … straight through: one number space, so the review rules on all of
-     them.
+     organise it under three headings instead of one list.
 
-     | Section | Form | What goes in it |
-     |---|---|---|
-     | `## Current Behavior` | `WHEN <condition> THE SYSTEM <wrong behaviour>` | The conditions that reproduce the defect. No `SHALL` here — this is what happens, not what ought to. |
-     | `## Expected Behavior` | the EARS forms above | What it does once fixed. |
-     | `## Unchanged Behavior` | `WHEN <condition> THE SYSTEM SHALL CONTINUE TO <existing behaviour>` | What this fix must not disturb. |
+     | Section | Numbered? | Form | What goes in it |
+     |---|---|---|---|
+     | `## Current Behavior` | **no** | prose | What goes wrong today, and when. A paragraph, not a list of criteria. |
+     | `## Expected Behavior` | `REQ-n` | the EARS forms above | What it does once fixed. |
+     | `## Unchanged Behavior` | `REQ-n` | `WHEN <condition> THE SYSTEM SHALL CONTINUE TO <existing behaviour>` | What this fix must not disturb. |
+
+     **`Current Behavior` carries no `REQ-n` numbers.** It is the reason the work exists,
+     not a thing the finished code is judged against — asking the review to rule on "does it
+     still misbehave?" duplicates the `Expected` verdict that already answers it. Numbering
+     it once meant every defect stated the same fact twice, under two numbers, and the review
+     then ruled on both. Number `Expected` and `Unchanged` straight through in one space.
 
      `SHALL CONTINUE TO` is this project's addition to EARS; treat it as notation and keep
      it in English like the rest. The three headings are notation too, so they stay English —
@@ -144,15 +177,14 @@ So, concretely:
 
      ```
      ## Current Behavior
-     REQ-1: WHEN a rotated refresh token is presented a second time,
-            THE SYSTEM accepts it and issues a new access token.
+     A rotated refresh token is accepted a second time and issues a new access token.
 
      ## Expected Behavior
-     REQ-2: WHEN a rotated refresh token is presented a second time,
+     REQ-1: WHEN a rotated refresh token is presented a second time,
             THE SYSTEM SHALL reject the request and invalidate that user's token family.
 
      ## Unchanged Behavior
-     REQ-3: WHEN a valid unrotated refresh token is presented,
+     REQ-2: WHEN a valid unrotated refresh token is presented,
             THE SYSTEM SHALL CONTINUE TO issue a new access token without extra latency.
      ```
    - **Otherwise** — new capability, changed behaviour — use the single list above.
@@ -175,6 +207,7 @@ configured language, but the symbol is not:
 2. Write a plan to `.corral/pending_plan.md` (Markdown): which repo(s) you will change and
    why, the approach, the files you will change (prefix each with its repo dir, e.g.
    `server/src/...`), edge cases, and **testable acceptance criteria** (see below).
+{{ plan_length }}
 {{ ears_forms }}
 {{ defect_shape }}   - Reference the IDs from the rest of the plan: mark each file you will change and each
      edge case with the `REQ-n` it serves. An ID nothing points at is not worth writing.
@@ -193,6 +226,7 @@ configured language, but the symbol is not:
 2. Write `.corral/spec/requirements.md`: **what must become true**, and nothing about how.
    No file names, no APIs, no chosen libraries — those are the next document's job. Include
    the edge cases and failure modes the issue implies.
+{{ plan_length }}
 {{ ears_forms }}
 {{ defect_shape }}
 3. If you cannot proceed without a decision from the human, write the question to
@@ -205,6 +239,10 @@ may have written it, so rely on the file.
 Write `.corral/spec/design.md`: **how** it will be built. Which repo(s) change and why, the
 approach and the alternatives rejected, the files you will touch (prefix each with its repo
 dir, e.g. `server/src/...`), the data/API shapes, and the failure handling.
+{{ plan_length }}
+
+- **Do not restate the requirements.** They are approved and sitting in the file next to
+  this one; the reader has them. Name the `REQ-n` and go straight to the decision.
 
 - **Every design decision names the `REQ-n` it serves.** A decision serving no requirement is
   scope you invented; a requirement no decision covers is a gap — say so rather than leaving
@@ -241,12 +279,30 @@ shape is fixed:
   if the behaviour drifted — attach that to the task that puts the change in, naming the
   `REQ-n` it protects.
 - Do not tick any box. The implementation ticks them as it goes.
+- **Nothing but the checklist.** No preamble, no notes, no record of what a critique
+  changed. A parser reads this file and a human scans it; a measured `tasks.md` was
+  eighty-seven lines around eleven tasks. One line per task, and each line short enough to
+  read at a glance — name the design section rather than repeating it.
+{{ plan_length }}
 
 ### Consolidate plan
 Independent critiques are in `.corral/plan_critique_*.md`. Fold them into the final vetted
 document — **the one the orchestrator's prompt names** (in spec mode that is the spec file
 for the stage you are in, otherwise `.corral/pending_plan.md`) — keeping options + acceptance
-criteria and noting how each critique was addressed. **Keep every `REQ-n` label attached to the same requirement** —
+criteria.
+
+**Consolidating cuts as well as adds.** A critique hunts for what is missing, so folding one
+in only ever grows the document unless this turn also removes: merge criteria that state the
+same rule, delete a requirement another one already covers, and drop anything the reader does
+not need to decide. **Pay for what you add** — a real BLOCKER will grow a section, so name
+what came out to make room for it. Ending up meaningfully longer than you started means the
+cutting half did not happen.
+
+**Write the record of what each critique point changed to `.corral/critique_response.md`** —
+one line per point, what you did, and why if you disagreed. **Do not put it in the document
+and do not leave it only in your reply**: the reply is not saved anywhere, and the vetted
+document is what the next stage re-reads in full and the human approves. A log of how it was
+written is neither of those. **Keep every `REQ-n` label attached to the same requirement** —
 renumbering breaks the references in the rest of the plan. A requirement dropped in
 consolidation loses its ID; a new one takes the next unused number. Do not modify code.{% if direction %} Keep the final plan aligned
 with the **Direction** above where the issue is neutral (it is guiding, not a rule).{% endif %}
@@ -366,6 +422,25 @@ The human approved — open the PR with the **current code as-is**, even if find
 NOT write a fix plan. Make sure your work is committed on each changed repo's work branch, then
 write PR metadata as JSON to `.corral/pr_meta.json`: `{"title": "…", "body": "…"}`. The
 orchestrator opens one PR per changed repo using this title/body. Do NOT push or open PRs yourself.
+
+**The body is read by people who were not here.** A reviewer, a teammate, someone auditing the
+repository months later — none of them saw the plan, the critique, or the review card. Write for
+them, in this shape, and keep it under a page:
+
+```md
+## 무엇을 왜
+<what changed and the problem it solves — a short paragraph, not the issue re-pasted>
+
+## 바뀐 것
+- <one line per meaningful change, with `path/to/file.ts` where it helps>
+
+## 확인
+- <how you know it works: the test, the command, the measurement>
+```
+
+Do NOT put in the body: the plan or requirements restated, a per-`REQ-n` verdict table, the
+critique response, or a list of every file touched (the diff is right there). If a finding was
+left unresolved at approval, say so in one line — that is worth the space.
 
 ### H — Fix plan approved
 Implement the approved fix plan, commit in the relevant repo subdir, and write
