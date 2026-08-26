@@ -10,7 +10,7 @@
   import Toast from './Toast.svelte';
   import Wizard from './Wizard.svelte';
   import * as api from './lib/api';
-  import { t } from './lib/i18n.svelte';
+  import { adoptConfigLangOnce, t } from './lib/i18n.svelte';
   import { modeState, setMode } from './lib/mode.svelte';
   import { prefs } from './lib/prefs.svelte';
 
@@ -24,6 +24,10 @@
     void api.isConfigured().then((configured) => {
       if (!configured && !location.hash.startsWith('#/setup')) location.hash = '#/setup';
     });
+
+    // A config pinned to a language, from before the UI language was remembered at all.
+    // Best-effort by design: it needs the core, and skipping it costs one launch.
+    void api.configLanguage().then(adoptConfigLangOnce);
 
     // OS notifications when a human action is needed — fired app-wide (any tab) so a
     // pending approval doesn't sit unseen for hours. The main process suppresses these
@@ -92,7 +96,11 @@
 {:else}
   <div class="shell">
     <nav>
-      <p class="brand">Corral</p>
+      <!-- The picker is a screen, not a one-time gate (see ModePicker) — and this is the
+           way back to it, which nothing else was (CRL-123). "Switch" below flips the
+           pillar in one click; the picker is where the choice is explained, which is
+           what you want when you have come back to re-read it. -->
+      <a class="brand" href="#/mode" class:active={picking} title={t('nav.modePicker')}>Corral</a>
       {#if mode}
         <!-- Spelled out, not an icon: which pillar you are looking at decides what every
              screen below means, and an icon would make that a guess. -->
@@ -142,10 +150,20 @@
     padding: 18px 12px;
   }
   .brand {
+    display: block;
     font-size: 16px;
     font-weight: 500;
     margin: 0 0 10px;
     padding-left: 8px;
+    color: var(--text);
+    text-decoration: none;
+    border-radius: var(--radius);
+  }
+  .brand:hover {
+    color: var(--accent);
+  }
+  .brand.active {
+    color: var(--accent);
   }
   .mode {
     display: flex;
@@ -184,7 +202,9 @@
     flex-direction: column;
     gap: 2px;
   }
-  a {
+  /* Scoped to the list: the brand above it is a link too, and the filled active state
+     that reads as "this page" on a nav item would swallow the wordmark. */
+  ul a {
     display: block;
     padding: 8px 10px;
     border-radius: 8px;
@@ -192,10 +212,10 @@
     text-decoration: none;
     font-size: 14px;
   }
-  a:hover {
+  ul a:hover {
     background: var(--surface-2);
   }
-  a.active {
+  ul a.active {
     background: var(--accent);
     color: var(--accent-text);
   }

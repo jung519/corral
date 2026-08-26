@@ -26,6 +26,23 @@ export async function isConfigured(): Promise<boolean> {
   }
 }
 
+/** `profile.language` as config has it — `'auto' | 'en' | 'ko'`.
+ *
+ *  Undefined when there is no desktop bridge, no config, or no core up yet: parsing YAML
+ *  is the core's job (see `configParsed`), so this cannot be counted on during the first
+ *  paint. Only caller is the one-time UI-language adoption, which is fine to skip and
+ *  retry on the next launch. */
+export async function configLanguage(): Promise<string | undefined> {
+  try {
+    if (typeof window === 'undefined' || !window.corral?.config) return undefined;
+    const { config } = await window.corral.config.parsed();
+    const language = (config as { profile?: { language?: unknown } } | undefined)?.profile?.language;
+    return typeof language === 'string' ? language : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export async function getState(): Promise<StateResponse> {
   return call<StateResponse>('state');
 }
