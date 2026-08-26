@@ -6,7 +6,7 @@
   import CopyButton from './lib/CopyButton.svelte';
   import CredentialField from './lib/CredentialField.svelte';
   import PasteButton from './lib/PasteButton.svelte';
-  import { currentLang, setLang, t } from './lib/i18n.svelte';
+  import { applyConfigLang, currentLang, setLang, t } from './lib/i18n.svelte';
   import {
     activeSlot,
     apiSupported,
@@ -428,6 +428,10 @@
       for (const sec of secretsFor(s)) await window.corral.secret.set(sec.service, sec.account, sec.value);
       const saved = await window.corral.config.write(buildConfigYaml(s, currentLang()));
       if (!saved.ok) throw new Error(saved.error ?? 'the core could not start on this config');
+      // Pinning the output language to a real language switches the UI to it too, and
+      // remembers it: the inline edit stays on screen, so a change that only showed up
+      // after a restart would read as the setting not having been saved (CRL-122).
+      applyConfigLang(s.language);
       // First-run brings the orchestrator up; an inline edit just persists config.
       if (!embedded) await window.corral.startOrchestrator();
       // Keep the (non-secret) draft as the last-applied state so re-opening pre-fills.

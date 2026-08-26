@@ -524,6 +524,7 @@ const en: Dict = {
   'editor.save': 'Save',
   'editor.elsewhere': 'Something needs fixing on another step',
   'nav.dashboard': 'Dashboard',
+  'nav.modePicker': 'Mode picker — the first screen',
   'nav.logs': 'Logs',
   'nav.history': 'History',
   'nav.settings': 'Settings',
@@ -1161,6 +1162,7 @@ const ko: Dict = {
   'editor.save': '저장',
   'editor.elsewhere': '다른 단계에 고칠 것이 있습니다',
   'nav.dashboard': '대시보드',
+  'nav.modePicker': '모드 선택 — 첫 화면',
   'nav.logs': '로그',
   'nav.history': '이력',
   'nav.settings': '설정',
@@ -1286,9 +1288,11 @@ const ko: Dict = {
 
 const catalog: Record<Lang, Dict> = { en, ko };
 
-function initialLang(): Lang {
+const LANG_KEY = 'corral.lang';
+
+function savedLang(): Lang {
   try {
-    const saved = localStorage.getItem('corral.lang');
+    const saved = localStorage.getItem(LANG_KEY);
     if (saved === 'en' || saved === 'ko') return saved;
   } catch {
     /* no localStorage */
@@ -1296,7 +1300,7 @@ function initialLang(): Lang {
   return 'en';
 }
 
-let lang = $state<Lang>(initialLang());
+let lang = $state<Lang>(savedLang());
 
 export function currentLang(): Lang {
   return lang;
@@ -1305,10 +1309,41 @@ export function currentLang(): Lang {
 export function setLang(next: Lang): void {
   lang = next;
   try {
-    localStorage.setItem('corral.lang', next);
+    localStorage.setItem(LANG_KEY, next);
   } catch {
     /* ignore */
   }
+}
+
+/** Take the UI language from a saved `profile.language`, and remember it like any other
+ *  language choice.
+ *
+ * The agent output language is the language control people actually find: a labelled
+ * dropdown in the settings, where the UI language is a two-button toggle in the sidebar.
+ * Pinning that dropdown to Korean therefore has to make the UI Korean too — otherwise
+ * the app stays in English and the setting reads as never having saved (CRL-122).
+ *
+ * "Auto" means "follow the UI", so there is nothing to take from it. Call this only for
+ * a language the user just saved: it is an explicit choice, so it outranks an earlier
+ * one made with the toggle. */
+export function applyConfigLang(configured: string | undefined): void {
+  if (configured === 'en' || configured === 'ko') setLang(configured);
+}
+
+/** The same adoption, for a config that was pinned before the UI language was ever a
+ *  saved thing — it runs at startup and gives up the moment a UI language exists.
+ *
+ *  Without this, a config that already says `language: ko` stays paired with an English
+ *  UI until the settings happen to be saved again, which is the state the bug was
+ *  reported from. Persisting it (rather than following config on every launch) keeps the
+ *  toggle the last word from then on. */
+export function adoptConfigLangOnce(configured: string | undefined): void {
+  try {
+    if (localStorage.getItem(LANG_KEY)) return;
+  } catch {
+    /* no localStorage — nothing is remembered either way, so adopting is still right */
+  }
+  applyConfigLang(configured);
 }
 
 /** Translate a key for the current language (falls back to English, then the key). */
