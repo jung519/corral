@@ -19,6 +19,10 @@ export interface IssueRuntime {
   cost: number;
   /** Task counts while a spec-mode implementation runs. Absent otherwise (CRL-107). */
   taskProgress?: { done: number; total: number; warnings: number };
+  /** Which spec document the planning ladder is on, while it is on one. The three vetting
+   *  passes share one phase, so this is what says which (CRL-128). Cleared on the way into
+   *  implementation, and absent in single mode. */
+  specStage?: 'requirements' | 'design' | 'tasks';
 }
 
 export interface PendingAction {

@@ -22,21 +22,32 @@ export function stageKeys(specMode: string | undefined): string[] {
   return specMode === 'split' ? SPLIT_STAGES : SINGLE_STAGES;
 }
 
+/** Where each spec gate sits in `SPLIT_STAGES`. */
+const SPEC_GATE_STAGE: Record<string, number> = { requirements: 1, design: 2, tasks: 3 };
+
 /**
  * Which stage the orchestrator phase currently sits at, as an index into `stageKeys()`.
  *
  * `specMode` is passed rather than inferred from the phase: after the last gate is approved
  * the phase says nothing about how planning was shaped, so an inferring bar would collapse
  * from three approval stages back to one just as the long part of the run begins.
+ *
+ * `specStage` is what tells the three vetting passes apart. They all run under the one
+ * `plan_reviewing` phase, so without it the bar cannot say which document is being worked.
  */
-export function stageIndex(phase: string, specMode?: string): number {
+export function stageIndex(phase: string, specMode?: string, specStage?: string): number {
   const split = specMode === 'split';
   // Everything after the approval stage(s) shifts right by the two extra gates.
   const after = (n: number) => n + (split ? 2 : 0);
   switch (phase) {
     case 'initial':
-    case 'plan_reviewing':
       return 0;
+    // Vetting sits on the gate it is working toward. In split mode this phase comes round
+    // once per gate, so sending it to 0 walked the bar backwards — requirements (1) →
+    // vetting the design (0) → design (2) — and a bar that goes back reads as a run that
+    // went back to planning (CRL-128). With no stage it is the single planning stage.
+    case 'plan_reviewing':
+      return split ? (SPEC_GATE_STAGE[specStage ?? ''] ?? 0) : 0;
     case 'requirements_sent':
       return 1;
     case 'design_sent':
@@ -117,9 +128,9 @@ export function phaseColor(phase: string): string {
 }
 
 /** i18n key for the short phase badge label (the active stage, or error). */
-export function phaseLabelKey(phase: string, specMode?: string): string {
+export function phaseLabelKey(phase: string, specMode?: string, specStage?: string): string {
   if (phase === 'auth_error_waiting') return 'phase.error';
-  return stageKeys(specMode)[stageIndex(phase, specMode)] ?? 'phase.plan';
+  return stageKeys(specMode)[stageIndex(phase, specMode, specStage)] ?? 'phase.plan';
 }
 
 /** i18n key for the waiting badge — phase-specific so it says WHAT is awaited (a plan

@@ -2,9 +2,9 @@
   import { t } from './lib/i18n.svelte';
   import { phaseActivity, stageKeys, stageIndex } from './lib/phase';
 
-  let { phase, specMode }: { phase: string; specMode?: string } = $props();
+  let { phase, specMode, specStage }: { phase: string; specMode?: string; specStage?: string } = $props();
   const keys = $derived(stageKeys(specMode));
-  const cur = $derived(stageIndex(phase, specMode));
+  const cur = $derived(stageIndex(phase, specMode, specStage));
   const activity = $derived(phaseActivity(phase));
 </script>
 
