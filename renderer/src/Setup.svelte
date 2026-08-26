@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import CoreConnection from './CoreConnection.svelte';
@@ -85,12 +85,26 @@
     void refresh();
   });
 
-  // A pipeline node (here or on the dashboard) asked to edit a section — open it.
+  /**
+   * A pipeline node (here or on the dashboard) asked to edit a section.
+   *
+   * Opening it is not enough. The node sits at the top of a long screen, so a section
+   * further down expanded where nobody could see it and the click read as doing nothing —
+   * and with no focus move, keyboard and screen-reader users got no signal at all
+   * (CRL-121). So the section is brought into view and focus lands on its heading, which
+   * is the standard way to say "you are here" without yanking the caret into a field.
+   */
   $effect(() => {
-    if (editNav.section) {
-      editing = editNav.section;
-      editNav.section = '';
-    }
+    const want = editNav.section;
+    if (!want) return;
+    editing = want;
+    editNav.section = '';
+    void (async () => {
+      await tick(); // the branch for this section does not exist until the DOM updates
+      const el = document.getElementById(`sec-${want}`);
+      el?.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      el?.focus();
+    })();
   });
 </script>
 
@@ -100,7 +114,9 @@
 
 {#snippet head(title: string, section: string)}
   <div class="hdr">
-    <h2>{title}</h2>
+    <!-- The scroll and focus target. `tabindex="-1"` makes it focusable by script without
+         adding it to the tab order. -->
+    <h2 id={`sec-${section}`} tabindex="-1">{title}</h2>
     {#if editing !== section}<button class="edit" onclick={() => (editing = section)}>{t('settings.edit')}</button>{/if}
   </div>
 {/snippet}
@@ -255,6 +271,18 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 10px;
+  }
+  /* Focus moved here by script, not by tabbing, so `:focus-visible` never matches in most
+     browsers — the ring has to hang off plain `:focus` to be seen at all. It is the whole
+     answer to "which section did that click open?". */
+  .hdr h2:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: 3px;
+  }
+  /* Nothing to scroll to if the heading sits flush against the viewport edge. */
+  .hdr h2 {
+    scroll-margin-top: 12px;
   }
   .edit {
     font-size: 12px;

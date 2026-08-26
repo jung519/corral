@@ -1,6 +1,6 @@
 <script lang="ts">
   import { currentLang, t } from './lib/i18n.svelte';
-  import { editSection } from './lib/nav.svelte';
+  import { editSection, type Section } from './lib/nav.svelte';
   import type { WizardState } from './lib/wizard';
 
   let { s }: { s: WizardState } = $props();
@@ -27,7 +27,7 @@
 
   // input nodes (sources the agents consume) + the per-stage agent nodes. `section` is
   // the Setup section a node opens for editing when clicked.
-  const nodes = $derived([
+  const nodes: { kind: string; section: Section; icon: string; label: string; value: string; title: string }[] = $derived([
     { kind: 'in', section: 'tracker', icon: '📋', label: t('pipe.tracker'), value: TRACKER[s.trackerKind], title: '' },
     { kind: 'in', section: 'repo', icon: '📦', label: t('pipe.repos'), value: repoValue, title: '' },
     { kind: 'in', section: 'repo', icon: '📚', label: t('pipe.skills'), value: skillValue, title: s.referenceRepo },
