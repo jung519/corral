@@ -6,14 +6,17 @@
  * resolved through a Registry (see ./registry.ts).
  *
  *   axis        interface                          reference impls
- *   tracker     TrackerAdapter                     notion
- *   repository  RepositoryAdapter                  github
- *   agent       AgentAdapter                       claude (provider × transport, see ../agent/types.ts)
+ *   tracker     TrackerAdapter                     notion, github_issues, jira
+ *   repository  RepositoryAdapter                  github, gitlab, bitbucket
+ *   agent       AgentAdapter                       claude · gemini · gpt × api · cli (see ../agent/types.ts)
  *   workspace   WorkspaceAdapter + WorkspaceIO     docker, local
- *   channel     ChannelAdapter                     web, slack
+ *   channel     ChannelAdapter                     web
  *
- * These signatures are deliberately kept compatible with the upstream orchestrator
- * so the core logic can be lifted in one pass (see docs/development-plan.md §1.3).
+ * The operational pillar adds a sixth axis of its own — `TriggerAdapter`
+ * (../ops/trigger/types.ts): manual, schedule, pubsub.
+ *
+ * Each signature is the narrowest thing the orchestrator needs, so an adapter can be
+ * written against it without reading the core.
  */
 
 // ───────────────────────────────────────────────────────────── domain models
@@ -101,6 +104,13 @@ export interface BotIdentity {
 export interface CandidatePage {
   items: Issue[];
   nextCursor?: string;
+  /** Whether a `search` term was actually applied to this page.
+   *
+   *  A tracker is allowed to ignore `search`, and an older core does not know the
+   *  parameter at all — in both cases the answer is every candidate, which looks like a
+   *  search box that matches anything rather than one that was never consulted. Saying
+   *  so is what lets the caller tell the two apart (CRL-124). */
+  searched?: boolean;
 }
 
 export interface TrackerAdapter {
@@ -266,7 +276,24 @@ export interface WorkspaceAdapter {
  * or Slack. The only human touch-points: plan approval (with option selection),
  * review approval, PR-fix-plan approval, and ad-hoc questions.
  */
-export type ApprovalKind = 'plan' | 'fix_plan' | 'review' | 'pr_plan' | 'question';
+export const APPROVAL_KINDS = [
+  'plan',
+  'fix_plan',
+  'review',
+  'pr_plan',
+  'question',
+  // Spec-driven planning splits the single plan gate into three (SDD S2).
+  'requirements',
+  'design',
+  'tasks',
+] as const;
+
+/**
+ * A value, not just a type, because the dashboard has to have a label for every one of
+ * them: the approval card renders the kind, and an untranslated kind reaches the reader as
+ * a bare English identifier on the card whose whole content is *which* thing it approves.
+ */
+export type ApprovalKind = (typeof APPROVAL_KINDS)[number];
 
 export interface ApprovalRequest {
   identifier: string;
@@ -293,7 +320,7 @@ export interface ChannelAdapter {
   sendApproval(req: ApprovalRequest): Promise<string>;
   /** Plain notification / reply to the user (no approval semantics). */
   notify(identifier: string, text: string): Promise<void>;
-  /** Provide a unified diff for the issue (web shows inline / slack uploads). */
+  /** Provide a unified diff for the issue — the web channel shows it inline. */
   uploadDiff(identifier: string, filename: string, diff: string): Promise<void>;
   /** Approval granted (optionally with a selected option + notes). */
   onApprove(cb: (approvalId: string, detail?: ApprovalDetail) => void): void;
@@ -309,7 +336,18 @@ export type IssuePhase =
   | 'plan_reviewing'
   | 'plan_sent'
   | 'pr_plan_sent'
+  // The three spec gates, each waiting on a human exactly like `plan_sent`. Produced by
+  // the orchestrator when `spec_mode: split` is configured — see ApprovalKind above.
+  | 'requirements_sent'
+  | 'design_sent'
+  | 'tasks_sent'
   | 'implementing'
+  // The self-review while it is running. `selfReviewLoop` announced this on the bus from
+  // the start — so the history timeline has always had it — but never wrote it to the
+  // runtime, and the dashboard reads the runtime. A review that takes minutes, plus every
+  // re-review after an auto-fix round, showed the card sitting on `implementing` (CRL-90).
+  // Planning has had `plan_reviewing` all along; this is the missing other half.
+  | 'reviewing'
   | 'question_sent'
   | 'review_sent'
   | 'review_fixing'
@@ -324,6 +362,12 @@ export type IssuePhase =
 export const WAITING_PHASES: ReadonlySet<IssuePhase> = new Set([
   'plan_sent',
   'pr_plan_sent',
+  // Listing these the moment the phases exist, not when something first sets them: a
+  // `*_sent` phase missing from this set reads as "idle", and the poller would dispatch
+  // straight over a gate a human is standing at.
+  'requirements_sent',
+  'design_sent',
+  'tasks_sent',
   'review_sent',
   'question_sent',
   'pr_open',
@@ -334,4 +378,6 @@ export const WAITING_PHASES: ReadonlySet<IssuePhase> = new Set([
  * Unattended phases (no human gate, no external wake event) that a restart can
  * leave mid-run. On recovery these are marked retryable rather than auto-redispatched.
  */
-export const RESUMABLE_PHASES: ReadonlySet<IssuePhase> = new Set(['implementing', 'review_fixing']);
+// The spec gates are deliberately absent: they are waiting on a person, not a run the
+// restart cut short, so there is nothing to resume.
+export const RESUMABLE_PHASES: ReadonlySet<IssuePhase> = new Set(['implementing', 'reviewing', 'review_fixing']);

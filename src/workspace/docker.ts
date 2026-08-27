@@ -3,7 +3,7 @@
  * started with `sleep infinity` and kept alive across dispatches (reused via
  * docker exec).
  *
- * Lifted from upstream. KEY ADAPTATION (BYOK): the host `~/.claude` OAuth mount is
+ * Carried over from corral's pre-rename implementation. KEY ADAPTATION (BYOK): the host `~/.claude` OAuth mount is
  * removed — Corral never shares an operator's subscription login. Provider auth is
  * the agent transport's concern (API key / the user's own CLI login); any env the
  * orchestrator needs to inject goes through DockerBackendOptions.env.
@@ -59,6 +59,35 @@ export interface DockerBackendOptions {
   mountCodexAuth?: boolean;
 }
 
+/**
+ * The `docker run` argument list, as its own function so a test can pin it.
+ *
+ * `--init` gives the container a real init as PID 1. Without it PID 1 is `sleep infinity`,
+ * which never reaps anything, so every process an agent orphans stays as a `<defunct>`
+ * entry for the life of the container. A measured run left four behind — harmless at that
+ * count, and unbounded on a container that lives for days (CRL-89).
+ *
+ * Option order matters: everything here precedes the image name, which is appended last.
+ * A container that already exists keeps whatever PID 1 it was started with until it is
+ * recreated.
+ */
+export function dockerRunArgs(name: string, image: string, opts: DockerBackendOptions): string[] {
+  const args = ['run', '-d', '--init', '--name', name, '-w', WORKDIR];
+  if (opts.memory) args.push('--memory', opts.memory);
+  if (opts.cpus) args.push('--cpus', opts.cpus);
+  for (const [k, v] of Object.entries(opts.env ?? {})) args.push('-e', `${k}=${v}`);
+  // Mount the host Claude login read-only so the CLI authenticates without an API key.
+  if (opts.mountHostLogin) args.push('-v', `${homedir()}/.claude:/home/${WORKER_USER}/.claude:ro`);
+  // Same idea for codex, but credential-file only and READ-WRITE: codex refreshes the
+  // token in place (an in-place write passes through a file bind mount), so host and
+  // container stay on ONE credential — no stale snapshot to go 401.
+  if (opts.mountCodexAuth) {
+    args.push('-v', `${hostCodexAuthPath()}:/home/${WORKER_USER}/.codex/auth.json`);
+  }
+  args.push(image, 'sleep', 'infinity');
+  return args;
+}
+
 export class DockerWorkspace implements WorkspaceAdapter {
   readonly kind = 'docker';
   readonly io: WorkspaceIO = dockerIO;
@@ -81,19 +110,7 @@ export class DockerWorkspace implements WorkspaceAdapter {
     // Remove any stale container with the same name.
     await run('docker', ['rm', '-f', name]);
 
-    const args = ['run', '-d', '--name', name, '-w', WORKDIR];
-    if (this.opts.memory) args.push('--memory', this.opts.memory);
-    if (this.opts.cpus) args.push('--cpus', this.opts.cpus);
-    for (const [k, v] of Object.entries(this.opts.env ?? {})) args.push('-e', `${k}=${v}`);
-    // Mount the host Claude login read-only so the CLI authenticates without an API key.
-    if (this.opts.mountHostLogin) args.push('-v', `${homedir()}/.claude:/home/${WORKER_USER}/.claude:ro`);
-    // Same idea for codex, but credential-file only and READ-WRITE: codex refreshes the
-    // token in place (an in-place write passes through a file bind mount), so host and
-    // container stay on ONE credential — no stale snapshot to go 401.
-    if (this.opts.mountCodexAuth) {
-      args.push('-v', `${hostCodexAuthPath()}:/home/${WORKER_USER}/.codex/auth.json`);
-    }
-    args.push(image, 'sleep', 'infinity');
+    const args = dockerRunArgs(name, image, this.opts);
 
     log.info(`starting container ${name} (${image})`);
     await runOrThrow('docker', args);

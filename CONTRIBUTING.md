@@ -21,19 +21,22 @@ and build installers.
 
 | Path | What |
 |------|------|
-| `src/` | Core: orchestrator, 5-axis adapters, control-plane HTTP server (headless) |
-| `renderer/` | Svelte dashboard + setup wizard (consumes the control-plane API) |
+| `src/` | Core: orchestrator, adapters, WebSocket control plane (headless) |
+| `renderer/` | Svelte dashboard + setup wizard (talks to the core through the Electron bridge) |
 | `desktop/` | Electron shell (lifecycle, keychain IPC, spawns the core) |
 | `WORKFLOW.md` | The agent behavior contract (rendered per dispatch) |
 
-## Architecture: the 5 axes
+## Architecture: the axes
 
-Every external integration sits behind an adapter interface in `src/core/types.ts`,
-selected by a `kind` field in config and resolved through a `Registry`
-(`src/core/registry.ts`):
+Every external integration sits behind an adapter interface, selected by a `kind` field in
+config and resolved through a `Registry` (`src/core/registry.ts`).
 
-`TrackerAdapter`, `RepositoryAdapter`, `AgentAdapter` (provider × transport),
-`WorkspaceAdapter` (+`WorkspaceIO`), `ChannelAdapter`.
+The development pillar has five, in `src/core/types.ts`: `TrackerAdapter`,
+`RepositoryAdapter`, `AgentAdapter` (provider × transport), `WorkspaceAdapter`
+(+`WorkspaceIO`), `ChannelAdapter`.
+
+The operational pillar adds `TriggerAdapter` (`src/ops/trigger/types.ts`) — what starts a
+pipeline: manual, a schedule, or a queue.
 
 ### Adding an adapter
 

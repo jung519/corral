@@ -1,0 +1,481 @@
+/**
+ * Pipeline definition — the declarative shape of one operational-AI job.
+ *
+ *   trigger → input → agent → output
+ *
+ * Every name here is domain-neutral on purpose. Corral knows *kinds* of things (a queue,
+ * an HTTP call, a structured answer); what a `title` or a `category` means belongs to the
+ * user's system, and never to this schema. If a field name would only make sense for one
+ * kind of business, it does not belong here.
+ *
+ * This is also the contract for everything downstream — the registry, the runtime, the
+ * history and the UI all read the shapes defined here.
+ */
+import { z } from 'zod';
+import { CredentialRefSchema } from '../../config/schema.js';
+import { isTimeZone, parseCron } from '../trigger/cron.js';
+
+/**
+ * Where a value comes from in a JSON response: a dotted path, optionally cut down.
+ *
+ * Prompt cost is the reason both caps live here rather than in whatever prompt the user
+ * happens to write: `truncate` for a long piece of text, `limit` for a long list. A
+ * pipeline that reads "everything since yesterday" gets whatever yesterday happened to
+ * hold, and the day it holds five hundred records is not the day to find that out.
+ */
+export const FieldSelectorSchema = z.union([
+  z.string().min(1),
+  z.object({
+    path: z.string().min(1),
+    /** Characters, on a string. */
+    truncate: z.number().int().positive().optional(),
+    /** Items, on a list. The first `limit`, since a source that orders its results puts
+     *  the ones worth reading first. */
+    limit: z.number().int().positive().optional(),
+  }),
+]);
+
+/** A structured condition. Free-text conditions can't be executed, so there aren't any. */
+export const ConditionSchema = z.object({
+  field: z.string().min(1),
+  is: z.enum(['empty', 'non_empty']),
+});
+
+// ─────────────────────────────────────────────────────────────── ① trigger
+//
+// Only the kinds something will actually run. An unimplementable kind in the schema means
+// the loader accepts a pipeline that can never fire — a worse failure than rejecting it.
+// `http` is absent on purpose: a trigger you must open a port for defeats the reason the
+// queue was chosen (D5). `queue` is absent because `pubsub` IS the queue implementation.
+
+export const ManualTriggerSchema = z.object({ kind: z.literal('manual') });
+
+export const ScheduleTriggerSchema = z.object({
+  kind: z.literal('schedule'),
+  /**
+   * Standard 5-field cron, parsed here rather than only by the adapter.
+   *
+   * It used to be checked for shape here and for meaning at start, which meant an
+   * unrunnable expression saved cleanly, loaded cleanly, and left one line in the log —
+   * for the same reason the zone below is refused here. CRL-41 opened a box for people to
+   * type an expression by hand, so the wrong one has to come back while they are still
+   * looking at it.
+   */
+  cron: z.string().min(1).superRefine((cron, ctx) => {
+    try {
+      parseCron(cron);
+    } catch (err) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: err instanceof Error ? err.message : String(err) });
+    }
+  }),
+  /**
+   * Which clock "09:00" is on, as an IANA name (`Asia/Seoul`, `UTC`).
+   *
+   * Omitted means the machine running the core — fine on a laptop, and the reason a
+   * schedule set at home runs at a different hour once the core moves to a VM. Refused
+   * here when the runtime does not know the name, because the alternative is a pipeline
+   * that loads cleanly and then fires at the wrong time forever.
+   */
+  timezone: z
+    .string()
+    .min(1)
+    .refine(isTimeZone, (tz) => ({ message: `"${tz}" is not a time zone this machine knows (expected an IANA name like "Asia/Seoul")` }))
+    .optional(),
+});
+
+/**
+ * What talking to Pub/Sub needs, and why it is a refinement rather than a required field.
+ *
+ * Optional, and no longer checked here.
+ *
+ * There are three ways to reach Pub/Sub and only one of them is a credential: the emulator
+ * needs none, and a core on a GCE VM has an identity of its own (CRL-95). Whether a machine
+ * has one cannot be known from a definition — and this schema runs in two places, the core
+ * that will do the pulling and the desktop that may be nowhere near it, so a probe here
+ * would answer about the wrong machine.
+ *
+ * It used to be checked, because unchecked it produced the failure CRL-46 was about: a
+ * pipeline that saved cleanly, loaded cleanly, showed a lit dot and received nothing,
+ * forever. That is now answered where it belongs — `pubsubClient` throws with the three
+ * ways named, and the trigger turns it into a `blocked` state carrying that sentence. The
+ * dot is not lit when nothing is listening.
+ */
+const PubSubCredentialSchema = CredentialRefSchema.optional();
+
+export const PubSubTriggerSchema = z.object({
+  kind: z.literal('pubsub'),
+  topic: z.string().min(1),
+  subscription: z.string().min(1),
+  credential: PubSubCredentialSchema,
+});
+
+export const TriggerSchema = z.discriminatedUnion('kind', [
+  ManualTriggerSchema,
+  ScheduleTriggerSchema,
+  PubSubTriggerSchema,
+]);
+
+// ─────────────────────────────────────────────────────────────── ② input
+//
+// Fetch-back (D6): the event carries an identifier, and the record is read at processing
+// time. A queued event can sit for a while, and the source can change underneath it —
+// carrying the data would mean acting on a stale copy.
+
+export const HttpRequestSchema = z.object({
+  method: z.enum(['GET', 'POST', 'PUT', 'PATCH', 'DELETE']).default('GET'),
+  /** `{{field}}` placeholders are filled from the event/derived fields. */
+  url: z.string().min(1),
+  headers: z.record(z.string(), z.string()).default({}),
+  /** Points at the credential store; the resolved value is sent by `auth` below. Corral
+   *  does not put secrets in config files, here or anywhere else. */
+  credential: CredentialRefSchema.optional(),
+  /**
+   * How the credential is put on the wire.
+   *
+   * `Authorization: Bearer <secret>` is the common case and stays the default, but an
+   * internal API behind a VPC is as likely to want `X-API-Key: <secret>` — and that is
+   * not something a pipeline should have to give up its credential store to express.
+   * A `prefix` of `''` sends the secret on its own.
+   */
+  auth: z
+    .object({
+      header: z.string().min(1).default('authorization'),
+      prefix: z.string().default('Bearer '),
+    })
+    .default({ header: 'authorization', prefix: 'Bearer ' }),
+  body: z.record(z.string(), z.unknown()).optional(),
+  timeout_ms: z.number().int().positive().default(15_000),
+});
+
+/** The event body is already the input. */
+export const NoneInputSchema = z.object({
+  kind: z.literal('none'),
+  select: z.record(z.string(), FieldSelectorSchema).default({}),
+  require: z.array(z.string()).default([]),
+  skip_if: ConditionSchema.optional(),
+});
+
+/** One HTTP call covers REST, GraphQL (POST + JSON body) and in-house APIs alike (D7). */
+export const HttpInputSchema = z.object({
+  kind: z.literal('http'),
+  request: HttpRequestSchema,
+  /** Response path → flat input field. These names are what the prompt template sees. */
+  select: z.record(z.string(), FieldSelectorSchema).default({}),
+  /** Missing any of these means skip, not retry — a retry would fetch the same gap. */
+  require: z.array(z.string()).default([]),
+  /** Guards against re-processing something already handled. */
+  skip_if: ConditionSchema.optional(),
+});
+
+export const InputSchema = z.discriminatedUnion('kind', [NoneInputSchema, HttpInputSchema]);
+
+// ─────────────────────────────────────────────────────────────── ③ agent
+//
+// One turn: prompt in, structured answer out, then checked. The checks are not optional
+// politeness — the rule may be written in the prompt, but the answer is verified in code
+// regardless. A model that ignores an instruction must not be able to write a bad value
+// into someone's system.
+
+/**
+ * Where a piece of prompt material comes from.
+ *
+ * The same shape as `allowed_values`: a list written inline, or one fetched from an API.
+ * That is deliberate — it is the same question ("what are the choices") asked at the other
+ * end of the turn, and two different shapes for it would mean writing the URL twice.
+ *
+ * The list is passed to the prompt as it arrives. Tidying it into something a person would
+ * read needs to know what the values mean — which parent a key belongs to, which label goes
+ * with it — and Corral does not. A caller who wants it tidied can have their own endpoint
+ * answer that way; `select` already points at whichever part of the response to take.
+ */
+export const ContextSourceSchema = z
+  .object({
+    /** Written into the definition. Anything a template can render. */
+    values: z.array(z.unknown()).optional(),
+    /** Fetched at run time, and briefly cached — a list that changes daily should not mean
+     *  editing the pipeline. */
+    source: HttpRequestSchema.optional(),
+    /** Where the list sits inside the response, when it isn't the whole body. */
+    select: z.string().optional(),
+  })
+  .refine((c) => !!c.values || !!c.source, {
+    message: 'context needs either an inline `values` list or a `source` to fetch it from',
+  });
+
+export const OutputShapeSchema = z
+  .object({
+    type: z.literal('object'),
+    properties: z.record(z.string(), z.unknown()),
+    required: z.array(z.string()).default([]),
+  })
+  .passthrough()
+  // Only declared properties survive the answer check, so a schema that declares none
+  // would pay for a turn and then discard everything it got back — a run that reports
+  // success while doing nothing. Caught here rather than at 3am.
+  .refine((shape) => Object.keys(shape.properties).length > 0, {
+    message: 'schema must declare at least one property — an answer with no declared fields would be discarded',
+  });
+
+export const ValidationSchema = z.object({
+  /** Values outside the list are dropped and recorded, never sent on. The list itself can
+   *  be fetched, so a vocabulary that changes daily doesn't mean editing the pipeline. */
+  allowed_values: z
+    .object({
+      field: z.string().min(1),
+      values: z.array(z.string()).optional(),
+      source: HttpRequestSchema.optional(),
+      /** Where the list sits inside the response, when it isn't the whole body. */
+      select: z.string().optional(),
+      /**
+       * The name of an `agent.context` entry to judge against.
+       *
+       * The list the prompt showed the model and the list its answer is checked against
+       * are the same list. Saying it twice — once here and once up there — is a pipeline
+       * that drifts the day somebody edits one of them: the check would start accepting a
+       * value the model was never told about, or keep rejecting one it was (CRL-66).
+       */
+      from: z.string().min(1).optional(),
+    })
+    .superRefine((v, ctx) => {
+      // Three ways to say where the list comes from, and "none" and "more than one" are
+      // different mistakes — a reader who wrote neither should not have to work out which
+      // of two sentences applies to them.
+      const named = [v.values && 'values', v.source && 'source', v.from && 'from'].filter(Boolean);
+      if (named.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'allowed_values needs one of `values` (written here), `source` (fetched) or `from` (a context name)',
+        });
+      } else if (named.length > 1) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `allowed_values names more than one source for its list (${named.join(', ')}) — pick one`,
+        });
+      }
+    })
+    .optional(),
+  max_items: z.object({ field: z.string().min(1), limit: z.number().int().positive() }).optional(),
+  min_confidence: z.object({ field: z.string().min(1), threshold: z.number().min(0).max(1) }).optional(),
+});
+
+/** What each rule needs the field to be, when the answer schema says what it is. */
+const RULE_EXPECTS: Record<string, { type?: string; not?: string; why: string }> = {
+  max_items: { type: 'array', why: 'counts the items in a list' },
+  min_confidence: { type: 'number', why: 'compares a number against a threshold' },
+  allowed_values: { not: 'object', why: 'compares values against a list of allowed ones' },
+};
+
+export const AgentStepSchema = z.object({
+  /** Omitted = use the app's configured provider. Operational and development AI share
+   *  the same provider settings and the same token ceiling (D24, D12). */
+  provider: z.enum(['claude', 'gemini', 'gpt']).optional(),
+  model: z.string().optional(),
+  /**
+   * Cap on the tokens the model may produce. Omit and the provider's own behaviour applies,
+   * exactly as it did before this was wired up.
+   *
+   * Optional rather than defaulted on purpose: a default cannot be told apart from a value
+   * someone wrote, so applying one would have quietly narrowed every pipeline that already
+   * runs — Claude from 8192 down, Gemini and GPT from their own defaults down (CRL-93).
+   *
+   * The right number is measured, not chosen: too low and the JSON is cut mid-answer and
+   * the paid turn is discarded by the shape check; too high and reasoning tokens spend what
+   * they are given. Gemini counts its thinking against this same allowance, which is why
+   * one number cannot serve every pipeline.
+   *
+   * Not applied on the CLI transport — see `cli-turn.ts`.
+   */
+  max_tokens: z.number().int().positive().optional(),
+  /**
+   * Both halves take `{{field}}` placeholders, filled from the selected input fields and
+   * from whatever `context` fetched.
+   *
+   * The system half used to be passed through raw, which made the obvious place to put a
+   * fetched vocabulary the one place it did not work (CRL-97).
+   */
+  prompt: z.object({
+    system: z.string().min(1),
+    user_template: z.string().min(1),
+  }),
+  /**
+   * Material the prompt needs, fetched before the turn and merged into the fields a
+   * template can reach (CRL-64).
+   *
+   * The case it exists for: a rule says "choose from this list" and the list lives
+   * somewhere else. Without this the model never saw the list, answered names that were
+   * not on it, and `allowed_values` threw every one away.
+   *
+   * Names declared here are the weakest in the bag. An event field or a selected input
+   * field of the same name wins — the same order `select` already beats the event by, and
+   * for the same reason: the value belonging to *this* run is the more specific one.
+   */
+  context: z.record(z.string(), ContextSourceSchema).default({}),
+  /** The structured answer's shape. Requested from the model and checked on return. */
+  schema: OutputShapeSchema,
+  validate: ValidationSchema.default({}),
+})
+  /**
+   * A rule that cannot do its job is refused here rather than skipped at 3am.
+   *
+   * Only declared properties survive the answer check, so a rule naming anything else is
+   * examining a field that will never be there — `allowed_values` and `max_items` would
+   * quietly pass everything, while `min_confidence` would reject everything. Three rules,
+   * the same mistake, three different behaviours, none of them the one that was meant.
+   */
+  .superRefine((step, ctx) => {
+    // `from` names an entry in `context`, and the two blocks only meet here — the
+    // validation schema on its own has no idea what was declared for the prompt. Same
+    // shape as the field check below: a name nothing answers to means a rule that will
+    // never see a list, and finding that out at 3am is the failure being avoided.
+    const from = step.validate.allowed_values?.from;
+    if (from && !(from in step.context)) {
+      const declared = Object.keys(step.context);
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['validate', 'allowed_values', 'from'],
+        message: declared.length
+          ? `"${from}" is not declared in \`agent.context\` — it has ${declared.map((n) => `"${n}"`).join(', ')}`
+          : `"${from}" is not declared in \`agent.context\`, which is empty`,
+      });
+    }
+
+    const properties = step.schema.properties;
+    for (const [rule, field] of [
+      ['allowed_values', step.validate.allowed_values?.field],
+      ['max_items', step.validate.max_items?.field],
+      ['min_confidence', step.validate.min_confidence?.field],
+    ] as const) {
+      if (!field) continue;
+      const path = ['validate', rule, 'field'];
+      if (!(field in properties)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `"${field}" is not declared in the answer schema, so this rule would never see a value`,
+        });
+        continue;
+      }
+
+      // The declared type is optional in JSON Schema and in the answers people write, so
+      // a missing one is not a problem — it just means this cannot be settled until a
+      // value turns up, and the validator refuses it then.
+      const declared = (properties[field] as { type?: unknown } | null)?.type;
+      if (typeof declared !== 'string') continue;
+      const expects = RULE_EXPECTS[rule];
+      if (!expects) continue;
+      if (expects.type && declared !== expects.type) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `${rule} ${expects.why}, but "${field}" is declared ${declared}`,
+        });
+      }
+      if (expects.not && declared === expects.not) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path,
+          message: `${rule} ${expects.why}, but "${field}" is declared ${declared}`,
+        });
+      }
+    }
+  });
+
+// ─────────────────────────────────────────────────────────────── ④ output
+//
+// Corral does not know the user's data model, so storing the result is their system's job
+// (D8). It either calls their API or publishes a message.
+
+export const NoneOutputSchema = z.object({ kind: z.literal('none') });
+
+export const HttpOutputSchema = z.object({
+  kind: z.literal('http'),
+  request: HttpRequestSchema,
+  /**
+   * Don't send when the answer came back empty (CRL-92).
+   *
+   * The prompt is often the thing *asking* for an empty answer — "return an empty list if
+   * you have no grounds" — and `validate` rightly lets that through, because honouring the
+   * instruction is not drift. But an API that stores results usually refuses an empty one,
+   * since a stored blank cannot be told apart from "not processed yet". It answers 400, the
+   * run ends `output_failed`, and a queue trigger reads that as retryable: the same message
+   * returns, the model sees the same material, gives the same honest empty answer, and the
+   * loop runs to the dead-letter queue with nobody at fault.
+   *
+   * Same `ConditionSchema` as the input's `skip_if` — a judgement that works on the way in
+   * has no reason to be unavailable on the way out. Evaluated against what the sink would
+   * have received, so the name written here is the name the output body uses.
+   */
+  skip_if: ConditionSchema.optional(),
+});
+
+const MESSAGE_REQUIRED = 'a pubsub output needs a message — name the fields to publish, e.g. { labels: "{{labels}}" }';
+
+export const PubSubOutputSchema = z.object({
+  kind: z.literal('pubsub'),
+  topic: z.string().min(1),
+  credential: PubSubCredentialSchema,
+  /**
+   * What to publish, `{{field}}` placeholders and all. Required, with no default.
+   *
+   * It used to default to `{}`, which the sink read as "publish everything" — and
+   * everything is more than it sounds. The bag a sink receives is the event, the fetched
+   * record and the answer, merged. A pipeline classifying a record published its own
+   * source material: 589 bytes where the answer was 40, carrying a 420-character body,
+   * the organiser's email and phone, and a token that arrived on the queue message
+   * (CRL-51).
+   *
+   * An HTTP output never had this problem because a body has to be written out. Saying
+   * what goes on a topic is the same amount of thinking, and the default was the only
+   * thing excusing anyone from doing it.
+   */
+  // Absent and empty are the same mistake, so they get the same sentence — a reader who
+  // left the box blank should not have to work out which of two messages applies to them.
+  message: z
+    .record(z.string(), z.unknown(), { required_error: MESSAGE_REQUIRED, invalid_type_error: MESSAGE_REQUIRED })
+    .refine((m) => Object.keys(m).length > 0, { message: MESSAGE_REQUIRED }),
+  /** Don't publish an empty answer — see `HttpOutputSchema.skip_if` (CRL-92). */
+  skip_if: ConditionSchema.optional(),
+});
+
+export const OutputSchema = z.discriminatedUnion('kind', [NoneOutputSchema, HttpOutputSchema, PubSubOutputSchema]);
+
+// ─────────────────────────────────────────────────────────────── the pipeline
+
+/** What to do when the answer fails `min_confidence`. Defaults to not sending it (D14):
+ *  the run is recorded with a link to wherever a human can look, and nothing is written. */
+export const LowConfidenceSchema = z.object({
+  action: z.enum(['report', 'skip', 'send']).default('report'),
+  /** Deep link to the user's own review screen. `{{field}}` placeholders allowed. */
+  review_url: z.string().optional(),
+});
+
+export const PipelineSchema = z.object({
+  /** Stable identifier — used in history, the UI, and manual runs. */
+  key: z
+    .string()
+    .min(1)
+    .regex(/^[a-z0-9][a-z0-9-]*$/, 'key must be lowercase letters, digits and dashes, starting with a letter or digit'),
+  enabled: z.boolean().default(true),
+  /** Free text for the operator; never read by the runtime. */
+  description: z.string().optional(),
+  /** Concurrent runs of THIS pipeline. Start at 1 and raise once you've measured — it is
+   *  a property of the work, not of how the work arrives, so it sits here and not on the
+   *  trigger. */
+  max_concurrent: z.number().int().positive().default(1),
+  trigger: TriggerSchema,
+  input: InputSchema,
+  agent: AgentStepSchema,
+  output: OutputSchema,
+  on_low_confidence: LowConfidenceSchema.default({ action: 'report' }),
+});
+
+export type Pipeline = z.infer<typeof PipelineSchema>;
+export type PipelineTrigger = z.infer<typeof TriggerSchema>;
+export type PipelineInput = z.infer<typeof InputSchema>;
+export type PipelineAgentStep = z.infer<typeof AgentStepSchema>;
+export type PipelineOutput = z.infer<typeof OutputSchema>;
+export type HttpRequestDef = z.infer<typeof HttpRequestSchema>;
+export type ContextSource = z.infer<typeof ContextSourceSchema>;
+export type FieldSelector = z.infer<typeof FieldSelectorSchema>;
+export type PipelineValidation = z.infer<typeof ValidationSchema>;
+export type Condition = z.infer<typeof ConditionSchema>;

@@ -5,17 +5,34 @@
  * config exists it starts the orchestrator child and loads the dashboard. All
  * native capabilities are exposed to the renderer through preload IPC handlers.
  */
-import { app, BrowserWindow, dialog, ipcMain, Notification, shell } from 'electron';
-import { exec, execFile, spawn } from 'node:child_process';
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Notification, shell } from 'electron';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { configExists, readConfig, writeConfig } from './config-store.js';
-import { readDirection, writeDirection } from './direction-store.js';
-import { clearDraft, readDraft, writeDraft } from './draft-store.js';
-import { deleteSecret, hasSecret, setSecret } from './keychain.js';
+import { configExists as localConfigExists } from './config-store.js';
+import * as native from './native-routing.js';
 import { initAutoUpdate } from './auto-updater.js';
-import { callCore, restartOrchestrator, startOrchestrator, stopOrchestrator } from './orchestrator-process.js';
+import {
+  callCore,
+  linkStatus,
+  pairRemote,
+  restartOrchestrator,
+  startOrchestrator,
+  stopOrchestrator,
+  type TunnelConfig,
+} from './orchestrator-process.js';
+import {
+  EXPECT_SCRIPT,
+  failureReason,
+  findAuthUrl,
+  findToken,
+  oauthError,
+  spawnFailureReason,
+  splitAuthCode,
+  renderText,
+} from './claude-token.js';
+import { clearRemote, clearRemoteToken, readRemote, writeRemote } from './remote-store.js';
 import { decideGate, fetchManifest, type GateDecision } from './update-gate.js';
 import {
   fetchNotionSchema,
@@ -68,32 +85,111 @@ function createWindow(): void {
   // Ensure the core (IPC control plane) is running whenever a window exists — covers
   // first launch and macOS reopen-after-close. Idempotent (no-op if already up).
   startOrchestrator();
-  const firstRun = !configExists();
+  // Which screen to open first. Only the local config can be checked synchronously, and
+  // in remote mode it is the wrong disk to look at — so we open the dashboard and let the
+  // renderer redirect once it has asked the core (App.svelte does this on mount).
+  const firstRun = !native.isRemote() && !localConfigExists();
   void win.loadURL(rendererUrl(firstRun ? '#/setup' : '#/'));
 }
 
 function registerIpc(): void {
+  // Config, secrets, direction, draft and host probes go through native-routing: they
+  // land on this machine in local mode and on the core's machine in remote mode.
   ipcMain.handle('app:version', () => app.getVersion());
-  ipcMain.handle('config:exists', () => configExists());
-  ipcMain.handle('config:read', () => readConfig());
-  ipcMain.handle('config:write', (_e, yaml: string) => writeConfig(yaml));
+  ipcMain.handle('config:exists', () => native.configExists());
+  ipcMain.handle('config:read', () => native.configRead());
+  ipcMain.handle('config:parsed', () => native.configParsed());
+  ipcMain.handle('config:write', (_e, yaml: string) => native.configWrite(yaml));
+  ipcMain.handle('config:specMode', (_e, mode: 'single' | 'split') => native.specModeWrite(mode));
 
-  ipcMain.handle('draft:read', () => readDraft());
-  ipcMain.handle('draft:write', (_e, json: string) => writeDraft(json));
-  ipcMain.handle('draft:clear', () => clearDraft());
+  ipcMain.handle('draft:read', () => native.draftRead());
+  ipcMain.handle('draft:write', (_e, json: string) => native.draftWrite(json));
+  ipcMain.handle('draft:clear', () => native.draftClear());
 
-  ipcMain.handle('direction:read', () => readDirection());
-  ipcMain.handle('direction:write', (_e, text: string) => writeDirection(text));
+  /**
+   * The third-party attribution list. Shipped as a resource so it travels with the build —
+   * MIT/ISC ask for their text in binary distributions, and `NOTICE` used to point at a
+   * screen that did not exist (CRL-118).
+   */
+  ipcMain.handle('licenses:read', () => {
+    const file = app.isPackaged
+      ? join(process.resourcesPath, 'THIRD-PARTY-LICENSES.txt')
+      : join(app.getAppPath(), '..', 'THIRD-PARTY-LICENSES.txt');
+    try {
+      return readFileSync(file, 'utf8');
+    } catch {
+      // Say so rather than showing an empty panel: a missing list is a build problem.
+      return null;
+    }
+  });
+
+  ipcMain.handle('direction:read', () => native.directionRead());
+  ipcMain.handle('direction:write', (_e, text: string) => native.directionWrite(text));
+
+  // Core connection: run the core here (local) or attach to one elsewhere (remote).
+  ipcMain.handle('remote:get', () => {
+    const saved = readRemote();
+    return {
+      mode: saved.mode,
+      url: saved.url ?? '',
+      label: saved.label ?? '',
+      paired: !!saved.token, // drives whether the UI asks for a pairing code
+      // Null rather than undefined: the renderer distinguishes "no tunnel configured"
+      // (someone with their own tunnel or an overlay network) from "not answered yet".
+      tunnel: saved.tunnel ?? null,
+      ...linkStatus(),
+    };
+  });
+  ipcMain.handle(
+    'remote:setMode',
+    (_e, mode: 'local' | 'remote', url?: string, label?: string, tunnel?: TunnelConfig) => {
+      writeRemote({ mode, url, label, tunnel });
+      restartOrchestrator(); // pick up the new mode immediately
+      return { ok: true, ...linkStatus() };
+    },
+  );
+  ipcMain.handle('remote:pair', (_e, url: string, code: string, label?: string, tunnel?: TunnelConfig) =>
+    pairRemote({ url, code, label, tunnel }),
+  );
+  ipcMain.handle('remote:unpair', () => {
+    // Forget this device's token; the next remote connection needs a fresh code. This is
+    // the one path that erases the saved setup — `writeRemote` merges, so wiping has to be
+    // asked for by name (CRL-119).
+    clearRemoteToken();
+    clearRemote();
+    restartOrchestrator();
+    return { ok: true };
+  });
 
   ipcMain.handle('secret:set', (_e, service: string, account: string, value: string) =>
-    setSecret(service, account, value),
+    native.secretSet(service, account, value),
   );
-  ipcMain.handle('secret:has', (_e, service: string, account: string) => hasSecret(service, account));
-  ipcMain.handle('secret:delete', (_e, service: string, account: string) => deleteSecret(service, account));
+  ipcMain.handle('secret:has', (_e, service: string, account: string) => native.secretHas(service, account));
+  ipcMain.handle('secret:delete', (_e, service: string, account: string) => native.secretDelete(service, account));
 
-  ipcMain.handle('docker:detect', () => detectDocker());
-  ipcMain.handle('cli:detect', (_e, provider: string) => detectCli(provider));
-  ipcMain.handle('claude:setup-token', () => runClaudeSetupToken());
+  ipcMain.handle('docker:detect', () => native.detectDocker());
+  ipcMain.handle('cli:detect', (_e, provider: string) => native.detectCli(provider));
+  // Login capture stays on THIS machine in both modes — it opens a browser, and a VM has
+  // none. The token it returns is saved through `secret:set`, so it still lands on the core.
+  // Clipboard through the main process, not `navigator.clipboard`: the window is loaded
+  // from a `file://` URL, which is not a secure context, so the web API is unavailable.
+  // Every value a user would otherwise select by hand goes through here.
+  ipcMain.handle('clipboard:write', (_e, text: string) => {
+    clipboard.writeText(String(text ?? ''));
+    return { ok: true };
+  });
+  ipcMain.handle('clipboard:read', () => ({ ok: true, text: clipboard.readText() }));
+  ipcMain.handle('claude:token-start', () => startClaudeSetupToken());
+  ipcMain.handle('claude:token-code', (_e, code: string) => submitClaudeCode(code));
+  // A quit mid-flow must not leave a CLI attached to a pty nobody reads.
+  app.on('will-quit', endSession);
+  // Asked while the dialog waits on a browser sign-in. A session that ended in the
+  // meantime should be said out loud there and then, not discovered on submit.
+  ipcMain.handle('claude:token-alive', () => ({ alive: !!session }));
+  ipcMain.handle('claude:token-cancel', () => {
+    endSession();
+    return { ok: true };
+  });
   ipcMain.handle('codex:import-auth', () => importCodexAuth());
   ipcMain.handle('notify', (_e, title: string, body: string) => showNotification(title, body));
 
@@ -107,8 +203,10 @@ function registerIpc(): void {
 
   // After setup (config + secrets just written): respawn the core so it picks up the
   // new config and the freshly-saved keychain secrets (injected as env on spawn).
+  // A remote core has already reloaded itself inside `config:write` — respawning here
+  // would only drop and re-establish the link for nothing.
   ipcMain.handle('orchestrator:start', () => {
-    restartOrchestrator();
+    if (!native.isRemote()) restartOrchestrator();
     return { ok: true };
   });
 
@@ -132,64 +230,164 @@ function showNotification(title: string, body: string): void {
   n.show();
 }
 
-function detectDocker(): Promise<{ available: boolean; version?: string }> {
-  return new Promise((resolve) => {
-    exec('docker --version', (err, stdout) => {
-      if (err) resolve({ available: false });
-      else resolve({ available: true, version: stdout.trim() });
-    });
-  });
+/**
+ * Driving `claude setup-token` for the user, when this machine can.
+ *
+ * The CLI is an Ink TUI: with no TTY it prints nothing, and after the browser sign-in it
+ * waits for a code to be pasted in. The previous version spawned it with piped stdio and
+ * awaited a token that could never come — the button spun for five minutes and left the
+ * process running (CRL-83).
+ *
+ * So: a pty (borrowed from `expect`, which is base-system on macOS), and three steps
+ * instead of one, because the code only exists after the user has signed in. Every step
+ * has an end — a timeout, a failure, or a cancel — and the caller falls back to asking
+ * the user to run the command themselves whenever one is reached. That fallback is not
+ * only for errors: most Linux desktops and every Windows have no `expect` at all.
+ */
+type TokenStep = { ok: true; url?: string; token?: string } | { ok: false; reason: string; error?: string };
+
+/** Nothing here ever waits forever. Sign-in is slow, a rejected code is not. */
+const URL_WAIT_MS = 20_000;
+const TOKEN_WAIT_MS = 60_000;
+
+let session: { child: ChildProcess; out: string } | undefined;
+
+function endSession(): void {
+  const s = session;
+  session = undefined;
+  const pid = s?.child.pid;
+  if (!s || !pid) return;
+
+  // Negative pid = the whole group. `expect` is the child; `claude` is *its* child, and
+  // killing only the parent leaves a stray CLI holding the pty.
+  const signal = (sig: NodeJS.Signals): void => {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+      try {
+        s.child.kill(sig);
+      } catch {
+        /* already gone */
+      }
+    }
+  };
+
+  signal('SIGTERM');
+  // `expect` ignores SIGTERM — measured, not assumed: after `kill -TERM` it was still
+  // running, and only `kill -KILL` ended it. So escalate. A second is long enough for a
+  // process that does listen, and short enough that nobody notices.
+  const kill = setTimeout(() => signal('SIGKILL'), 1_000);
+  s.child.once('close', () => clearTimeout(kill));
 }
 
-/** The official CLI binary for each agent provider. */
-const CLI_BIN: Record<string, string> = { claude: 'claude', gemini: 'gemini', gpt: 'codex' };
-
-/** Check whether a provider's CLI is installed (runs `<bin> --version`). Binary is
- *  looked up from a fixed whitelist, never interpolated from the provider arg. */
-function detectCli(provider: string): Promise<{ installed: boolean; version?: string }> {
-  const bin = CLI_BIN[provider];
-  if (!bin) return Promise.resolve({ installed: false });
+/** Watch the CLI's screen until `read` finds something, the process dies, or time runs out. */
+function watch<T>(ms: number, read: (out: string) => T | null): Promise<T | 'timeout' | 'gone'> {
   return new Promise((resolve) => {
-    execFile(bin, ['--version'], { timeout: 5000 }, (err, stdout) => {
-      if (err) resolve({ installed: false });
-      else resolve({ installed: true, version: stdout.trim().split('\n')[0] });
-    });
-  });
-}
-
-/** Run `claude setup-token` to obtain a long-lived subscription OAuth token at save
- *  time, so the user doesn't have to run it in a terminal and paste the result. The
- *  CLI opens the browser itself and serves a localhost OAuth callback (no stdin/TTY
- *  needed), then prints the `sk-ant-oat…` token — which we extract from its output.
- *  On failure we return the output tail (it contains the URL) so the UI can fall back
- *  to manual auth. */
-function runClaudeSetupToken(): Promise<{ ok: boolean; token?: string; error?: string }> {
-  return new Promise((resolve) => {
-    let out = '';
-    let settled = false;
-    const finish = (r: { ok: boolean; token?: string; error?: string }): void => {
-      if (settled) return;
-      settled = true;
+    const s = session;
+    if (!s) return resolve('gone');
+    const done = (v: T | 'timeout' | 'gone'): void => {
       clearTimeout(timer);
-      resolve(r);
+      s.child.stdout?.off('data', onData);
+      s.child.off('close', onClose);
+      resolve(v);
     };
-    const child = spawn('claude', ['setup-token'], { stdio: ['ignore', 'pipe', 'pipe'] });
-    // Browser auth can take a while; give the user 5 minutes before giving up.
-    const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      finish({ ok: false, error: 'timeout — 인증이 완료되지 않았습니다 (5분 초과)' });
-    }, 300_000);
-    child.stdout.on('data', (d: Buffer) => (out += d.toString()));
-    child.stderr.on('data', (d: Buffer) => (out += d.toString()));
-    child.on('error', (err) =>
-      finish({ ok: false, error: `claude CLI 실행 실패 (설치/PATH 확인): ${err instanceof Error ? err.message : String(err)}` }),
-    );
-    child.on('close', () => {
-      const m = out.match(/sk-ant-oat[A-Za-z0-9_-]+/);
-      if (m) finish({ ok: true, token: m[0] });
-      else finish({ ok: false, error: out.trim().slice(-600) || '출력에서 토큰을 찾지 못했습니다.' });
-    });
+    const check = (): boolean => {
+      const found = read(s.out);
+      if (found === null) return false;
+      done(found);
+      return true;
+    };
+    const onData = (d: Buffer): void => {
+      s.out += d.toString();
+      check();
+    };
+    // Look once more before giving up: the answer may have arrived in the same breath as
+    // the exit, and the CLI exits right after printing the token.
+    const onClose = (): void => {
+      if (!check()) done('gone');
+    };
+    const timer = setTimeout(() => done('timeout'), ms);
+    s.child.stdout?.on('data', onData);
+    s.child.on('close', onClose);
+    // The answer may already be on screen — a listener added now would never see it.
+    check();
   });
+}
+
+/** Start the flow: spawn under a pty and hand back the sign-in URL. */
+async function startClaudeSetupToken(): Promise<TokenStep> {
+  endSession();
+  const child = spawn('expect', ['-c', EXPECT_SCRIPT], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    // Its own group, so cancelling takes the CLI down with it.
+    detached: true,
+  });
+  session = { child, out: '' };
+  child.stderr?.on('data', (d: Buffer) => session && (session.out += d.toString()));
+  // A child that exits on its own must not leave `session` pointing at a corpse. Without
+  // this, a submitted code was written to a dead pipe and the watcher then waited for a
+  // `close` that had already fired — a full minute of nothing, ending in "unknown"
+  // (CRL-84). Now the next call says plainly that the session is over.
+  child.once('close', () => {
+    if (session?.child === child) session = undefined;
+  });
+
+  const spawnFailed = new Promise<TokenStep>((resolve) =>
+    child.once('error', (err: NodeJS.ErrnoException) =>
+      resolve({ ok: false, reason: spawnFailureReason(err.code), error: err.message }),
+    ),
+  );
+  const url = watch(URL_WAIT_MS, (out) => findAuthUrl(out));
+  const found = await Promise.race([spawnFailed, url]);
+
+  if (typeof found === 'object') {
+    endSession();
+    return found;
+  }
+  if (found === 'timeout' || found === 'gone') {
+    const reason = session && renderText(session.out).trim().length === 0 ? 'no-pty' : found;
+    endSession();
+    return { ok: false, reason };
+  }
+  return { ok: true, url: found };
+}
+
+/** Hand the code from the sign-in page to the waiting CLI, and read back the token. */
+async function submitClaudeCode(code: string): Promise<TokenStep> {
+  if (!session) return { ok: false, reason: 'gone' };
+  // The screen checks this too; here it is a guarantee rather than a courtesy — the CLI
+  // would reject it and end the session, costing the user the whole flow again.
+  const split = splitAuthCode(code);
+  if (!split.ok) return { ok: false, reason: 'partial-code' };
+  session.child.stdin?.write(`${split.code}\n`);
+  // Either outcome, whichever the screen shows first. The refusal carries the CLI's own
+  // words — "Invalid code" and "Request failed with status code 400" are different
+  // problems and the user can only tell them apart if we pass the message along.
+  const found = await watch(TOKEN_WAIT_MS, (out) => {
+    const token = findToken(out);
+    if (token) return { kind: 'token' as const, token };
+    const refusal = oauthError(out);
+    return refusal ? { kind: 'refused' as const, refusal } : null;
+  });
+  if (typeof found === 'object' && found.kind === 'refused') {
+    // Recoverable in the CLI, but only by pressing Enter into a screen we would then have
+    // to keep reading. Ending here and starting over is the honest shape.
+    endSession();
+    // The status, when there was one, is the difference between "you copied half of it"
+    // and "the server would not take it" — different advice, so it travels with the reason.
+    return {
+      ok: false,
+      reason: found.refusal.kind,
+      error: found.refusal.status ? String(found.refusal.status) : undefined,
+    };
+  }
+  if (found === 'timeout' || found === 'gone') {
+    const reason = session ? failureReason(session.out) : 'gone';
+    endSession();
+    return { ok: false, reason };
+  }
+  endSession();
+  return { ok: true, token: found.token };
 }
 
 // App name (menu bar, About, dock tooltip).
@@ -219,7 +417,7 @@ function importCodexAuth(): { ok: boolean; b64?: string; error?: string } {
 }
 
 /**
- * Version gate (§update). Blocks a too-old app (forced) or nudges an out-of-date one
+ * Version gate. Blocks a too-old app (forced) or nudges an out-of-date one
  * (recommended), based on the remote manifest. Returns false only when the app must NOT
  * continue (forced → we open the download page and quit). Fail-open: offline / fetch error
  * → proceed, so a network blip never bricks the app.

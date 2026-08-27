@@ -3,8 +3,8 @@
  *
  * Every value is user-supplied — there are no project-specific defaults baked in.
  * Secrets are never inline: config holds a CredentialRef pointer; the secret lives
- * in a CredentialStore (see ../credentials/types.ts). Project/language specifics
- * live under `profile` (the de-masil seam), not in code.
+ * in a CredentialStore (see ../credentials/types.ts). Project and language specifics
+ * live under `profile`, never in code.
  *
  * `kind` discriminators line up with the per-axis registries (../core/registry.ts).
  */
@@ -179,11 +179,38 @@ export const RepositorySchema = z.discriminatedUnion('kind', [
 
 // ─────────────────────────────────────────────────────────────── axis 3: agent
 
+/**
+ * Reasoning effort levels, as the claude CLI names them.
+ *
+ * The type itself lives in `agent/types.ts` — this is the parser for it, and exporting a
+ * second `Effort` from here would make the package's re-export ambiguous.
+ */
+export const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
+
 export const StageModelsSchema = z
   .object({
     planning: z.string().optional(),
     implementation: z.string().optional(),
     review: z.string().optional(),
+  })
+  .default({});
+
+/**
+ * How hard the agent thinks before it acts, per stage.
+ *
+ * Measured across one issue's planning: 55.6% of the wall time was the model thinking
+ * between tool calls, against 31.7% writing documents and 0.1% running the tools. The
+ * levels are claude's own (`--effort low|medium|high|xhigh|max`) rather than an invented
+ * scale — there is no evidence for how another CLI's knob would map onto a scale of ours,
+ * and guessing a mapping is worse than naming the one that exists (CRL-131).
+ *
+ * Absent = the CLI's own default, which is what every run does today.
+ */
+export const StageEffortsSchema = z
+  .object({
+    planning: EffortSchema.optional(),
+    implementation: EffortSchema.optional(),
+    review: EffortSchema.optional(),
   })
   .default({});
 
@@ -201,6 +228,9 @@ export const AgentRoutingSchema = z.object({
    *  key (subscription, not pay-per-use). */
   oauth_credential: CredentialRefSchema.optional(),
   models: StageModelsSchema,
+  /** Per-stage reasoning effort. Honoured by the claude CLI transport; other transports
+   *  warn at startup rather than ignoring it in silence (CRL-93's lesson, CRL-131). */
+  effort: StageEffortsSchema,
 });
 
 const requireApiCredential = (agent: { transport: string; credential?: unknown }, ctx: z.RefinementCtx, path: (string | number)[]) => {
@@ -256,7 +286,15 @@ export const WorkspaceSchema = z
         mount_host_login: z.boolean().default(true),
         memory: z.string().optional(),
         cpus: z.string().optional(),
-        /** Extra env injected into the worker container. */
+        /**
+         * Extra env injected into the worker container.
+         *
+         * **Not for secrets.** These are set when the container is created, and docker keeps
+         * them in the container's own configuration — `docker inspect` reads them back for as
+         * long as the container lives, no matter how they were passed in. There is no way to
+         * hide them, so agent credentials go a different route entirely (`CliSpawnSpec.secretEnv`,
+         * CRL-125). Put build configuration here, not keys.
+         */
         env: z.record(z.string()).optional(),
       })
       .optional(),
@@ -265,12 +303,61 @@ export const WorkspaceSchema = z
 
 // ───────────────────────────────────────────────────────────── axis 5: channel
 
+/**
+ * How a human is asked for a decision. `web` means the dashboard itself — the app IS the
+ * channel, so there is no port and no server: an approval becomes a pending action the UI
+ * renders and the user's click is the answer.
+ */
 export const ChannelSchema = z
   .object({
-    kind: z.enum(['web', 'slack']).default('web'),
-    port: z.number().int().positive().default(4400),
+    // One axis, one implementation for now. `slack` used to be accepted here and there
+    // was nothing registered to serve it, so a config naming it validated cleanly and then
+    // died at the registry — the latest possible moment to learn you were wrong. A value
+    // goes back in this list when an adapter exists to answer for it (CRL-116).
+    kind: z.enum(['web']).default('web'),
   })
-  .default({ kind: 'web', port: 4400 });
+  .default({ kind: 'web' });
+
+// ──────────────────────────────────────────────────────────────────── limits
+
+/**
+ * Daily ceiling, shared by the development and operational AI (first come, first served).
+ *
+ * The token counts are the figure of record: they come back from the response itself and
+ * are exactly what was spent, whereas a price table belongs to the vendor and the vendor
+ * changes it. The dollar ceiling is there because a token count is not a number anyone
+ * budgets in — "2,000,000 tokens" does not answer "what will tonight cost" (CRL-86). It is
+ * estimated from `agent/pricing.ts`, so treat it as a guard rail, not an invoice.
+ *
+ * Any of the three may be set on its own; whichever runs out first stops the work.
+ * Unset = no ceiling.
+ */
+export const LimitsSchema = z
+  .object({
+    daily_input_tokens: z.number().int().nonnegative().optional(),
+    daily_output_tokens: z.number().int().nonnegative().optional(),
+    /** Dollars. Fractional on purpose — a day's work can be well under $1. */
+    daily_cost_usd: z.number().nonnegative().optional(),
+  })
+  .default({});
+
+// ────────────────────────────────────────────────────────────── control plane
+
+/**
+ * Remote control plane (WebSocket). **Off by default** — the desktop drives the core
+ * over a process IPC channel, so a local install has no reason to open a port. Turn it
+ * on to operate a core that runs elsewhere (a VM).
+ *
+ * ⚠️ Authenticated (a pairing code exchanged for a token) but NOT encrypted. Put it behind
+ * a tunnel or a VPN rather than binding a public interface.
+ */
+export const ControlPlaneSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    host: z.string().default('127.0.0.1'),
+    port: z.number().int().nonnegative().default(4410),
+  })
+  .default({ enabled: false, host: '127.0.0.1', port: 4410 });
 
 // ─────────────────────────────────────────────────────── review / plan-review
 
@@ -305,6 +392,27 @@ export const PlanReviewSchema = z
     rounds: z.number().int().positive().default(1),
     heavy_labels: z.array(z.string()).default([]),
     heavy_rounds: z.number().int().positive().default(2),
+    /**
+     * Per-stage overrides for spec mode. Absent = use the counts above, which is what every
+     * existing config does — omitting this block changes nothing.
+     *
+     * `0` means that stage runs no critique at all, and then its consolidation is skipped
+     * too: the draft goes straight to the approval card. Worth having because the stages are
+     * not alike — `design` and `tasks` read an already-approved document, so they start from
+     * material a human has passed, while `requirements` is written from the issue text alone
+     * and is where a critique earns the most. Measured on one issue, critique + consolidation
+     * across the three stages was 43 of the 72 minutes planning took (CRL-130).
+     *
+     * Turning ALL of them off is a different decision: the critique is the only thing that
+     * checks EARS form and wrong assumptions, which is the reason CRL-100 was closed.
+     */
+    stages: z
+      .object({
+        requirements: z.number().int().nonnegative().optional(),
+        design: z.number().int().nonnegative().optional(),
+        tasks: z.number().int().nonnegative().optional(),
+      })
+      .default({}),
   })
   .default({});
 
@@ -317,10 +425,34 @@ export const ConfigSchema = z.object({
   agent: AgentSchema,
   workspace: WorkspaceSchema,
   channel: ChannelSchema,
+  control_plane: ControlPlaneSchema,
+  limits: LimitsSchema,
   review: ReviewSchema,
   plan_review: PlanReviewSchema,
   /** Max issues active (workspaces) at once. */
   max_active_issues: z.number().int().positive().default(3),
+  /**
+   * How planning is shaped: one plan document, or the three spec gates
+   * (requirements → design → tasks) of spec-driven development.
+   *
+   * Defaults to `single`, and the reason is not the extra money. The daily token ceiling is
+   * ONE pool shared by the development and operational pillars (`core/token-budget.ts`), so
+   * roughly 2.4x the dev-side calls does not just cost more — it takes that much away from
+   * the operational pipeline, which then stops running. `split` is something an operator
+   * turns on knowing that, not something that arrives with an upgrade.
+   *
+   * (It also keeps in-flight issues out of it: a plan written before the split still means
+   * what it meant.)
+   */
+  spec_mode: z.enum(['single', 'split']).default('single'),
+  /**
+   * Ceiling on implementation turns in `split` mode — one per task.
+   *
+   * A bound rather than a target: the cost is the number of tasks the plan actually
+   * describes, and this only stops a malformed or runaway list from buying a turn per line.
+   * Hitting it hands the rest to the human instead of continuing quietly.
+   */
+  max_task_rounds: z.number().int().positive().default(20),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
@@ -330,6 +462,8 @@ export type AgentConfig = z.infer<typeof AgentSchema>;
 export type AgentRoutingConfig = z.infer<typeof AgentRoutingSchema>;
 export type WorkspaceConfig = z.infer<typeof WorkspaceSchema>;
 export type ChannelConfig = z.infer<typeof ChannelSchema>;
+export type ControlPlaneConfig = z.infer<typeof ControlPlaneSchema>;
+export type LimitsConfig = z.infer<typeof LimitsSchema>;
 export type Profile = z.infer<typeof ProfileSchema>;
 export type CredentialRefConfig = z.infer<typeof CredentialRefSchema>;
 export type ReviewConfig = z.infer<typeof ReviewSchema>;

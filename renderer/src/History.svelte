@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { t } from './lib/i18n.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
   import * as api from './lib/api';
   import type { HistoryRecord } from './lib/types';
 
@@ -49,15 +50,11 @@
   const outcomeLabel = (o: string) => t(`history.${o}`);
 </script>
 
-<div class="view">
-  <div class="head">
-    <div>
-      <h1>{t('history.title')}</h1>
-      <p class="dim">{t('history.subtitle')}</p>
-    </div>
-    <button class="ghost" onclick={refresh}>↻ {t('history.refresh')}</button>
-  </div>
+<PageHeader title={t('history.title')} meta={t('history.subtitle')}>
+  <button class="ghost" onclick={refresh}>↻ {t('history.refresh')}</button>
+</PageHeader>
 
+<div class="view">
   <div class="tabs">
     {#each tabs as tab}
       <button class="tab" class:on={filter === tab.key} onclick={() => setFilter(tab.key)}>{t(tab.label)}</button>
@@ -148,10 +145,6 @@
     justify-content: space-between;
     align-items: flex-start;
     gap: 12px;
-  }
-  h1 {
-    font-size: 18px;
-    margin: 0 0 4px;
   }
   .dim {
     color: var(--text-dim);

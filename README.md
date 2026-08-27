@@ -1,13 +1,43 @@
 # Corral
 
-> Open-source agent development orchestrator — **tracker → repository → human approval → AI coding agent**, runnable on your own machine with your own keys.
+> Open-source AI orchestrator you run yourself — **coding agents for the work you approve,
+> pipelines for the work that repeats.**
 
-Corral takes an issue from your tracker, has an AI agent plan it, asks you to
-approve the plan, implements it, self-reviews, and opens a pull request — with a
-human in the loop at every gate. It is **provider-neutral** (Claude / Gemini /
-GPT), **BYOK** (bring your own keys; nothing is embedded), and **self-hostable**.
+Corral does two jobs on one setup. They share your provider, your keys and a single daily
+ceiling — in tokens, in dollars, or both; the app shows one at a time so the other's screens
+stay out of the way.
 
-Corral is the open-source successor to an internal tool called *Symphony*.
+**Development — an issue becomes a pull request.**
+`tracker → plan → your approval → code → self-review → pull request`
+Corral takes an issue from your tracker, has an agent plan it, asks you to approve the plan
+before a line is written, implements it, reviews its own work, and opens a pull request.
+A human is at every gate.
+
+*Optional:* turn on **spec mode** and that one plan becomes three — requirements, design,
+tasks — each approved on its own, with the implementation then working the task list one
+task at a time and the dashboard showing how far it has got. Three documents and three
+approvals cost more model calls than one, so it is off by default — set `spec_mode: split`
+in `corral.yaml` to turn it on.
+
+**Operations — a queue becomes an answer.**
+`trigger → fetch → one model turn → checks → your API`
+A pipeline is one YAML file: what wakes it (a queue, a schedule, or you), what to read from
+your own API, one turn with a declared answer shape, rules that re-check the answer **in
+code**, and where the result goes. Nobody approves each item — the checks are the gate, and
+a doubtful answer is held back with a link rather than written.
+
+Both are **provider-neutral** (Claude / Gemini / GPT), **BYOK** (bring your own keys;
+nothing is embedded), and **self-hostable**.
+
+Corral is built to [OpenAI's Symphony](https://github.com/openai/symphony) spec (Apache-2.0),
+written from scratch in TypeScript — the "make your own" route that repository offers, rather
+than a fork of its Elixir reference implementation.
+
+It started as a rebuild of a Slack-driven harness on that spec: review requests, three
+candidate plans to choose from, and completion reports all arrived as Slack messages, and
+nothing showed what was where. So Corral goes past the spec exactly where the spec stops — a
+rich UI is one of Symphony's stated non-goals — and that is the point of the project: a
+dashboard that shows each issue's stage, what it is waiting on, and what it has spent.
 
 ## ⬇ Download
 
@@ -29,9 +59,14 @@ config files to edit.
 
 ## Status
 
-**Works end-to-end** (issue → plan → your approval → code → self-review → pull request) and
-is used daily on a real multi-repo project. Early and rough; installers are **unsigned**
-until code-signing lands. Auto-update is built in.
+**Development works end-to-end** (issue → plan → your approval → code → self-review → pull
+request) and is used daily on a real multi-repo project.
+
+**Operations is newer.** Pipelines run end-to-end — trigger, fetch, structured answer,
+validation, delivery — and are being put into real use now. Expect the rough edges of
+something young.
+
+Early overall; installers are **unsigned** until code-signing lands. Auto-update is built in.
 
 ## Try it (run on your own machine)
 
@@ -70,23 +105,32 @@ proposes, and it implements, self-reviews, and opens a pull request for you to m
 
 To reopen the app later, just run `pnpm app` again from the `corral` folder.
 
-> Advanced / headless (no GUI) usage and packaging are in [Development](#development) below.
+> Want it running on a server instead of your laptop — with the app connecting to it from
+> anywhere? See [Run headless](#run-headless-no-gui) below: the core runs there, the app
+> pairs with it over SSH, and nothing needs a port opened. Packaging and other advanced
+> usage are in [Development](#development) below.
 
-## Architecture (5 pluggable axes)
+## Architecture (6 pluggable axes)
 
 Every external integration sits behind an adapter interface, selected by a
 `kind` field in config and resolved through a registry:
 
-| Axis | Interface | Reference impl |
-|------|-----------|----------------|
-| Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira |
-| Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket |
-| Agent | `AgentAdapter` (provider × transport) | Claude (api/cli) |
-| Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local |
-| Channel | `ChannelAdapter` | Web (Slack optional) |
+| Axis | Interface | Reference impl | Used by |
+|------|-----------|----------------|---------|
+| Tracker | `TrackerAdapter` | Notion, GitHub Issues, Jira | Development |
+| Repository | `RepositoryAdapter` | GitHub, GitLab, Bitbucket | Development |
+| Workspace | `WorkspaceAdapter` + `WorkspaceIO` | Docker, Local | Development |
+| Channel | `ChannelAdapter` | Web | Development |
+| Trigger | `TriggerAdapter` | Manual, Schedule (cron), Google Pub/Sub | Operations |
+| Agent | `AgentAdapter` (provider × transport) | Claude · Gemini · GPT (api/cli each) | Both |
 
 Adding an integration = one adapter implementation + one config schema variant
 + one registry registration.
+
+A pipeline's own steps — what it reads, how the answer is checked, where the result goes —
+are **not** an axis. They are fields in the pipeline file, because a declaration someone can
+read and edit is the point. What a declaration can express is the pipeline schema itself
+(`src/ops/pipeline/schema.ts`), which carries the reasoning for each field.
 
 ## Principles
 
@@ -109,13 +153,60 @@ Requires Node.js >= 24 and pnpm.
 
 ### Run headless (no GUI)
 
+The core runs on its own — no Electron, no renderer, not even a config file to start with.
+It opens a WebSocket **control plane** and waits; you attach the desktop app to it from
+another machine and set it up from there.
+
+```bash
+pnpm install && pnpm build              # core only — renderer/desktop are not needed
+pnpm start corral.yaml                  # control plane on ws://127.0.0.1:4410
+```
+
+It prints a **6-digit pairing code**. In the desktop app: **Settings → Core connection →
+Another computer**, give it the server (`user@host`) and the code.
+
+There is no HTTP dashboard and no port to open in a browser — the desktop app *is* the
+client. Binding stays on `127.0.0.1`, and the app carries the connection over SSH itself —
+so there is nothing to open in a firewall and no terminal to leave running. Uncheck that
+if you already have a tunnel or an overlay network and want the address used as-is.
+`--control-plane [host:]port` overrides the address the core binds.
+
+If you already have a `corral.yaml`, secrets come from the environment as
+`CORRAL_<SERVICE>_<ACCOUNT>` — the account is the one named in that credential's config
+entry, so `corral.example.yaml` wants `CORRAL_GITHUB_SERVER`, not `..._DEFAULT`:
+
 ```bash
 cp corral.example.yaml corral.yaml      # edit it
-export CORRAL_NOTION_DEFAULT=...        # BYOK secrets (see corral.example.yaml)
-export CORRAL_GITHUB_DEFAULT=...
+export CORRAL_NOTION_DEFAULT=...        # see the header of corral.example.yaml
+export CORRAL_GITHUB_SERVER=...         # matches `account: server` in that file
 export CORRAL_ANTHROPIC_DEFAULT=...
-pnpm build && pnpm start corral.yaml    # control plane on http://localhost:4400
+pnpm start corral.yaml
 ```
+
+Running it on a server long-term: put the core behind a systemd unit with
+`Restart=always`, keep the control plane on loopback, and let the desktop app open the SSH
+tunnel (Settings → Core connection → Another computer). A provider login that needs a
+browser is captured on your own machine and stored on the server's credential store, so the
+server never needs one.
+
+#### Where secrets come from
+
+Nothing in a config file or a pipeline file is ever a secret — those name a credential,
+and the value is looked up at call time. The core reads two places, in order:
+
+| | | |
+|---|---|---|
+| 1 | **Environment** | `CORRAL_<SERVICE>_<ACCOUNT>`. Read-only, and it wins — which is how one machine overrides another without editing anything |
+| 2 | **`<state dir>/credentials.json`** | mode `0600`, written by the setup wizard. This is where the app saves what you type |
+
+Corral does not read a `.env` file itself. Putting those variables in the environment is
+your process manager's job — Compose's `env_file`, systemd's `EnvironmentFile`, or a
+`source` in your shell. That keeps one loader in the tool that already owns the process.
+
+The desktop app in local mode is the same picture from the other side: it encrypts secrets
+with the OS keychain and passes them to the core it spawns as `CORRAL_*` variables. Pointed
+at a remote core, it sends them over the control plane and that core writes its own
+`credentials.json`.
 
 ### Run the desktop app (dev)
 
@@ -124,8 +215,11 @@ pnpm build                              # build the core
 pnpm -C renderer dev                    # Vite dev server on :5173 (terminal 1)
 # terminal 2:
 pnpm -C desktop build
-CORRAL_RENDERER_URL=http://localhost:5173 CORRAL_CORE_ENTRY="$PWD/dist/main.js" pnpm -C desktop start
+CORRAL_RENDERER_URL=http://localhost:5173 CORRAL_CORE_ENTRY="$PWD/dist/ipc-main.js" pnpm -C desktop start
 ```
+
+`ipc-main.js` is the entry the desktop forks (it talks over the process IPC channel);
+`main.js` is the headless one and has no such channel.
 
 The wizard writes config to the OS app-data dir and secrets to the OS keychain.
 

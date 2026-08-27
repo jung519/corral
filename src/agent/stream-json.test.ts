@@ -31,13 +31,64 @@ describe('stream-json parsing', () => {
     ]);
   });
 
-  it('accumulates usage: cumulative cost replaced, tokens summed', () => {
+  /**
+   * The numbers below are copied from a real `claude -p` stream, not invented. Reading
+   * `input_tokens` alone counted 2 of the 4,037 tokens the turn was billed for, and that
+   * count is what the shared daily ceiling is made of (CRL-58).
+   */
+  it('counts every input token the turn was billed for', () => {
     const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
-    applyUsage({ type: 'assistant', usage: { input_tokens: 10, output_tokens: 5 } }, acc);
-    applyUsage({ type: 'result', total_cost_usd: 0.42, usage: { input_tokens: 2, output_tokens: 3 } }, acc);
-    expect(acc.costUsd).toBeCloseTo(0.42);
-    expect(acc.inputTokens).toBe(12);
-    expect(acc.outputTokens).toBe(8);
+
+    applyUsage(
+      {
+        type: 'result',
+        total_cost_usd: 0.08092,
+        usage: { input_tokens: 2, cache_creation_input_tokens: 4035, cache_read_input_tokens: 0, output_tokens: 4 },
+      },
+      acc,
+    );
+
+    expect(acc).toEqual({
+      costUsd: 0.08092,
+      inputTokens: 4037,
+      outputTokens: 4,
+      // The same tokens a second way, for pricing only — the sum above is what the ceiling
+      // counts (CRL-86).
+      input: { cacheWrite: 4035, cacheRead: 0 },
+    });
+  });
+
+  it('counts a cache read too — cheaper than the rest, not free', () => {
+    const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+
+    applyUsage(
+      { type: 'result', usage: { input_tokens: 12, cache_creation_input_tokens: 0, cache_read_input_tokens: 4035, output_tokens: 7 } },
+      acc,
+    );
+
+    expect(acc.inputTokens).toBe(4047);
+  });
+
+  it('takes the turn tally rather than adding up whatever carried numbers', () => {
+    // Both events report the same totals for the turn. Summing them counted it twice —
+    // which happened not to bite only because the assistant event keeps its usage under
+    // `message`, where this never looked.
+    const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    const usage = { input_tokens: 2, cache_creation_input_tokens: 4035, output_tokens: 4 };
+
+    applyUsage({ type: 'assistant', usage }, acc);
+    applyUsage({ type: 'result', total_cost_usd: 0.42, usage }, acc);
+
+    expect(acc).toEqual({ costUsd: 0.42, inputTokens: 4037, outputTokens: 4, input: { cacheWrite: 4035, cacheRead: 0 } });
+  });
+
+  it('leaves the tally alone for an event that carries no usage', () => {
+    const acc: UsageAcc = { costUsd: 0, inputTokens: 0, outputTokens: 0 };
+    applyUsage({ type: 'result', usage: { input_tokens: 9, output_tokens: 3 } }, acc);
+
+    applyUsage({ type: 'assistant' }, acc);
+
+    expect(acc).toMatchObject({ inputTokens: 9, outputTokens: 3 });
   });
 
   it('detects auth failures', () => {

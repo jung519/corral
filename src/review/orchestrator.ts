@@ -6,7 +6,7 @@
  * It produces the per-round files + semgrep output; the MAIN agent then
  * consolidates them into pending_review.md.
  *
- * Lifted from upstream. Adaptation: a single configured agent runs all rounds
+ * Carried over from corral's pre-rename implementation. Adaptation: a single configured agent runs all rounds
  * (corral is single-agent), so the agents[]×kinds filter is dropped; output
  * language/calibration come from the profile.
  */
@@ -49,6 +49,8 @@ export class ReviewOrchestrator {
     verifyCommands: string[] = [],
     diffStats?: { lines: number; files: number },
     direction = '',
+    /** Where the acceptance criteria live — `requirements.md` in split mode (CRL-103). */
+    criteriaFrom?: string,
   ): Promise<ReviewResult> {
     const log = logger.child(issue.identifier);
 
@@ -65,7 +67,7 @@ export class ReviewOrchestrator {
 
     const tasks: Array<Promise<string | null>> = [];
     for (let r = 1; r <= rounds; r++) {
-      tasks.push(this.runRound(handle, issue, r, targets, model, referencePath, onRoundCost, direction));
+      tasks.push(this.runRound(handle, issue, r, targets, model, referencePath, onRoundCost, direction, criteriaFrom));
     }
 
     const semgrepTask = this.cfg.semgrep
@@ -87,13 +89,14 @@ export class ReviewOrchestrator {
     referencePath?: string,
     onRoundCost?: RoundCostFn,
     direction = '',
+    criteriaFrom?: string,
   ): Promise<string | null> {
     const log = logger.child(issue.identifier);
     try {
       const result = await this.agent.run(handle, issue, {
         stage: 'review',
         workflow: '', // self-contained; must not clobber the main workflow guide
-        prompt: reviewRoundPrompt(issue, round, targets, this.profile, referencePath, direction),
+        prompt: reviewRoundPrompt(issue, round, targets, this.profile, referencePath, direction, criteriaFrom),
         continueSession: false, // fresh, independent perspective
         model,
         turnTimeoutMs: this.turnTimeoutMs,

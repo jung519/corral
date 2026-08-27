@@ -1,8 +1,8 @@
 /**
  * Agent provider × transport abstraction.
  *
- * This is a NET-NEW boundary, designed from scratch — NOT lifted from upstream's
- * claude-only, CLI-only backend (see docs/development-plan.md §1.3). The
+ * Provider and transport are separate axes on purpose: a provider is a model family
+ * and a transport is how you reach it, and every pair is valid. The
  * orchestrator-facing interface stays `AgentAdapter` (../core/types.ts); a generic
  * adapter composes a provider × transport and aggregates the normalized event
  * stream into an AgentRunResult.
@@ -12,7 +12,7 @@
  *     api : official SDK / HTTP, user API key (BYOK)
  *     cli : spawn a user-installed official CLI (claude / gemini / codex); never bundled
  *
- * Concrete transports (ClaudeApi, ClaudeCli, …) land in S2+; api is the priority path.
+ * All six cells are implemented; see `agent/index.ts` for what is registered.
  */
 import type { AgentStage, WorkspaceHandle, WorkspaceIO } from '../core/types.js';
 
@@ -21,6 +21,10 @@ export type AgentTransportId = 'api' | 'cli';
 
 /** Per-stage model mapping, provider-neutral (e.g. planning→opus, implementation→sonnet). */
 export type StageModels = Partial<Record<AgentStage, string>>;
+
+/** How hard the model thinks before acting, per stage. claude's own scale (CRL-131). */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+export type StageEfforts = Partial<Record<AgentStage, Effort>>;
 
 export type AgentErrorKind = 'timeout' | 'auth' | 'login_required' | 'crashed' | 'budget' | 'rate_limit';
 
@@ -54,12 +58,41 @@ export interface AgentTurnSpec {
   workflow: string;
   /** Resolved model id for this stage, if any. */
   model?: string;
+  /**
+   * Reasoning effort for this turn, if the deployment set one for this stage.
+   *
+   * Measured: thinking was 55.6% of one issue's planning wall time, and `low` removed the
+   * thinking blocks entirely while leaving the number of tool calls unchanged — it changes
+   * how deeply the model deliberates, not how much it looks at. Absent means the transport's
+   * own default, which is every run today (CRL-131).
+   */
+  effort?: Effort;
   /** Keep session memory across turns (provider's "continue" semantics). */
   continueSession: boolean;
   maxTurns?: number;
   maxBudgetUsd?: number;
   turnTimeoutMs?: number;
   allowedTools?: string[];
+  /**
+   * Run with no tools at all.
+   *
+   * A coding agent normally gets a shell and a filesystem, and its prompt is the user's
+   * own issue. An operational turn's prompt carries a queue message and an external API
+   * response — text nobody here controls — so it asks a question and must not be able to
+   * act on the answer to it. Measured: narrowing tools stops commands but not writes, so
+   * the only sound setting is none (CRL-43).
+   *
+   * A transport that cannot express this must refuse the turn rather than run it wide.
+   */
+  noTools?: boolean;
+  /**
+   * Receive the model's reply verbatim.
+   *
+   * The `text` AgentEvent is capped for the live timeline (`oneLine(text, 2000)`), which
+   * is right for a UI and wrong for an answer that has to parse as JSON. With no tools
+   * there is no file to read it from, so a caller that needs the whole thing asks here.
+   */
+  onAnswerText?: (text: string) => void;
   signal?: AbortSignal;
 }
 

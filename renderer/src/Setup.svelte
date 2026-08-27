@@ -1,7 +1,8 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { currentLang, setLang, t } from './lib/i18n.svelte';
   import * as api from './lib/api';
+  import CoreConnection from './CoreConnection.svelte';
   import DirectionSetup from './DirectionSetup.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
   import Wizard from './Wizard.svelte';
@@ -11,6 +12,7 @@
     CORE_STATE_KEYS,
     loadDraft,
     OPTIONAL_STATE_KEYS,
+    stateFromConfig,
     type Provider,
     PROVIDERS,
     secretRefs,
@@ -47,12 +49,26 @@
   const acctState = (p: Provider) =>
     isSaved(serviceFor(p), 'default') || isSaved(serviceFor(p), 'oauth') ? t('account.set') : t('account.unset');
 
+  /**
+   * Where this screen's picture of the config comes from.
+   *
+   * The config file, first. The draft is what an unfinished wizard resumes from — it is
+   * allowed to be stale, and rendering the *settings* from it meant this screen showed
+   * something other than what the core is running. Worse, with no draft it showed nothing
+   * at all, even here, where the core-connection panel lives (CRL-76).
+   *
+   * The draft is still the fallback, for the one case it is the only thing there: a wizard
+   * that was started and not finished, so no config exists yet.
+   */
   async function refresh() {
-    const draft = await loadDraft();
-    s = draft;
-    if (draft && window.corral) {
+    const got: { config?: unknown; raw?: unknown } = window.corral
+      ? await window.corral.config.parsed().catch(() => ({}))
+      : {};
+    const draft = got.config ? null : await loadDraft();
+    s = got.config ? stateFromConfig(got.config, got.raw) : draft;
+    if (s && window.corral) {
       const found = new Set<string>();
-      for (const ref of secretRefs(draft)) {
+      for (const ref of secretRefs(s)) {
         if (await window.corral.secret.has(ref.service, ref.account)) found.add(`${ref.service}:${ref.account}`);
       }
       savedSecrets = found;
@@ -69,12 +85,35 @@
     void refresh();
   });
 
-  // A pipeline node (here or on the dashboard) asked to edit a section — open it.
+  /**
+   * A pipeline node (here or on the dashboard) asked to edit a section.
+   *
+   * Opening it is not enough. The node sits at the top of a long screen, so a section
+   * further down expanded where nobody could see it and the click read as doing nothing —
+   * and with no focus move, keyboard and screen-reader users got no signal at all
+   * (CRL-121). So the section is brought into view and focus lands on its heading, which
+   * is the standard way to say "you are here" without yanking the caret into a field.
+   */
   $effect(() => {
-    if (editNav.section) {
-      editing = editNav.section;
+    const want = editNav.section;
+    if (!want) return;
+    editing = want;
+    // Read on purpose, and before any early return: the sections live behind `{#if s}`, and
+    // arriving from the dashboard mounts this screen with `s` still null while the config is
+    // being fetched. Reading it here makes this effect run again when it lands.
+    const ready = s;
+    void (async () => {
+      if (!ready) return; // nothing to focus yet — the request stays in `editNav`
+      await tick(); // the branch for this section does not exist until the DOM updates
+      const el = document.getElementById(`sec-${want}`);
+      if (!el) return; // same: keep the request rather than dropping it silently
+      // Cleared only once it has actually been delivered. Clearing it up front was why the
+      // dashboard route moved to Settings and then focused nothing: the one retry that
+      // would have worked had already been thrown away (CRL-121).
       editNav.section = '';
-    }
+      el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+      el.focus();
+    })();
   });
 </script>
 
@@ -84,18 +123,24 @@
 
 {#snippet head(title: string, section: string)}
   <div class="hdr">
-    <h2>{title}</h2>
+    <!-- The scroll and focus target. `tabindex="-1"` makes it focusable by script without
+         adding it to the tab order. -->
+    <h2 id={`sec-${section}`} tabindex="-1">{title}</h2>
     {#if editing !== section}<button class="edit" onclick={() => (editing = section)}>{t('settings.edit')}</button>{/if}
   </div>
 {/snippet}
 
 <div class="view">
-  {#if configured === false}
-    <div class="card">
-      <p class="note">{t('settings.notConfigured')}</p>
-      <div class="actions"><button class="primary" onclick={() => (location.hash = '#/setup')}>{t('settings.setup')}</button></div>
-    </div>
-  {:else if s}
+  <!--
+    Outside every branch below, on purpose. This panel decides WHICH core the app is
+    looking at; the rest of the screen describes what that core is configured with. Having
+    it inside the "we could read the config" branch made it unreachable exactly when it was
+    needed — a fresh remote core has no config to show, and that is the moment you need to
+    point the app at it (CRL-76).
+  -->
+  <CoreConnection />
+
+  {#if s}
     <PipelineSummary {s} />
     <p class="hint">{t('settings.summaryHint')}</p>
 
@@ -176,7 +221,11 @@
         <Wizard embedded section="workspace" {onDone} />
       {:else}
         {@render row(t('workspace.backend'), s.backend === 'docker' ? t('workspace.docker') : t('workspace.local'))}
-        {#if s.backend === 'docker'}{@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}{/if}
+        {#if s.backend === 'docker'}
+          {@render row(t('workspace.mountLogin'), s.dockerMountLogin ? 'on' : 'off')}
+          {@render row(t('workspace.memory'), s.dockerMemory || t('field.noLimit'))}
+          {@render row(t('workspace.cpus'), s.dockerCpus || t('field.noLimit'))}
+        {/if}
       {/if}
     </div>
 
@@ -188,7 +237,19 @@
         {@render row(t('field.maxActive'), String(s.maxActive))}
         {@render row(t('field.language'), langLabel(s.language))}
         {@render row(t('field.stack'), s.stack)}
+        {@render row(t('field.dailyInput'), s.dailyInputTokens || t('field.noLimit'))}
+        {@render row(t('field.dailyOutput'), s.dailyOutputTokens || t('field.noLimit'))}
+        {@render row(t('field.dailyCost'), s.dailyCostUsd ? `$${s.dailyCostUsd}` : t('field.noLimit'))}
       {/if}
+    </div>
+  {:else if configured === undefined}
+    <!-- Still asking. Saying nothing here is how a slow answer looked identical to "there
+         is nothing to configure" — two different situations, one blank panel. -->
+    <p class="note">{t('settings.reading')}</p>
+  {:else}
+    <div class="card">
+      <p class="note">{t('settings.notConfigured')}</p>
+      <div class="actions"><button class="primary" onclick={() => (location.hash = '#/setup')}>{t('settings.setup')}</button></div>
     </div>
   {/if}
 
@@ -219,6 +280,18 @@
     align-items: center;
     justify-content: space-between;
     margin-bottom: 10px;
+  }
+  /* Focus moved here by script, not by tabbing, so `:focus-visible` never matches in most
+     browsers — the ring has to hang off plain `:focus` to be seen at all. It is the whole
+     answer to "which section did that click open?". */
+  .hdr h2:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: 4px;
+    border-radius: 3px;
+  }
+  /* Nothing to scroll to if the heading sits flush against the viewport edge. */
+  .hdr h2 {
+    scroll-margin-top: 12px;
   }
   .edit {
     font-size: 12px;

@@ -1,7 +1,7 @@
 /**
  * Agent scratch paths inside the workspace — the orchestrator ↔ agent handoff
  * files. Single source of truth so the prompt builder, orchestrator, and review
- * pipeline agree. (Upstream used `.symphony/`; Corral uses `.corral/`.)
+ * pipeline agree. (The pre-rename implementation used `.symphony/`; Corral uses `.corral/`.)
  */
 export const SCRATCH_DIR = '.corral';
 
@@ -24,11 +24,9 @@ export const SCRATCH = {
   planOptions: `${SCRATCH_DIR}/plan_options.json`,
   /** Unresolved finding counts {blocker, suggestion, nit} — drives the auto-fix loop. */
   reviewStatus: `${SCRATCH_DIR}/review_status.json`,
-  /** Agent's reply scratch (feedback answers). */
-  reply: `${SCRATCH_DIR}/pending_reply.md`,
   /** Agent's answer to a read-only Q&A question (structured markdown, preserved verbatim). */
   qaAnswer: `${SCRATCH_DIR}/qa_answer.md`,
-  /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}` (§15). */
+  /** Direction safety-check verdict: `{"approved": bool, "reason": "…"}`. */
   directionCheck: `${SCRATCH_DIR}/direction_check.json`,
   /** Agent's question to the human (when it can't proceed). */
   question: `${SCRATCH_DIR}/question.md`,
@@ -40,6 +38,39 @@ export const SCRATCH = {
   reviewRound: (n: number): string => `${SCRATCH_DIR}/review_round_${n}.md`,
   /** Nth parallel plan-critique output. */
   planCritique: (n: number): string => `${SCRATCH_DIR}/plan_critique_${n}.md`,
+  /**
+   * Where consolidation records what each critique point changed.
+   *
+   * Beside the plan rather than inside it. That record used to be a section of the vetted
+   * document, where it was a fifth of `requirements.md` and an eighth of `design.md` — and
+   * every later stage re-read it, because each one reads the approved documents in full. It
+   * is written for whoever asks "why did this change", which is not the same reader the
+   * approval card serves (CRL-129).
+   */
+  critiqueResponse: `${SCRATCH_DIR}/critique_response.md`,
+} as const;
+
+/**
+ * The spec documents of spec-driven planning (SDD S2).
+ *
+ * Unlike `pending_plan.md`, these are meant to live across many dispatches: requirements
+ * are written once and then read by the design turn, the task turn, the implementation, and
+ * the review. That only works because a dispatch now clears exactly the outputs it declares
+ * and nothing else (CRL-88) — before that, surviving a dispatch was an accident of which of
+ * two hard-coded lists a file happened to be on.
+ *
+ * **No dispatch may declare these as its outputs.** Doing so would blank a later turn's
+ * input, which is the failure CRL-88 was about; `scratch-outputs.test.ts` pins it.
+ */
+export const SPEC_DIR = `${SCRATCH_DIR}/spec`;
+
+export const SPEC = {
+  /** WHAT must be true — EARS criteria with REQ-n ids. */
+  requirements: `${SPEC_DIR}/requirements.md`,
+  /** HOW it will be built — the approach, traced back to REQ ids. */
+  design: `${SPEC_DIR}/design.md`,
+  /** The ordered work, as checkboxes referencing the REQ ids they serve. */
+  tasks: `${SPEC_DIR}/tasks.md`,
 } as const;
 
 /** Where the rendered workflow guide is written in the workspace. */

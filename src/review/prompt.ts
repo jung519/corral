@@ -2,10 +2,10 @@
  * Review-round + plan-critique prompts. Each round is an INDEPENDENT fresh session
  * (no shared memory) so perspectives stay diverse; the validator merges them later.
  *
- * Lifted from upstream. De-masil: output language, the "no issues" / resolved /
- * unresolved phrasing, and the severity calibration examples all come from the
- * configured profile (language + stack) instead of hardcoded Korean + masil's stack.
- * The reference repo is generic (no design_system/masil_project subpaths).
+ * Output language, the "no issues" / resolved / unresolved phrasing, and the severity
+ * calibration examples all come from the configured profile (language + stack) rather
+ * than being written into the prompt. The reference repo is whatever the config names,
+ * with no assumed subpaths inside it.
  */
 import { SCRATCH } from '../core/paths.js';
 import type { Issue } from '../core/types.js';
@@ -22,17 +22,34 @@ export function planCritiquePrompt(
   referencePath?: string,
   focus?: string,
   direction = '',
+  /** The document under critique — a spec stage's file in split mode (CRL-103). */
+  target: string = SCRATCH.pendingPlan,
 ): string {
   const out = SCRATCH.planCritique(round);
   const lines = [
     `You are an independent, SKEPTICAL plan reviewer for issue ${issue.identifier} (round ${round}).`,
-    `Read the DRAFT plan at \`${SCRATCH.pendingPlan}\` and the issue. Critique it BEFORE any code is written.`,
+    `Read the DRAFT at \`${target}\` and the issue. Critique it BEFORE any code is written.`,
     `Inspect the ACTUAL repositories (each subdirectory of the workspace is a repo) to verify the plan's assumptions — do not trust the plan's claims.`,
     `Hunt for:`,
-    `- Underspecified / ambiguous steps; missing edge cases, failure modes, concurrency, data migration.`,
+    `- Underspecified / ambiguous steps; unquantified words that cannot be tested ("large volume", "fast response", "most users"); missing edge cases, failure modes, concurrency, data migration.`,
     `- WRONG assumptions about the schema / API / existing code (cite the real file:line that contradicts the plan).`,
     `- Anything that would BREAK existing behavior.`,
     `- Acceptance criteria that are missing, vague, or not testable.`,
+    // The critic has to know the notation the plan is required to use. Without this it
+    // reads EARS as awkward phrasing and "fixes" it, and the format dies in consolidation.
+    `- Acceptance criteria not written in EARS notation (THE SYSTEM SHALL / WHEN / WHILE / IF-THEN / WHERE) or missing REQ-n labels. Judge the wording, not the count — do not ask for more criteria than the issue warrants.`,
+    // A critic asked only for what is missing can only grow the plan, and consolidation then
+    // adds what it found. Nothing ever removed: one measured plan reached forty criteria for
+    // one rule applied across twelve files, and became unreadable (CRL-129). So the same
+    // pass looks for what should come out.
+    `- Criteria that say the SAME rule at different call sites — those belong together as one ubiquitous \`THE SYSTEM SHALL\`, and enumerating them is how a plan becomes unreadable. Say which to merge. Likewise a criterion another one already covers, and a "Current Behavior" entry that only restates its "Expected" counterpart.`,
+    `- Length that defeats the point: the human has to READ this and decide. Flag a document that cannot be read in five minutes, and say what to cut — process notes ("how each critique was addressed"), restatement of an already-approved document, commentary on the plan's own confidence.`,
+    // The axis a per-item read misses. Each requirement can be sound on its own while the
+    // set is impossible to satisfy — and that only shows up when they are read together.
+    // A defect spec that skips this section reads as complete; the gap is only visible
+    // by knowing the section should be there (CRL-111).
+    `- A defect spec with no "Unchanged Behavior" section, or one whose entries are hopes rather than behaviours ("the existing tests still pass"). What could a plausible fix plausibly break?`,
+    `- Problems BETWEEN requirements, not within one: two that are each reasonable but cannot both hold; constraints that cannot be satisfied at the same time; a concept referenced as if it already existed when nothing in the plan or the code defines it.`,
     `- A simpler or safer approach the plan overlooked.`,
   ];
   if (focus) {
@@ -80,6 +97,8 @@ export function reviewRoundPrompt(
   profile: ResolvedProfile,
   referencePath?: string,
   direction = '',
+  /** Where the acceptance criteria live — `requirements.md` in split mode (CRL-103). */
+  criteriaFrom: string = SCRATCH.pendingPlan,
 ): string {
   const out = SCRATCH.reviewRound(round);
   const examples = profile.stack.calibrationExamples.map((e) => `  - ${e}`).join('\n');
@@ -94,6 +113,17 @@ export function reviewRoundPrompt(
     `BEFORE judging, read \`${SCRATCH.staticQa}\` if it exists. It holds static-check results (lint / typecheck / analyze) that were actually executed. These are DETERMINISTIC FACTS:`,
     `- Any command with a non-zero \`code\` is a real failure caused by this branch. Treat it as a BLOCKER and diagnose the root cause. Never dismiss it as noise.`,
     `- Then look for what static tools CANNOT catch: logic errors, wrong behavior, missing edge cases.`,
+    // Mirrors the re-review block below: read the input first, then rule on each item with
+    // evidence. The criteria are only here to be read because the implementation dispatch
+    // stopped blanking pending_plan.md (CRL-88).
+    `BEFORE judging, read the approved plan at \`${criteriaFrom}\` and find its acceptance criteria (\`REQ-1\`, \`REQ-2\`, …):`,
+    `- For EACH \`REQ-n\`, inspect the actual diff and state explicitly "${profile.t('review.reqMet')}" with the \`file:line\` that satisfies it, or "${profile.t('review.reqUnmet')}" naming what is missing.`,
+    `- Judge the code, not the plan's own claim that it was done. A criterion the diff does not implement is UNMET however confidently the plan states it.`,
+    // Inverted for these: the evidence of success is the absence of a change, so looking
+    // for code that implements them would mark every one of them UNMET (CRL-111).
+    `- An "Unchanged Behavior" requirement (\`SHALL CONTINUE TO\`) is met by the diff NOT disturbing it. Check the diff for anything that reaches that behaviour — a shared code path, an altered order, a changed default — and cite it if so; otherwise it is met.`,
+    `- An unmet criterion is a finding in its own right — report it with the others.`,
+    `- If the plan has NO \`REQ-n\` labels (an older or hand-written plan), SKIP this entirely. Do not report their absence as a problem.`,
     `ALSO read \`${SCRATCH.prevReview}\` if it exists — the PREVIOUS review; the current diff includes the fix meant to address it. This is a RE-REVIEW:`,
     `- For EACH prior finding, inspect the current code and state explicitly "${profile.t('review.resolved')}" (verify the actual code) or "${profile.t('review.unresolved')}" (cite the current file:line still affected).`,
     `- Do NOT silently re-raise a previous finding as if new — tie it back with its id and the verdict.`,
@@ -118,6 +148,9 @@ export function reviewRoundPrompt(
     `Write your findings as Markdown to ${out}. Do NOT modify any source code.`,
     `Write the findings in ${profile.languageName}; keep severity labels, file paths, and code identifiers in English.`,
     `Be concise but do not omit a real BLOCKER. If you genuinely find nothing after probing, write "${profile.t('review.noIssues')}" to ${out}.`,
+    // The consolidated report has a strict layout and a person reads it in a small panel;
+    // rounds that arrive as prose walls get folded in as prose walls (CRL-129).
+    `Shape: one heading per finding, then bullets — Location, Issue, Why / Fix. ONE short sentence per bullet; split longer reasoning across more bullets rather than writing a paragraph. No preamble, no summary of the diff, no restatement of the plan.`,
   );
   return lines.join(' ');
 }

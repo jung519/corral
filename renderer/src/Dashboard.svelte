@@ -2,8 +2,10 @@
   import { onMount, tick } from 'svelte';
   import ApprovalCard from './ApprovalCard.svelte';
   import PhaseBar from './PhaseBar.svelte';
+  import SpecDocs from './SpecDocs.svelte';
   import PipelineSummary from './PipelineSummary.svelte';
   import Button from './lib/Button.svelte';
+  import PageHeader from './lib/PageHeader.svelte';
   import { t } from './lib/i18n.svelte';
   import * as api from './lib/api';
   import { phaseActivity, phaseColor, phaseLabelKey, waitingLabelKey } from './lib/phase';
@@ -12,10 +14,20 @@
   import { loadDraft, type WizardState } from './lib/wizard';
 
   let view: StateResponse = $state({ issues: [], pending: [], events: [] });
+  let specFor = $state<string | null>(null);
   let live: CorralEvent[] = $state([]);
   let candidates: Candidate[] = $state([]);
   let candCursor = $state<string | undefined>(undefined);
   let candLoading = $state(false);
+  /** What is typed, and what the last request actually used — the empty state names the
+   *  applied term, so the two cannot be the same variable. */
+  let candQuery = $state('');
+  let candSearch = $state('');
+  /** Whether the core said it actually applied the term. A core older than the search
+   *  box drops the parameter and answers with everything, which reads as a box that
+   *  matches anything — so an unconfirmed search is called out rather than shown as a
+   *  result (CRL-124). */
+  let candSearched = $state<boolean | undefined>(undefined);
   let candListEl = $state<HTMLElement | undefined>(undefined);
   let showCandidates = $state(false);
   let online = $state(false);
@@ -50,10 +62,27 @@
       location.hash = '#/setup';
       return;
     }
+    candQuery = '';
+    candSearch = '';
+    candSearched = undefined;
     const r = await api.getCandidates();
     candidates = r.candidates;
     candCursor = r.nextCursor;
     showCandidates = true;
+    void fillIfNeeded();
+  }
+  /** Apply the search box. Paging restarts: the cursor belongs to the previous filter. */
+  async function runCandSearch() {
+    candSearch = candQuery.trim();
+    candLoading = true;
+    try {
+      const r = await api.getCandidates(undefined, candSearch || undefined);
+      candidates = r.candidates;
+      candCursor = r.nextCursor;
+      candSearched = candSearch ? r.searched === true : undefined;
+    } finally {
+      candLoading = false;
+    }
     void fillIfNeeded();
   }
   // Infinite scroll: fetch the next ID-ascending page and append (deduped).
@@ -61,7 +90,7 @@
     if (!candCursor || candLoading) return;
     candLoading = true;
     try {
-      const r = await api.getCandidates(candCursor);
+      const r = await api.getCandidates(candCursor, candSearch || undefined);
       const seen = new Set(candidates.map((c) => c.identifier));
       candidates = [...candidates, ...r.candidates.filter((c) => !seen.has(c.identifier))];
       candCursor = r.nextCursor;
@@ -123,12 +152,9 @@
   }
 </script>
 
-<header>
-  <span class="dot" class:on={online}></span>
-  <h1>Corral</h1>
-  <span class="count">{view.issues.length} {t('dash.count')}</span>
+<PageHeader title={t('nav.dashboard')} {online} meta="{view.issues.length} {t('dash.count')}">
   <Button class="primary" onclick={openCandidates}>{t('dash.import')}</Button>
-</header>
+</PageHeader>
 
 <main>
   {#if configured === false}
@@ -165,10 +191,20 @@
             {@const wl = t(waitingLabelKey(issue.phase))}
             <span class="waiting" title={wl}><span class="pulse" aria-hidden="true"></span>{wl}</span>
           {/if}
-          <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase))}</span>
+          <span class="phase" style:color={phaseColor(issue.phase)}>{t(phaseLabelKey(issue.phase, view.specMode, issue.specStage))}</span>
+          {#if issue.taskProgress}
+            <span class="tasks" title={t('dash.tasks.hint')}>
+              {t('dash.tasks')} {issue.taskProgress.done}/{issue.taskProgress.total}
+              {#if issue.taskProgress.warnings > 0}
+                <!-- A clean count over a partly unreadable file is the misreading CRL-105
+                     and CRL-106 both guarded against; it must not stop at the number. -->
+                <span class="warn" title={t('dash.tasks.warn.hint')}>⚠️ {issue.taskProgress.warnings}</span>
+              {/if}
+            </span>
+          {/if}
           <span class="cost">${issue.cost.toFixed(4)}</span>
         </div>
-        <div class="bar-row"><PhaseBar phase={issue.phase} /></div>
+        <div class="bar-row"><PhaseBar phase={issue.phase} specMode={view.specMode} specStage={issue.specStage} /></div>
         <div class="issue-actions">
           {#if issue.url}<a href={issue.url} target="_blank" rel="noreferrer">{t('dash.tracker')} ↗</a>{/if}
           {#each issue.prs ?? [] as pr}
@@ -176,6 +212,10 @@
           {/each}
           {#if issue.prs?.length}<Button onclick={() => complete(issue.identifier)}>{t('dash.complete')}</Button>{/if}
           {#if issue.stuck}<Button onclick={() => retry(issue.identifier)}>{t('dash.retry')}</Button>{/if}
+          {#if issue.taskProgress || view.specMode === 'split'}
+            <!-- The approval cards are gone once approved, and these are what was approved. -->
+            <Button onclick={() => (specFor = issue.identifier)}>{t('spec.open')}</Button>
+          {/if}
           <Button onclick={() => restart(issue.identifier)}>{t('dash.restart')}</Button>
           <Button onclick={() => remove(issue.identifier)}>{t('dash.remove')}</Button>
         </div>
@@ -204,7 +244,24 @@
   >
     <div class="modal" role="dialog" tabindex="-1" onclick={(e) => e.stopPropagation()} onkeydown={() => {}}>
       <h2>{t('dash.candidates')}</h2>
-      {#if candidates.length === 0 && !candLoading}<p class="dim">{t('dash.none')}</p>{/if}
+      <!-- Filtered by the tracker, not by this list: one page is 10 issues, so filtering
+           what has arrived would search a tenth of the board (CRL-124). -->
+      <form
+        class="cand-search"
+        onsubmit={(e) => {
+          e.preventDefault();
+          void runCandSearch();
+        }}
+      >
+        <input type="search" bind:value={candQuery} placeholder={t('dash.searchHint')} aria-label={t('dash.searchHint')} />
+        <Button onclick={runCandSearch}>{t('dash.search')}</Button>
+      </form>
+      {#if candSearch && candSearched === false}
+        <p class="warn">{t('dash.searchIgnored')}</p>
+      {/if}
+      {#if candidates.length === 0 && !candLoading}
+        <p class="dim">{candSearch ? t('dash.searchNone').replace('{q}', candSearch) : t('dash.none')}</p>
+      {/if}
       <div class="cand-list" bind:this={candListEl} onscroll={onCandScroll}>
         {#each candidates as c (c.identifier)}
           <div class="candidate">
@@ -228,34 +285,11 @@
   </div>
 {/if}
 
+{#if specFor}
+  <SpecDocs identifier={specFor} onClose={() => (specFor = null)} />
+{/if}
+
 <style>
-  header {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 14px 22px;
-    border-bottom: 1px solid var(--border);
-    background: var(--surface);
-  }
-  header h1 {
-    font-size: 18px;
-    margin: 0;
-  }
-  .count {
-    color: var(--text-dim);
-  }
-  header :global(button.primary) {
-    margin-left: auto;
-  }
-  .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--red);
-  }
-  .dot.on {
-    background: var(--green);
-  }
   main {
     padding: 20px 28px;
   }
@@ -269,6 +303,21 @@
     border-radius: var(--radius);
     padding: 12px 16px;
     margin-top: 4px;
+    color: var(--amber);
+  }
+  .cand-search {
+    display: flex;
+    gap: 8px;
+    margin: 0 0 10px;
+  }
+  .cand-search input {
+    flex: 1;
+    min-width: 0;
+  }
+  .warn {
+    margin: 0 0 10px;
+    font-size: 12px;
+    line-height: 1.5;
     color: var(--amber);
   }
   h2 {
@@ -357,6 +406,14 @@
   .cost {
     color: var(--text-dim);
     font-size: 12px;
+  }
+  .tasks {
+    color: var(--accent-text);
+    font-size: 12px;
+  }
+  .tasks .warn {
+    color: var(--amber, #d29922);
+    margin-left: 4px;
   }
   .bar-row {
     margin: 10px 0;

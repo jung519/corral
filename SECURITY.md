@@ -10,9 +10,12 @@ Include steps to reproduce and the impact. We aim to acknowledge reports promptl
 
 - **BYOK (bring your own keys).** Corral embeds no provider credentials. All
   tokens/keys are supplied by the user.
-- **Secrets at rest.** In the desktop app, secrets are stored in the OS keychain
-  via Electron `safeStorage` (`desktop/src/keychain.ts`), never in the config file.
-  In headless use, secrets come from `CORRAL_*` environment variables.
+- **Secrets at rest.** Never in the config file. In the desktop app they go to the
+  OS keychain via Electron `safeStorage` (`desktop/src/keychain.ts`). The headless
+  core layers two sources: `CORRAL_*` environment variables, which are read-only and
+  take precedence, and `<state dir>/credentials.json`, written with mode `0600` —
+  that file is where a value saved headlessly is kept, so treat the state directory
+  as sensitive.
 - **Config holds references, not secrets.** `corral.yaml` contains only
   `CredentialRef` pointers (service + account), never the secret values.
 - **No bundled proprietary binaries.** Provider CLIs are detected on the host and

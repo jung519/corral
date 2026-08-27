@@ -1,0 +1,562 @@
+/**
+ * The Pub/Sub trigger, against a real HTTP server speaking the emulator's protocol.
+ *
+ * Almost every test here is about one question: **what happens to the message?** Getting
+ * that wrong produces either lost work or a subscription that redelivers the same poison
+ * message forever, and neither shows up in a happy-path test.
+ */
+import { readFileSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { RunOutcome, RunRecord } from '../pipeline/run.js';
+import { PipelineSchema, type Pipeline } from '../pipeline/schema.js';
+import { PubSubTrigger, SETTLED } from './pubsub.js';
+import type { TriggerHealth } from './types.js';
+
+const SUBSCRIPTION = 'projects/p/subscriptions/s';
+
+/** A stand-in Pub/Sub: hands out queued messages and records how each was settled. */
+class FakePubSub {
+  readonly acked: string[] = [];
+  readonly nacked: string[] = [];
+  /** How many times the trigger asked for work. `0` is a claim worth making. */
+  pulls = 0;
+  /** Hold a pull that has messages, so a stop can land in the middle of one. */
+  pullDelayMs = 0;
+  /** Anything but 200 makes `pull` throw the way a real refusal does. */
+  pullStatus = 200;
+  /** Put a returned message back on the queue, as Pub/Sub does. Off by default so the
+   *  settle tests can count one delivery. */
+  redeliver = false;
+  private readonly bodies = new Map<string, string | undefined>();
+  private queue: Array<{ ackId: string; data?: string; attributes?: Record<string, string> }> = [];
+  private server!: Server;
+  host = '';
+
+  async listen(): Promise<void> {
+    this.server = createServer((req, res) => {
+      let body = '';
+      req.on('data', (c) => (body += c));
+      req.on('end', () => {
+        const parsed = body ? (JSON.parse(body) as { ackIds?: string[]; maxMessages?: number }) : {};
+        const json = (status = 200): void => void res.writeHead(status, { 'content-type': 'application/json' });
+        if (req.url?.endsWith(':pull')) {
+          this.pulls++;
+          if (this.pullStatus !== 200) {
+            json(this.pullStatus);
+            res.end(JSON.stringify({ error: { message: 'refused' } }));
+            return;
+          }
+          json();
+          const take = this.queue.splice(0, parsed.maxMessages ?? 1);
+          const reply = (): void => {
+            res.end(
+              JSON.stringify({
+                receivedMessages: take.map((m) => ({
+                  ackId: m.ackId,
+                  message: { data: m.data, attributes: m.attributes, messageId: m.ackId },
+                })),
+              }),
+            );
+          };
+          // A real pull is a long poll. Delaying only a pull that found something keeps the
+          // idle case fast while leaving a window a stop can land inside.
+          if (take.length && this.pullDelayMs) setTimeout(reply, this.pullDelayMs);
+          else reply();
+        } else if (req.url?.endsWith(':acknowledge')) {
+          this.acked.push(...(parsed.ackIds ?? []));
+          json();
+          res.end('{}');
+        } else if (req.url?.endsWith(':modifyAckDeadline')) {
+          this.nacked.push(...(parsed.ackIds ?? []));
+          // Deadline 0 means "give it to someone else now", so a returned message is
+          // available again immediately. Modelling that is what makes a retry loop visible.
+          if (this.redeliver) for (const id of parsed.ackIds ?? []) this.queue.push({ ackId: id, data: this.bodies.get(id) });
+          json();
+          res.end('{}');
+        } else {
+          json();
+          res.end('{}');
+        }
+      });
+    });
+    await new Promise<void>((r) => this.server.listen(0, '127.0.0.1', r));
+    this.host = `127.0.0.1:${(this.server.address() as AddressInfo).port}`;
+  }
+
+  publish(ackId: string, payload: unknown, attributes?: Record<string, string>): void {
+    this.bodies.set(ackId, payload === undefined ? undefined : Buffer.from(JSON.stringify(payload)).toString('base64'));
+    this.queue.push({
+      ackId,
+      data: payload === undefined ? undefined : Buffer.from(JSON.stringify(payload)).toString('base64'),
+      attributes,
+    });
+  }
+
+  /** Publish something that is not JSON at all. */
+  publishGarbage(ackId: string): void {
+    this.queue.push({ ackId, data: Buffer.from('<<not json>>').toString('base64') });
+  }
+
+  async close(): Promise<void> {
+    await new Promise<void>((r) => this.server.close(() => r()));
+  }
+}
+
+let queue: FakePubSub;
+
+const pipeline = (over: Record<string, unknown> = {}): Pipeline =>
+  PipelineSchema.parse({
+    key: 'classify',
+    trigger: { kind: 'pubsub', topic: 'records', subscription: SUBSCRIPTION },
+    input: { kind: 'none' },
+    agent: { prompt: { system: 's', user_template: 'u' }, schema: { type: 'object', properties: { a: { type: 'string' } } } },
+    output: { kind: 'none' },
+    ...over,
+  });
+
+const record = (outcome: RunOutcome): RunRecord => ({
+  id: 'r1',
+  pipeline: 'classify',
+  startedAt: 0,
+  endedAt: 1,
+  outcome,
+});
+
+/** Wait for a condition the trigger's loop will bring about. */
+async function until(check: () => boolean, ms = 4000): Promise<void> {
+  const t0 = Date.now();
+  while (!check()) {
+    if (Date.now() - t0 > ms) throw new Error('timed out');
+    await new Promise((r) => setTimeout(r, 20));
+  }
+}
+
+beforeEach(async () => {
+  queue = new FakePubSub();
+  await queue.listen();
+  process.env.PUBSUB_EMULATOR_HOST = queue.host;
+});
+afterEach(async () => {
+  delete process.env.PUBSUB_EMULATOR_HOST;
+  await queue.close();
+});
+
+describe('receiving work', () => {
+  it('turns a message into a run', async () => {
+    const seen: unknown[] = [];
+    queue.publish('m1', { id: 42, title: 'a record' });
+
+    const stop = new PubSubTrigger().start(pipeline(), async (event) => {
+      seen.push(event);
+      return record('completed');
+    });
+    await until(() => seen.length > 0);
+    await stop();
+
+    expect(seen[0]).toEqual({ id: 42, title: 'a record' });
+  });
+
+  it('carries attributes alongside the body, so either can hold the identifier', async () => {
+    const seen: unknown[] = [];
+    queue.publish('m1', { title: 'a record' }, { id: '42' });
+
+    const stop = new PubSubTrigger().start(pipeline(), async (event) => (seen.push(event), record('completed')));
+    await until(() => seen.length > 0);
+    await stop();
+
+    expect(seen[0]).toEqual({ id: '42', title: 'a record' });
+  });
+
+  it('accepts a message that is only attributes', async () => {
+    const seen: unknown[] = [];
+    queue.publish('m1', undefined, { id: '42' });
+
+    const stop = new PubSubTrigger().start(pipeline(), async (event) => (seen.push(event), record('completed')));
+    await until(() => seen.length > 0);
+    await stop();
+
+    expect(seen[0]).toEqual({ id: '42' });
+  });
+
+  it('pulls no more at a time than the pipeline will run', async () => {
+    let maxSeen = 0;
+    for (let i = 0; i < 10; i++) queue.publish(`m${i}`, { i });
+
+    const stop = new PubSubTrigger().start(pipeline({ max_concurrent: 3 }), async () => {
+      maxSeen = Math.max(maxSeen, 1);
+      return record('completed');
+    });
+    await until(() => queue.acked.length >= 10, 6000);
+    await stop();
+
+    // Pulling a hundred messages a slot-limited pipeline cannot start just holds them
+    // until their deadlines lapse.
+    expect(queue.acked).toHaveLength(10);
+  });
+});
+
+describe('what happens to the message', () => {
+  /** Run one message whose run ends with `outcome`, and report how it was settled. */
+  async function settle(outcome: RunOutcome): Promise<'acked' | 'nacked'> {
+    queue.publish('m1', { id: 1 });
+    const stop = new PubSubTrigger().start(pipeline(), async () => record(outcome));
+    await until(() => queue.acked.length + queue.nacked.length > 0);
+    await stop();
+    return queue.acked.includes('m1') ? 'acked' : 'nacked';
+  }
+
+  it('acknowledges anything a retry would only repeat', async () => {
+    // A conclusion is a conclusion — running it again produces the same one.
+    expect(await settle('completed')).toBe('acked');
+    expect(await settle('skipped')).toBe('acked');
+    expect(await settle('reported')).toBe('acked');
+    expect(await settle('rejected')).toBe('acked');
+  });
+
+  it('keeps a run stopped by the day budget, rather than throwing the work away', async () => {
+    // This used to be acked, on the reasoning that a spent ceiling stays spent until
+    // midnight and holding the message would redeliver into it all day. That was true
+    // while the loop pulled regardless of the ceiling; it checks first now (CRL-49), so a
+    // returned message waits instead of coming straight back — and the work survives.
+    expect(await settle('over_budget')).toBe('nacked');
+  });
+
+  it('leaves a throttled message for later', async () => {
+    // Capacity frees up in seconds; the queue is exactly the right place to wait.
+    expect(await settle('throttled')).toBe('nacked');
+  });
+
+  it('leaves a message whose step failed', async () => {
+    // An unreachable source or a rate-limited model may well work next time. Nothing
+    // counts attempts here — that is what a dead-letter policy on the subscription is
+    // for, where an operator can see and change it.
+    expect(await settle('input_failed')).toBe('nacked');
+    expect(await settle('agent_failed')).toBe('nacked');
+    expect(await settle('output_failed')).toBe('nacked');
+  });
+
+  it('drops an unreadable message without ever running it', async () => {
+    let fired = 0;
+    queue.publishGarbage('bad');
+
+    const stop = new PubSubTrigger().start(pipeline(), async () => (fired++, record('completed')));
+    await until(() => queue.acked.length > 0);
+    await stop();
+
+    // It parses the same way tomorrow. Holding it is an infinite redelivery loop wearing
+    // a disguise.
+    expect(queue.acked).toEqual(['bad']);
+    expect(fired).toBe(0);
+  });
+
+  it('drops a message for a pipeline that is gone', async () => {
+    queue.publish('m1', { id: 1 });
+
+    const stop = new PubSubTrigger().start(pipeline(), async () => undefined);
+    await until(() => queue.acked.length > 0);
+    await stop();
+
+    expect(queue.acked).toEqual(['m1']);
+  });
+
+  it('leaves the message when the run throws outright', async () => {
+    queue.publish('m1', { id: 1 });
+
+    const stop = new PubSubTrigger().start(pipeline(), async () => {
+      throw new Error('boom');
+    });
+    await until(() => queue.nacked.length > 0);
+    await stop();
+
+    expect(queue.nacked).toEqual(['m1']);
+  });
+});
+
+describe('shutting down', () => {
+  it('waits for a message it is already handling', async () => {
+    let release: (() => void) | undefined;
+    let finished = false;
+    queue.publish('m1', { id: 1 });
+
+    const stop = new PubSubTrigger().start(pipeline(), async () => {
+      await new Promise<void>((r) => (release = r));
+      finished = true;
+      return record('completed');
+    });
+    await until(() => release !== undefined);
+
+    const stopping = stop();
+    release?.();
+    await stopping;
+
+    // A message half-processed and never settled sits until its deadline lapses, which
+    // looks like a stall to whoever published it.
+    expect(finished).toBe(true);
+    expect(queue.acked).toEqual(['m1']);
+  });
+
+  it('stops pulling', async () => {
+    const stop = new PubSubTrigger().start(pipeline(), async () => record('completed'));
+    await stop();
+
+    queue.publish('later', { id: 2 });
+    await new Promise((r) => setTimeout(r, 300));
+
+    expect(queue.acked).not.toContain('later');
+  });
+
+  /**
+   * A pull is a long poll, so a stop can land while one is out. The loop used to go straight
+   * on and start the run anyway — measured at 265ms after `stop()` had returned, on a core
+   * whose next statement is `process.exit` (CRL-50). `stop()` returned in a millisecond
+   * because it waited on the previous batch's already-resolved promise.
+   */
+  it('starts nothing new when a stop lands mid-pull, and hands the message back', async () => {
+    queue.pullDelayMs = 300;
+    const runs: number[] = [];
+    const stop = new PubSubTrigger().start(pipeline(), async () => (runs.push(Date.now()), record('completed')));
+
+    await until(() => queue.pulls > 0); // a pull is out
+    queue.publish('m1', { id: 1 });
+    await until(() => queue.pulls > 1); // and now one is out with m1 in it
+    const stoppedAt = Date.now();
+    await stop();
+    const returnedAt = Date.now();
+    await new Promise((r) => setTimeout(r, 500)); // watch for anything late
+
+    expect(runs).toHaveLength(0);
+    // Waited for the pull rather than sailing past it.
+    expect(returnedAt - stoppedAt).toBeGreaterThan(50);
+    // Held and unsettled, it would sit until its deadline lapsed.
+    expect(queue.nacked).toEqual(['m1']);
+    expect(queue.acked).toEqual([]);
+  });
+});
+
+/**
+ * The ceiling is shared with the development AI and resets at midnight. A queue that keeps
+ * handing over messages nothing can run turns a spent ceiling into lost work: the loop has
+ * to settle whatever it took, and both ways of settling are worse than not having taken it
+ * (CRL-49). Left in the subscription, the work simply waits.
+ */
+describe('when the day\'s tokens are spent', () => {
+  const spent = { check: () => ({ ok: false, reason: 'daily input token limit reached' }) };
+
+  it('leaves the work in the queue instead of taking it out', async () => {
+    queue.publish('m1', { id: 1 });
+    const runs: unknown[] = [];
+
+    const stop = new PubSubTrigger({ budget: spent }).start(pipeline(), async () => (runs.push(1), record('completed')));
+    await new Promise((r) => setTimeout(r, 300));
+    await stop();
+
+    // Not pulled, so not run, and not settled either way — still in the subscription.
+    expect(queue.pulls).toBe(0);
+    expect(runs).toHaveLength(0);
+    expect(queue.acked).toEqual([]);
+    expect(queue.nacked).toEqual([]);
+  });
+
+  it('picks the work up once there is budget again', async () => {
+    let ok = false;
+    queue.publish('m1', { id: 1 });
+    const runs: unknown[] = [];
+
+    const stop = new PubSubTrigger({ budget: { check: () => ({ ok }) } }).start(
+      pipeline(),
+      async () => (runs.push(1), record('completed')),
+    );
+    await new Promise((r) => setTimeout(r, 200));
+    expect(queue.pulls).toBe(0); // still nothing taken
+
+    ok = true; // midnight
+    await until(() => runs.length > 0);
+    await stop();
+
+    expect(queue.acked).toEqual(['m1']);
+  });
+
+  it('does not make a shutdown sit out the wait', async () => {
+    // The recheck interval is half a minute. A stop that had to wait for it would look
+    // wedged to whoever pressed Ctrl-C.
+    const stop = new PubSubTrigger({ budget: spent }).start(pipeline(), async () => record('completed'));
+    await new Promise((r) => setTimeout(r, 100)); // let it settle into the wait
+
+    const at = Date.now();
+    await stop();
+
+    expect(Date.now() - at).toBeLessThan(1_000);
+  });
+});
+
+describe('without an emulator', () => {
+  it('refuses to start with no credential rather than failing per message', async () => {
+    // Built while the emulator variable is still set — the schema refuses a definition like
+    // this now (CRL-46), and what is under test here is the runtime guard behind it: a
+    // credential that cannot be resolved when the loop actually starts.
+    const p = pipeline();
+    delete process.env.PUBSUB_EMULATOR_HOST;
+    let fired = 0;
+
+    const stop = new PubSubTrigger().start(p, async () => (fired++, record('completed')));
+    await new Promise((r) => setTimeout(r, 200));
+    await stop();
+
+    expect(fired).toBe(0);
+  });
+});
+
+/**
+ * Holding a stop handle is not the same as working. A subscription refused on every pull
+ * kept the dashboard lit and left one warning line every two seconds, which is the same
+ * thing an operator sees when the credential is missing entirely (CRL-60).
+ *
+ * Two failing states rather than one, because they send someone to different places: a 500
+ * clears up while they read about it, a 403 never does.
+ */
+describe('saying whether it is working', () => {
+  let seen: TriggerHealth[];
+
+  /** Start the trigger, collecting what it reports. */
+  function watch(): () => Promise<void> {
+    seen = [];
+    const stop = new PubSubTrigger().start(pipeline(), async () => record('completed'), (h) => seen.push(h));
+    return async () => {
+      queue.pullStatus = 200; // let whatever is in flight finish quickly
+      await stop();
+    };
+  }
+
+  it('says it is attached once it has a client', async () => {
+    const stop = watch();
+    await until(() => seen.length > 0);
+    await stop();
+
+    expect(seen).toEqual([{ state: 'attached' }]);
+  });
+
+  it('calls a refusal blocked — waiting will not grant a permission', async () => {
+    queue.pullStatus = 403;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+    await stop();
+
+    expect((seen.at(-1) as { reason: string }).reason).toContain('403');
+  });
+
+  it('calls a subscription that is not there blocked', async () => {
+    // A typo, a deletion, another project. None of them fix themselves.
+    queue.pullStatus = 404;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+    await stop();
+
+    expect(seen.at(-1)).toMatchObject({ state: 'blocked' });
+  });
+
+  it(
+    'calls a server error retrying — the loop is already trying again',
+    async () => {
+      // Slower than the others on purpose: `fetchRetry` backs off and tries a 5xx again
+      // before giving up, which is exactly why this one is not blocked.
+      queue.pullStatus = 500;
+      const stop = watch();
+      await until(() => seen.some((h) => h.state === 'retrying'), 15_000);
+      await stop();
+
+      expect(seen.at(-1)).toMatchObject({ state: 'retrying' });
+    },
+    20_000,
+  );
+
+  it('does not repeat itself while nothing changes', async () => {
+    // A pull runs every two seconds forever. Reporting each attempt would redraw the
+    // dashboard on a timer and bury the moment something actually changed.
+    queue.pullStatus = 403;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+    const after = seen.length;
+    await new Promise((r) => setTimeout(r, 1200)); // several more pulls, all refused
+    await stop();
+
+    expect(seen).toHaveLength(after);
+    expect(seen.map((h) => h.state)).toEqual(['attached', 'blocked']);
+  });
+
+  it('goes back to attached when the queue recovers', async () => {
+    queue.pullStatus = 403;
+    const stop = watch();
+    await until(() => seen.some((h) => h.state === 'blocked'));
+
+    queue.pullStatus = 200;
+    await until(() => seen.at(-1)?.state === 'attached');
+    await stop();
+
+    expect(seen.map((h) => h.state)).toEqual(['attached', 'blocked', 'attached']);
+  });
+});
+
+/**
+ * A returned message is available again at once, and the loop only rested when a pull came
+ * back empty — so a pipeline failing on every message went pull, run, return, pull with
+ * nothing in between. Measured against a zero-latency queue: the same message delivered
+ * 65,366 times in nine seconds, each turn able to cost a model call (CRL-61).
+ */
+describe('a message that keeps failing', () => {
+  it('is not picked up again straight away', async () => {
+    queue.redeliver = true;
+    queue.publish('m1', { id: 1 });
+
+    const stop = new PubSubTrigger().start(pipeline(), async () => record('agent_failed'));
+    await until(() => queue.nacked.length > 0);
+    await new Promise((r) => setTimeout(r, 1000)); // long enough for a spin to show
+    await stop();
+
+    // Without the wait this was hundreds of deliveries a second.
+    expect(queue.nacked.length).toBeLessThan(4);
+  });
+
+  it('does not slow a queue that is getting somewhere', async () => {
+    // One bad message among good ones is progress, and progress is what resets the wait.
+    queue.redeliver = false;
+    for (let i = 0; i < 8; i++) queue.publish(`m${i}`, { i });
+    let n = 0;
+
+    const stop = new PubSubTrigger().start(pipeline({ max_concurrent: 4 }), async () =>
+      record(++n % 4 === 0 ? 'agent_failed' : 'completed'),
+    );
+    await until(() => queue.acked.length >= 6, 3000);
+    await stop();
+
+    expect(queue.acked.length).toBeGreaterThanOrEqual(6);
+  });
+});
+
+/**
+ * The header comment is this file's specification — what happens to a message is decided
+ * there and implemented below. It has now been wrong twice: once when the budget policy
+ * changed and once when it changed back, both times leaving a sentence that the next
+ * reader would have taken as the rule.
+ *
+ * Only the acknowledge list can be checked mechanically, so that is what this checks. The
+ * prose still needs a person.
+ */
+describe('the header says what the code does', () => {
+  it('lists exactly the outcomes that are acknowledged', () => {
+    const header = readFileSync(new URL('./pubsub.ts', import.meta.url), 'utf8').split('*/')[0]!;
+    const acknowledged = header
+      .slice(header.indexOf('acknowledged (gone)'), header.indexOf('left unacknowledged'))
+      .toLowerCase();
+
+    // The comment writes them as prose — "finished, skipped, held back, rejected" — so
+    // match on the words a reader would recognise rather than the identifiers.
+    expect(acknowledged).toContain('finished');
+    expect(acknowledged).toContain('skipped');
+    expect(acknowledged).toContain('held back');
+    expect(acknowledged).toContain('rejected');
+    expect(acknowledged).not.toContain('budget'); // it is handed back now
+    expect([...SETTLED].sort()).toEqual(['completed', 'rejected', 'reported', 'skipped']);
+  });
+});

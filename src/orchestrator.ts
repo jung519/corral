@@ -9,19 +9,25 @@
  *   → [✅] → PR(F) → PR comments(G) → [✅] → fix(H) → merge → done + cleanup
  * Human touch-points: plan approval, review approval, PR-fix-plan approval.
  *
- * Lifted from upstream. Adaptations: single configured agent (not agents[]×kinds);
+ * Carried over from corral's pre-rename implementation. Adaptations: single configured agent (not agents[]×kinds);
  * repositories via RepositoryRouter; review/plan-review/concurrency from the
  * corral config; signals + phrasing via the profile; UI/status strings in English
  * (the agent's OUTPUT language is controlled by the profile, not these labels);
  * scratch files via core/paths (SCRATCH); BYOK (no ~/.claude). A live cycle needs a
- * real channel (the dashboard lands in S3).
+ * real channel — the desktop dashboard is it, reached over the control plane.
  */
 import { processAttachments } from './attachments.js';
 import { buildSignals, directionCheckPrompt, kickoffPrompt, PROMPTS, renderWorkflow, type Signals } from './agent/prompt-builder.js';
+import { consolidateSpecPrompt, nextSpecStage, specDoc, specStagePrompt, SPEC_STAGES, taskPrompt, type SpecStage } from './agent/prompt-builder.js';
+import { parseSpecTasks } from './core/spec-tasks.js';
+import { nextTaskStep, type TaskLoopState } from './core/task-loop.js';
+import { isUnbacked, taskEvidence, type RepoHeads, type TaskEvidence } from './core/task-evidence.js';
 import { TimingAgent } from './agent/timing-agent.js';
+import { unrunnableProvider } from './agent/backend-compat.js';
 import type { Config } from './config/schema.js';
 import { ConcurrencyLimiter } from './core/concurrency-limiter.js';
 import { CostTracker } from './core/cost-tracker.js';
+import type { TokenBudget } from './core/token-budget.js';
 import { bus } from './core/events.js';
 import { renderMarkdown } from './core/markdown.js';
 import {
@@ -34,7 +40,10 @@ import {
 import { IssueStateStore, type IssuePr, type IssueRuntime } from './core/issue-state.js';
 import { logger } from './core/logger.js';
 import { type DirectionCheckStore, type DirectionStore, parseDirectionVerdict } from './core/direction.js';
-import { SCRATCH } from './core/paths.js';
+import { SCRATCH, SCRATCH_DIR, SPEC } from './core/paths.js';
+import { wipeProduced } from './core/scratch-outputs.js';
+import { describeUncommitted, uncommittedAcross } from './core/uncommitted.js';
+import { fixableCount, isReviewClean, parseReviewStatus, unmetCriteria, type ReviewStatus } from './core/review-status.js';
 import {
   type AgentAdapter,
   type AgentRunResult,
@@ -48,7 +57,10 @@ import {
   type WorkspaceAdapter,
   type WorkspaceHandle,
 } from './core/types.js';
-import type { ApprovalDetail } from './core/types.js';
+import type { ApprovalDetail,
+  ApprovalKind,
+  IssuePhase,
+} from './core/types.js';
 import type { ResolvedProfile } from './profile/index.js';
 import type { RepositoryRouter } from './repository/router.js';
 import { PlanCritiqueOrchestrator } from './review/plan-critique.js';
@@ -64,7 +76,7 @@ const REFERENCE_DIR = '.reference';
 export class Orchestrator {
   private readonly review: ReviewOrchestrator;
   private readonly planCritique: PlanCritiqueOrchestrator;
-  private readonly cost = new CostTracker();
+  private readonly cost: CostTracker;
   private readonly history = new JsonlHistoryStore();
   /** Timing-wrapped agent (measures AI working time); the injected adapter is wrapped. */
   private readonly agent: AgentAdapter;
@@ -91,7 +103,10 @@ export class Orchestrator {
     private readonly directionStore?: DirectionStore,
     /** Direction validation state (consent + per-scope verified hashes). */
     private readonly directionCheck?: DirectionCheckStore,
+    /** Daily token ceiling, shared with the operational AI. */
+    private readonly budget?: TokenBudget,
   ) {
+    this.cost = new CostTracker(undefined, budget);
     // Wrap the agent once so every turn — planning, critique, review — is timed into
     // the issue's "AI working" total (recorded in the history entry on completion).
     this.agent = new TimingAgent(agent, (id, ms) => this.recordAgentMs(id, ms));
@@ -253,10 +268,16 @@ export class Orchestrator {
 
   /** Re-create a lost pending approval from the workspace's `.corral/` file. */
   private async recoverPendingApproval(rt: IssueRuntime, handle: WorkspaceHandle): Promise<void> {
-    const spec: Record<string, { file: string; kind: 'plan' | 'pr_plan' | 'review' | 'fix_plan' }> = {
+    const spec: Record<string, { file: string; kind: ApprovalKind }> = {
       plan_sent: { file: SCRATCH.pendingPlan, kind: 'plan' },
       pr_plan_sent: { file: SCRATCH.pendingPlan, kind: 'pr_plan' },
       review_sent: { file: SCRATCH.pendingReview, kind: 'review' },
+      // The spec gates recover the same way — the card is rebuilt from the document the
+      // human was looking at. Listed here rather than with the flow that raises them
+      // (CRL-103) because it is the file paths that were missing, and they exist now.
+      requirements_sent: { file: SPEC.requirements, kind: 'requirements' },
+      design_sent: { file: SPEC.design, kind: 'design' },
+      tasks_sent: { file: SPEC.tasks, kind: 'tasks' },
     };
     let s = spec[rt.phase];
     if (!s) return;
@@ -298,12 +319,19 @@ export class Orchestrator {
 
   // ──────────────────────────────────────── commands (on-demand, no polling)
 
-  /** Candidate issues from the tracker that are not already in flight. */
-  async listCandidates(opts?: { cursor?: string; limit?: number }): Promise<{
+  /** Candidate issues from the tracker that are not already in flight. `search` is the
+   *  picker's search box — filtered by the tracker, not here, because a page is 10 of
+   *  however many the board holds (CRL-124). */
+  async listCandidates(opts?: { cursor?: string; limit?: number; search?: string }): Promise<{
     candidates: Array<{ identifier: string; title: string; state: string; repoKey?: string; url?: string; inFlight: boolean }>;
     nextCursor?: string;
+    searched?: boolean;
   }> {
-    const { items, nextCursor } = await this.tracker.fetchCandidatePage({ cursor: opts?.cursor, limit: opts?.limit ?? 10 });
+    const { items, nextCursor, searched } = await this.tracker.fetchCandidatePage({
+      cursor: opts?.cursor,
+      limit: opts?.limit ?? 10,
+      search: opts?.search,
+    });
     const candidates = items.map((i) => ({
       identifier: i.identifier,
       title: i.title,
@@ -312,7 +340,7 @@ export class Orchestrator {
       url: i.url,
       inFlight: this.store.get(i.identifier) !== undefined,
     }));
-    return { candidates, nextCursor };
+    return { candidates, nextCursor, searched };
   }
 
   /** Begin work on an issue. Creates the workspace synchronously so failures surface immediately. */
@@ -521,13 +549,18 @@ export class Orchestrator {
       case 'pr_plan_sent': {
         const kind = rt.phase === 'plan_sent' ? 'plan' : 'pr_plan';
         const msg = 'The previous output was empty. Re-write the plan to `.corral/pending_plan.md` and stop.';
-        const result = await this.dispatch(rt, issue, msg, true, 'planning');
+        const result = await this.dispatch(rt, issue, msg, true, 'planning', [SCRATCH.pendingPlan]);
         if (result.ok) await this.afterPlanProduced(rt, issue, kind);
         return;
       }
       case 'implementing':
       case 'review_fixing':
         await this.resumeImplementing(rt, issue);
+        return;
+      // The code is already committed; the only thing the restart cost is the critique.
+      // Re-running the whole implementation would talk over work that is already done.
+      case 'reviewing':
+        await this.presentReview(rt, issue);
         return;
       default:
         await this.surfaceStuck(rt, `Phase '${rt.phase}' does not support auto-retry — restart the issue from scratch.`);
@@ -607,7 +640,7 @@ export class Orchestrator {
     return this.referenceCloneUrl ? REFERENCE_DIR : undefined;
   }
 
-  /** The global Direction text to inject — only if it's VERIFIED (§15); unverified text is
+  /** The global Direction text to inject — only if it's VERIFIED; unverified text is
    * never injected. '' → the workflow's `{% if direction %}` block renders nothing. Read
    * fresh per dispatch so edits apply without a core restart. */
   private buildDirection(): string {
@@ -616,7 +649,7 @@ export class Orchestrator {
   }
 
   /**
-   * Direction validation gate (§15, checkpoint 2). Runs at planning start: any non-empty
+   * Direction validation gate. Runs at planning start: any non-empty
    * Direction text that isn't already verified is checked by an AI turn. Rejected text
    * BLOCKS the issue; approved text is recorded (hash) so it's injected. Without user
    * consent nothing is spent — unverified scopes simply won't be injected. Returns false
@@ -699,9 +732,13 @@ export class Orchestrator {
 
   private async dispatchPlanning(rt: IssueRuntime, issue: Issue): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
-    // Direction validation gate (§15) — blocks the issue if a Direction text is rejected.
+    // Direction validation gate — blocks the issue if a Direction text is rejected.
     if (!(await this.runDirectionCheck(rt, issue, handle))) return;
-    const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning');
+    if (this.config.spec_mode === 'split') {
+      await this.runSpecStage(rt, issue, handle, 'requirements');
+      return;
+    }
+    const draft = await this.dispatch(rt, issue, kickoffPrompt(issue), false, 'planning', [SCRATCH.pendingPlan]);
     if (!draft.ok) return;
     if (await this.handleQuestion(rt, handle)) return;
     if (!(await this.readOutput(handle, SCRATCH.pendingPlan))) {
@@ -712,7 +749,18 @@ export class Orchestrator {
   }
 
   /** Plan vetting: critics over the draft → consolidate → send approval card. */
-  private async vetAndSendPlan(rt: IssueRuntime, issue: Issue, handle: WorkspaceHandle, focus?: string): Promise<void> {
+  /**
+   * `resume` is set only by `resumeVetting()` — the restart-recovery path. A fresh cycle and
+   * a human-requested re-vet both start over; a run the core interrupted picks up where it
+   * left off instead of paying for finished rounds again (CRL-87).
+   */
+  private async vetAndSendPlan(
+    rt: IssueRuntime,
+    issue: Issue,
+    handle: WorkspaceHandle,
+    focus?: string,
+    resume = false,
+  ): Promise<void> {
     rt.phase = 'plan_reviewing';
     this.store.upsert(rt);
     bus.emitEvent({
@@ -721,37 +769,180 @@ export class Orchestrator {
       phase: 'plan_reviewing',
       label: focus ? `🔍 Re-vetting plan — ${focus.slice(0, 40)}` : '🔍 Vetting plan',
     });
-    await this.planCritique.run(
-      handle,
-      issue,
-      this.planningModel(),
-      this.referencePath(),
-      (r) => this.cost.add(rt.identifier, r),
+    const critiques = await this.planCritique.run(handle, issue, {
+      model: this.planningModel(),
+      referencePath: this.referencePath(),
+      onRoundCost: (r) => this.cost.add(rt.identifier, r),
       focus,
-      this.buildDirection(),
-    );
-    // Preserve the draft before the consolidate dispatch's wipeOutputs clears it.
-    await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
-    const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidatePlan, true, 'planning');
-    if (!consolidate.ok) return;
+      direction: this.buildDirection(),
+      resume,
+    });
+    // Nothing to fold in means nothing to consolidate. It used to run anyway — a turn that
+    // asked the model to "fold the critiques in" with no critiques on disk, once per stage
+    // (CRL-130).
+    if (critiques.length > 0) {
+      // Preserve the draft — consolidation rewrites pending_plan.md from scratch.
+      await this.workspace.io.exec(handle, `cp ${SCRATCH.pendingPlan} ${SCRATCH.planDraft} 2>/dev/null || true`);
+      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidatePlan, true, 'planning', [
+        SCRATCH.pendingPlan,
+      ]);
+      if (!consolidate.ok) return;
+    }
     await this.afterPlanProduced(rt, issue, 'plan');
+  }
+
+  /**
+   * One spec stage: draft the document, vet it, then park on its approval gate.
+   *
+   * Deliberately the same shape as the single-plan flow above — draft, critique rounds,
+   * consolidate, card — so the two modes do not drift into separate code paths. What
+   * changes per stage is only which document is written and which card kind is raised.
+   *
+   * The spec files are never named in `produces`. A dispatch clears what it declares
+   * (CRL-88), and these are the *input* of every later stage; the "did this turn produce
+   * anything" check reads the file directly instead.
+   */
+  private async runSpecStage(
+    rt: IssueRuntime,
+    issue: Issue,
+    handle: WorkspaceHandle,
+    stage: SpecStage,
+  ): Promise<void> {
+    const log = logger.child(rt.identifier);
+    const doc = specDoc(stage);
+    rt.specStage = stage;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'plan_reviewing', label: `📐 Drafting ${stage}` });
+
+    // First stage only: a fresh session. The later ones continue so the agent still has the
+    // repository it just inspected, and they read the approved documents off disk anyway.
+    // Clear the previous stage's options: the file is not stage-scoped, and a leftover
+    // would answer for a stage that never wrote one (the same staleness CRL-87 fixed for
+    // critique files).
+    await this.workspace.io.writeFile(handle, SCRATCH.planOptions, '');
+    const fresh = stage === 'requirements';
+    const draft = await this.dispatch(rt, issue, specStagePrompt(issue, stage), !fresh, 'planning');
+    if (!draft.ok) return;
+    if (await this.handleQuestion(rt, handle)) return;
+    if (!(await this.readOutput(handle, doc))) {
+      await this.surfaceStuck(rt, `The ${stage} document (${doc}) is empty — please retry.`, true);
+      return;
+    }
+    await this.vetAndSendSpec(rt, issue, handle, stage);
+    log.info(`spec stage ${stage} awaiting approval`);
+  }
+
+  /** Critique + consolidate one spec document, then raise its approval card. */
+  private async vetAndSendSpec(
+    rt: IssueRuntime,
+    issue: Issue,
+    handle: WorkspaceHandle,
+    stage: SpecStage,
+    resume = false,
+  ): Promise<void> {
+    const doc = specDoc(stage);
+    rt.phase = 'plan_reviewing';
+    rt.specStage = stage;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'plan_reviewing', label: `🔍 Vetting ${stage}` });
+
+    const critiques = await this.planCritique.run(handle, issue, {
+      model: this.planningModel(),
+      referencePath: this.referencePath(),
+      onRoundCost: (r) => this.cost.add(rt.identifier, r),
+      direction: this.buildDirection(),
+      resume,
+      target: doc,
+      // Per stage: `design` and `tasks` read a document a human already approved, so a
+      // deployment can spend its critique where it buys the most. Absent = the configured
+      // count, which is every existing config (CRL-130).
+      rounds: this.config.plan_review.stages[stage],
+    });
+    if (critiques.length > 0) {
+      // Same guard the single flow uses: consolidation rewrites the document, so keep a copy
+      // to fall back on if the turn produces nothing.
+      await this.workspace.io.exec(handle, `cp ${doc} ${SCRATCH.planDraft} 2>/dev/null || true`);
+      const consolidate = await this.dispatch(rt, issue, consolidateSpecPrompt(stage), true, 'planning');
+      if (!consolidate.ok) return;
+      await this.workspace.io.exec(handle, `test -s ${doc} || cp ${SCRATCH.planDraft} ${doc} 2>/dev/null || true`);
+    }
+
+    const body = await this.readOutput(handle, doc);
+    if (!body) {
+      await this.surfaceStuck(rt, `The ${stage} document (${doc}) is empty after consolidation — please retry.`, true);
+      return;
+    }
+    const phase = `${stage}_sent` as IssuePhase;
+    rt.approvalId = await this.channel.sendApproval({
+      identifier: rt.identifier,
+      kind: stage,
+      title: issue.title,
+      body,
+      // Only the design stage is told to write options (guide A2); requirements and tasks
+      // are not. Attaching them everywhere meant the task card offered the design
+      // alternatives again — a choice the human already made, presented as still open, and
+      // carried into the implementation prompt as "Implement the X option" (CRL-113).
+      options: stage === 'design' ? await this.planOptionsFor(handle) : undefined,
+    });
+    rt.phase = phase;
+    this.store.upsert(rt);
+    bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase, label: `🔔 Action needed — review the ${stage}` });
+    await this.tracker.transitionIssue(issue, 'plan_review').catch(() => {});
+  }
+
+  /**
+   * A spec gate was approved: run the next stage, or start implementing after the last one.
+   *
+   * `specStage` is cleared on the way into implementation — from there on the run is no
+   * longer inside the planning ladder, and a stale value would make a later restart try to
+   * resume vetting a stage that is already approved.
+   */
+  private async specGateApproved(rt: IssueRuntime, issue: Issue, detail?: ApprovalDetail): Promise<void> {
+    const handle = this.handles.get(rt.identifier)!;
+    const stage = (rt.specStage ?? 'requirements') as SpecStage;
+    const next = nextSpecStage(stage);
+    if (next) {
+      await this.runSpecStage(rt, issue, handle, next);
+      return;
+    }
+    rt.specStage = undefined;
+    this.store.upsert(rt);
+    await this.implementAndReview(rt, issue, detail);
   }
 
   /** Resume plan vetting interrupted by a restart (phase stuck at plan_reviewing). */
   private async resumeVetting(rt: IssueRuntime, handle: WorkspaceHandle): Promise<void> {
     const issue = await this.tracker.fetchIssueByIdentifier(rt.identifier).catch(() => null);
     if (!issue) return;
+    // `plan_reviewing` is shared by both modes; `specStage` is what says which document was
+    // being vetted. Absent means the single-plan flow — including every state file written
+    // before spec mode existed.
+    const stage = rt.specStage as SpecStage | undefined;
+    const doc = stage ? specDoc(stage) : SCRATCH.pendingPlan;
     await this.workspace.io.exec(
       handle,
-      `test -s ${SCRATCH.pendingPlan} || cp ${SCRATCH.planDraft} ${SCRATCH.pendingPlan} 2>/dev/null || true`,
+      `test -s ${doc} || cp ${SCRATCH.planDraft} ${doc} 2>/dev/null || true`,
     );
-    if (!(await this.readOutput(handle, SCRATCH.pendingPlan))) {
-      await this.surfaceStuck(rt, 'Failed to resume plan vetting — no draft left. Restart the issue.');
+    if (!(await this.readOutput(handle, doc))) {
+      await this.surfaceStuck(rt, `Failed to resume ${stage ?? 'plan'} vetting — no draft left. Restart the issue.`);
       return;
     }
-    bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: '↻ Auto-resuming interrupted plan vetting' });
+    // Say which rounds survived. A restart that reuses them and a restart that re-runs them
+    // look the same on screen otherwise, and telling them apart is the point (CRL-87).
+    const kept = (await this.workspace.io.list(handle, SCRATCH_DIR)).filter((n) => /^plan_critique_\d+\.md$/.test(n));
+    bus.emitEvent({
+      identifier: rt.identifier,
+      kind: 'notice',
+      label:
+        kept.length > 0
+          ? `↻ Auto-resuming interrupted plan vetting — reusing ${kept.length} finished critique round(s)`
+          : '↻ Auto-resuming interrupted plan vetting',
+    });
     void this.serialize(rt.identifier, () =>
-      this.vetAndSendPlan(rt, issue, handle).catch((err) => {
+      (stage
+        ? this.vetAndSendSpec(rt, issue, handle, stage, true)
+        : this.vetAndSendPlan(rt, issue, handle, undefined, true)
+      ).catch((err) => {
         logger.child(rt.identifier).error('resumeVetting failed', String(err));
         bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: `❌ Plan vetting resume failed: ${oneLineErr(err)}` });
       }),
@@ -840,14 +1031,16 @@ export class Orchestrator {
   // ───────────────────────────────────────────────────── dispatch helper
 
   /** The provider that can't execute under the current backend for `stage`, or null.
-   *  gemini has no in-container auth under docker, so a stage routed to it is cancelled
-   *  at dispatch (it may be *configured*, just not runnable). Fallbacks are for capacity
-   *  exhaustion, not backend incompatibility, so only the stage's primary provider counts. */
+   *  A stage routed to one is cancelled at dispatch (it may be *configured*, just not
+   *  runnable). Fallbacks are for capacity exhaustion, not backend incompatibility, so
+   *  only the stage's own routing counts.
+   *
+   *  Provider AND transport come from the same place, the way bootstrap resolves it: a
+   *  stage override replaces the routing whole, so reading the provider from the override
+   *  and the transport from the base would judge a pair that never runs. */
   private unrunnableStageProvider(stage: AgentStage): string | null {
-    if (this.config.workspace.backend !== 'docker') return null;
-    const a = this.config.agent;
-    const provider = a.stages?.[stage]?.provider ?? a.provider;
-    return provider === 'gemini' ? provider : null;
+    const routing = this.config.agent.stages?.[stage] ?? this.config.agent;
+    return unrunnableProvider(routing, this.config.workspace.backend);
   }
 
   private async dispatch(
@@ -856,6 +1049,16 @@ export class Orchestrator {
     prompt: string,
     continueSession: boolean,
     stage: AgentStage,
+    /**
+     * The human-facing files this turn is expected to write. They are blanked first, so a
+     * turn that produces nothing is distinguishable from one that leaves the previous
+     * cycle's file in place.
+     *
+     * Empty by default, and most turns leave it empty: `pending_plan.md` and
+     * `pending_review.md` are *inputs* to the implementation, fix and feedback turns, and
+     * clearing an input is never right. It used to happen on every dispatch (CRL-88).
+     */
+    produces: readonly string[] = [],
   ): Promise<AgentRunResult> {
     const handle = this.handles.get(rt.identifier);
     if (!handle) throw new Error(`no workspace handle for ${rt.identifier}`);
@@ -864,6 +1067,16 @@ export class Orchestrator {
       logger.child(rt.identifier).warn('dispatch requested while busy; skipping');
       return { ok: false, costUsd: 0, inputTokens: 0, outputTokens: 0, exitCode: null, error: 'crashed' };
     }
+    // Checked before the turn, not after — a ceiling enforced afterwards has already
+    // been exceeded. The agent is never reached, so failover never sees this and does
+    // not waste an attempt on a second provider that shares the same limit.
+    const allowed = this.budget?.check();
+    if (allowed && !allowed.ok) {
+      logger.child(rt.identifier).warn(`dispatch blocked: ${allowed.reason}`);
+      bus.emitEvent({ identifier: rt.identifier, kind: 'error', label: `⛔ ${allowed.reason}` });
+      return { ok: false, costUsd: 0, inputTokens: 0, outputTokens: 0, exitCode: null, error: 'budget' };
+    }
+
     this.busy.add(rt.identifier);
     try {
       const workflow = await renderWorkflow({
@@ -880,13 +1093,15 @@ export class Orchestrator {
         reference_path: this.referencePath(),
         direction: this.buildDirection(),
       });
-      await this.wipeOutputs(handle);
+      await wipeProduced(this.workspace.io, handle, produces);
       // Run-time backend guard: a provider assigned to this stage that can't execute under
       // the current backend (gemini under docker) is cancelled here with a clear message,
       // instead of failing cryptically mid-build. Configurable in setup, blocked at run.
       const blocked = this.unrunnableStageProvider(stage);
       if (blocked) {
-        const msg = `${blocked}는 현재 Docker 백엔드에서 실행할 수 없습니다 — 워크스페이스를 로컬로 바꾸거나 이 단계를 다른 provider로 배치하세요.`;
+        // Names the transport, because that is what makes it impossible — and it is the
+        // cheapest of the three ways out (the container needs no gemini login on `api`).
+        const msg = `${blocked}는 Docker 백엔드에서 CLI로 실행할 수 없습니다 — 이 단계를 API 트랜스포트로 바꾸거나, 다른 provider로 배치하거나, 워크스페이스를 로컬로 바꾸세요.`;
         rt.phase = 'auth_error_waiting';
         rt.stuck = true;
         this.store.upsert(rt);
@@ -1022,6 +1237,9 @@ export class Orchestrator {
       plan_sent: '✅ Plan approved — starting implementation.',
       pr_plan_sent: '✅ Fix plan approved — starting PR fixes.',
       review_sent: '✅ Review approved — preparing the PR.',
+      requirements_sent: '✅ Requirements approved — drafting the design.',
+      design_sent: '✅ Design approved — breaking it into tasks.',
+      tasks_sent: '✅ Tasks approved — starting implementation.',
     };
     if (ack[rt.phase]) await this.channel.notify(identifier, ack[rt.phase]!);
     bus.emitEvent({ identifier, kind: 'approval', phase: rt.phase, label: '✅ Approved' });
@@ -1035,6 +1253,11 @@ export class Orchestrator {
         break;
       case 'review_sent':
         await this.reviewApproved(rt, issue);
+        break;
+      case 'requirements_sent':
+      case 'design_sent':
+      case 'tasks_sent':
+        await this.specGateApproved(rt, issue, detail);
         break;
       default:
         logger.child(identifier).warn(`approve ignored in phase ${rt.phase}`);
@@ -1066,13 +1289,36 @@ export class Orchestrator {
 
     if (rt.phase === 'question_sent') {
       this.clearApproval(rt);
-      const result = await this.dispatch(rt, issue, text, true, 'planning');
+      const stage = rt.specStage as SpecStage | undefined;
+      if (stage) {
+        // A spec stage asked the question, so the answer belongs to that stage — the guide
+        // tells the agent to write a question instead of the document when it needs a
+        // decision, and that happens (it did on the first measured A1 run). Routing the
+        // answer through the single-plan path instead left the reply, and the turn it
+        // bought, going to `pending_plan.md`, which does not exist in split mode: the run
+        // stopped with "Plan file is empty" (CRL-113).
+        const answered = await this.dispatch(rt, issue, text, true, 'planning');
+        if (answered.ok) await this.vetAndSendSpec(rt, issue, this.handles.get(rt.identifier)!, stage);
+        return;
+      }
+      const result = await this.dispatch(rt, issue, text, true, 'planning', [SCRATCH.pendingPlan]);
       if (result.ok) await this.afterPlanProduced(rt, issue, 'plan');
       return;
     }
 
     const signal = this.signals.feedback(text);
+    const specGate = SPEC_GATE_PHASE[rt.phase];
+    if (specGate) {
+      // Revises the spec document in place, so — like plan feedback — the turn declares no
+      // outputs: asking an agent to revise a file that was just blanked is not a revision.
+      const result = await this.dispatch(rt, issue, signal, true, 'planning');
+      if (result.ok) await this.resendApproval(rt, issue, specGate, specDoc(specGate));
+      return;
+    }
     if (rt.phase === 'plan_sent' || rt.phase === 'pr_plan_sent') {
+      // Revises the existing plan in place (WORKFLOW.md branch B), so it must survive.
+      // The cost: if the agent edits nothing, the unchanged plan goes back to the human
+      // as though it were a revision. Better than asking it to revise a blank file.
       const result = await this.dispatch(rt, issue, signal, true, 'planning');
       if (result.ok) await this.resendApproval(rt, issue, rt.phase === 'plan_sent' ? 'plan' : 'pr_plan', SCRATCH.pendingPlan);
     } else if (rt.phase === 'review_sent') {
@@ -1080,7 +1326,12 @@ export class Orchestrator {
       // instruction — editing + committing code if asked — then we re-review ONCE and
       // present again (clean → PR, findings → card). No automatic fix→re-review loop.
       this.clearApproval(rt);
-      const result = await this.dispatch(rt, issue, signal, true, 'implementation');
+      // Declares pending_plan.md because this turn is the one place a *fix plan* is born:
+      // asked to plan the fixes rather than apply them, the agent writes one here, and
+      // `recoverPendingApproval` reads it back after a restart. That read only tells a fix
+      // plan from the original implementation plan because this turn blanks the file first.
+      // It consumes pending_review.md, so that one is left alone.
+      const result = await this.dispatch(rt, issue, signal, true, 'implementation', [SCRATCH.pendingPlan]);
       if (!result.ok) return;
       await this.presentReview(rt, issue);
     } else {
@@ -1098,9 +1349,169 @@ export class Orchestrator {
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'implementing', label: `🛠 Implementing${sel}` });
     await this.tracker.transitionIssue(issue, 'in_progress');
 
+    if (this.config.spec_mode === 'split' && (await this.runTaskLoop(rt, issue))) return;
+
+    // Reads the approved pending_plan.md (WORKFLOW.md branch C) — produces no card file.
     const impl = await this.dispatch(rt, issue, this.planApprovalPrompt(detail), true, 'implementation');
     if (!impl.ok) return;
     await this.reviewAfterImplement(rt, issue);
+  }
+
+  /**
+   * Work `tasks.md` one task per turn, resuming wherever the file says the work stopped.
+   *
+   * Returns false when there is no readable task list, so the caller falls back to the
+   * single implementation dispatch — the plan doc's mitigation for the parser breaking on
+   * a format drift. Every other outcome is handled here.
+   *
+   * The file is re-read every round rather than tracked in memory. That is the whole
+   * mechanism behind "restart resumes from the remaining tasks": there is no state to
+   * lose, so a restart that lands mid-list simply reads the ticks that are already there.
+   */
+  private async runTaskLoop(rt: IssueRuntime, issue: Issue): Promise<boolean> {
+    const log = logger.child(rt.identifier);
+    const handle = this.handles.get(rt.identifier)!;
+    const state: TaskLoopState = { rounds: 0 };
+    const announced = new Set<string>();
+    const unbacked: TaskEvidence[] = [];
+
+    for (;;) {
+      const tasks = parseSpecTasks(await this.workspace.io.readFile(handle, SPEC.tasks));
+      // Said once each, not per round — the same warning every turn would bury the events
+      // that matter. Surfaced at all because a progress bar over a partly-unreadable file
+      // is the misreading CRL-105 exists to prevent.
+      for (const w of tasks?.warnings ?? []) {
+        if (announced.has(w)) continue;
+        announced.add(w);
+        bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `⚠️ tasks.md — ${w}` });
+      }
+
+      // Recorded here rather than read on demand: the dashboard polls, and re-reading the
+      // file per issue per poll would put file I/O on that path. The loop is already
+      // holding the parse (CRL-107).
+      rt.taskProgress = tasks ? { done: tasks.done, total: tasks.total, warnings: tasks.warnings.length } : undefined;
+      this.store.upsert(rt);
+
+      const step = nextTaskStep(tasks, state, this.config.max_task_rounds);
+      switch (step.kind) {
+        case 'downgrade':
+          this.clearTaskProgress(rt);
+          log.warn(`task loop unavailable (${step.reason}) — falling back to a single implementation turn`);
+          bus.emitEvent({
+            identifier: rt.identifier,
+            kind: 'notice',
+            label: `↩︎ No task list to work from (${step.reason}) — implementing in one turn`,
+          });
+          return false;
+
+        case 'halt':
+          await this.surfaceStuck(rt, `Task loop stopped: ${step.reason}`, true);
+          return true;
+
+        case 'done':
+          bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `✅ All ${tasks!.total} task(s) complete` });
+          // Said again, together, before the run moves on. The per-task notice scrolls away
+          // during a long implementation; this is the last point where a person sees it
+          // before a PR is proposed.
+          if (unbacked.length > 0) {
+            await this.channel.notify(
+              rt.identifier,
+              `⚠️ ${unbacked.length} task(s) marked done with no commit behind them: ${unbacked
+                .map((e) => `${e.taskId} (${e.detail})`)
+                .join('; ')}`,
+            );
+          }
+          this.clearTaskProgress(rt);
+          await this.reviewAfterImplement(rt, issue);
+          return true;
+
+        case 'run': {
+          const task = tasks!.next!;
+          bus.emitEvent({
+            identifier: rt.identifier,
+            kind: 'phase',
+            phase: 'implementing',
+            label: `🛠 ${task.id} (${step.position}/${step.total}) — ${task.title.slice(0, 60)}`,
+          });
+          // Bracket the turn so the tick can be checked against the repositories after it.
+          // The tick lives outside git, so a commit is real evidence rather than a
+          // by-product of writing the claim (CRL-109).
+          const before = await this.repoHeads(handle);
+          // Declares nothing: every later task reads the same three spec documents, and a
+          // turn that cleared them would take the next task's input with it (CRL-88).
+          const run = await this.dispatch(rt, issue, taskPrompt(task, step.position, step.total), true, 'implementation');
+          if (!run.ok) return true; // dispatch already surfaced why; the ticks so far survive
+          const after = await this.repoHeads(handle);
+
+          const ticked = parseSpecTasks(await this.workspace.io.readFile(handle, SPEC.tasks));
+          const claimed = ticked?.tasks.find((t) => t.id === task.id)?.done ?? false;
+          const evidence = taskEvidence(task.id, claimed, before, after);
+          if (isUnbacked(evidence)) {
+            // Not a halt: a task can legitimately need no change — already done, or covered
+            // in passing by an earlier one. Stopping the run on that would repeat the
+            // mistake CRL-105 avoided with missing dependencies. But it is said out loud,
+            // because silence here is exactly the CRL-89 failure.
+            unbacked.push(evidence);
+            bus.emitEvent({
+              identifier: rt.identifier,
+              kind: 'notice',
+              label: `⚠️ ${task.id} is ticked but no repository changed (${evidence.detail})`,
+            });
+          }
+
+          state.lastTaskId = task.id;
+          state.rounds += 1;
+          break;
+        }
+      }
+    }
+  }
+
+  /**
+   * The three spec documents for an issue, rendered.
+   *
+   * The approval card is gone once it is approved, and these are what was approved — the
+   * only record of the requirements a reviewer would want to check a PR against. Rendered
+   * here because the core owns the markdown parser; putting one in the window would copy
+   * a responsibility that deliberately lives on this side.
+   */
+  async specDocs(identifier: string): Promise<Array<{ stage: SpecStage; markdown: string; html: string }>> {
+    const handle = this.handles.get(identifier);
+    if (!handle) return [];
+    const out: Array<{ stage: SpecStage; markdown: string; html: string }> = [];
+    for (const stage of SPEC_STAGES) {
+      const markdown = await this.workspace.io.readFile(handle, specDoc(stage)).catch(() => null);
+      // A stage that has not run yet simply has no document; an empty entry would render as
+      // an empty tab and read as "there is nothing to say here", which is different.
+      if (markdown?.trim()) out.push({ stage, markdown, html: renderMarkdown(markdown) });
+    }
+    return out;
+  }
+
+  /** Drop the counts once the loop is done, so a later cycle cannot show yesterday's. */
+  private clearTaskProgress(rt: IssueRuntime): void {
+    if (!rt.taskProgress) return;
+    rt.taskProgress = undefined;
+    this.store.upsert(rt);
+  }
+
+  /**
+   * `HEAD` per repo, for bracketing a task turn.
+   *
+   * A repo that cannot be read comes back as `null` rather than an empty string, so the
+   * comparison can leave it out instead of reading a failed `git` call as "unchanged".
+   */
+  private async repoHeads(handle: WorkspaceHandle): Promise<RepoHeads> {
+    const heads: RepoHeads = {};
+    for (const repo of this.router.all()) {
+      try {
+        const out = await this.workspace.io.exec(handle, `git -C ${repo.key} rev-parse HEAD`);
+        heads[repo.key] = out.code === 0 && out.stdout.trim() ? out.stdout.trim() : null;
+      } catch {
+        heads[repo.key] = null;
+      }
+    }
+    return heads;
   }
 
   /** Resume an implement / review-fix run that a restart interrupted (continue the session). */
@@ -1111,7 +1522,17 @@ export class Orchestrator {
     bus.emitEvent({ identifier: rt.identifier, kind: 'phase', phase: 'implementing', label: '🛠 Resuming implementation (interrupted run)' });
     await this.tracker.transitionIssue(issue, 'in_progress').catch(() => {});
 
-    const impl = await this.dispatch(rt, issue, this.signals.resume, true, 'implementation');
+    // In spec mode the task file already says where the work stopped, so the resume is just
+    // the loop again — no prompt about "continuing" and no memory of what came before.
+    if (this.config.spec_mode === 'split' && (await this.runTaskLoop(rt, issue))) return;
+
+    // A plain resume left the agent re-deriving what it had already done — six minutes of
+    // it, in the measured run. If the last check saw edits with no commit, say so up front
+    // so the first move is the commit (CRL-91).
+    const resume = rt.uncommitted
+      ? `${this.signals.resume} ${this.profile.t('signal.resumeUncommitted')}`
+      : this.signals.resume;
+    const impl = await this.dispatch(rt, issue, resume, true, 'implementation');
     if (!impl.ok) {
       await this.surfaceStuck(
         rt,
@@ -1131,15 +1552,29 @@ export class Orchestrator {
 
     const changed = await this.changedRepoKeys(handle, rt, issue);
     if (changed.length === 0) {
-      log.error('no committed diff in any repo after implementation');
-      // Retryable: the agent may not have committed yet, or a transient git issue.
-      // Retry resumes implementation and re-checks — the existing commit is reused.
+      // `git diff base..HEAD` cannot see a work tree, so "no committed diff" covers two
+      // very different situations: the agent did nothing, or it did everything and never
+      // committed. Look before saying which — the operator's next move differs, and the
+      // wrong sentence has already cost a 4.35M-token turn (CRL-91).
+      const dirty = await uncommittedAcross(this.workspace.io, handle, this.router.all().map((r) => r.key));
+      rt.uncommitted = dirty.length > 0;
+      this.store.upsert(rt);
+      log.error(`no committed diff in any repo after implementation (uncommitted repos: ${dirty.length})`);
+      // Retryable either way: retry resumes implementation and re-checks.
       await this.surfaceStuck(
         rt,
-        'No committed changes detected in any repo. The agent may not have committed — press Retry to re-check / resume.',
+        dirty.length > 0
+          ? `${this.profile.t('stuck.uncommitted')} ${describeUncommitted(dirty)}`
+          : this.profile.t('stuck.noChanges'),
         true,
       );
       return;
+    }
+    // A commit exists, so the earlier "edited but never committed" reading is spent. Left
+    // set, it would keep prepending the commit-first nudge to every later resume.
+    if (rt.uncommitted) {
+      rt.uncommitted = false;
+      this.store.upsert(rt);
     }
     bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: `🗂 Changed repos: ${changed.join(', ')}` });
 
@@ -1163,8 +1598,18 @@ export class Orchestrator {
       return;
     }
     const status = await this.reviewStatus(handle);
-    const clean = !status || status.blocker + status.suggestion === 0;
-    if (clean && this.config.review.auto_pr_when_clean) {
+    const unmet = unmetCriteria(status);
+    if (unmet > 0) {
+      // The one place this layer has teeth. Everything else can be quiet and a requirement
+      // the plan committed to is still missing — shipping that unseen is what writing the
+      // criteria down was meant to prevent.
+      bus.emitEvent({
+        identifier: rt.identifier,
+        kind: 'notice',
+        label: `📋 ${unmet} of ${status!.criteria!.total} acceptance criteria unmet — needs a human`,
+      });
+    }
+    if (isReviewClean(status) && this.config.review.auto_pr_when_clean) {
       bus.emitEvent({ identifier: rt.identifier, kind: 'notice', label: '✅ Self-review clean — opening PR automatically' });
       await this.reviewApproved(rt, issue);
       return;
@@ -1186,6 +1631,15 @@ export class Orchestrator {
     const log = logger.child(rt.identifier);
     const maxFixRounds = this.config.review.max_fix_rounds;
     for (let round = 0; ; round++) {
+      // Written to the runtime, not only announced. The event has always gone out — which
+      // is why the history timeline knew about the review — but the dashboard reads
+      // `snapshot()`, which reads this, and so it said `implementing` for the whole run
+      // (CRL-90). Re-set each round so a re-review after an auto-fix is covered too.
+      rt.phase = 'reviewing';
+      // A retry after a restart enters here; the run is moving again, so it is no longer
+      // stuck. Every other resume path clears its own flag the same way.
+      rt.stuck = false;
+      this.store.upsert(rt);
       bus.emitEvent({
         identifier: rt.identifier,
         kind: 'phase',
@@ -1214,9 +1668,14 @@ export class Orchestrator {
         verifyCommands,
         diffStats,
         this.buildDirection(),
+        // In split mode the criteria live in requirements.md, not the single plan. CRL-99's
+        // escape hatch covers the rest: no REQ ids found, no criteria section.
+        this.config.spec_mode === 'split' ? SPEC.requirements : undefined,
       );
       await this.uploadDiff(rt, issue, changed);
-      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review');
+      const consolidate = await this.dispatch(rt, issue, PROMPTS.consolidateReview, true, 'review', [
+        SCRATCH.pendingReview,
+      ]);
       if (!consolidate.ok) return null;
       const review = await this.readOutput(handle, SCRATCH.pendingReview);
       if (!review) {
@@ -1226,7 +1685,9 @@ export class Orchestrator {
       await this.workspace.io.writeFile(handle, SCRATCH.prevReview, review);
 
       const status = await this.reviewStatus(handle);
-      const fixable = status ? status.blocker + status.suggestion : 0;
+      // Unmet criteria count as fixable: they mean code is missing, and the fix turn reads
+      // the `## Acceptance criteria` section of pending_review.md that names which.
+      const fixable = fixableCount(status);
       if (fixable === 0 || round >= maxFixRounds) {
         if (fixable > 0) {
           bus.emitEvent({
@@ -1244,22 +1705,18 @@ export class Orchestrator {
         identifier: rt.identifier,
         kind: 'phase',
         phase: 'review_fixing',
-        label: `🔧 Auto-fixing review findings (BLOCKER ${status?.blocker ?? 0}, SUG ${status?.suggestion ?? 0})`,
+        label: `🔧 Auto-fixing review findings (BLOCKER ${status?.blocker ?? 0}, SUG ${status?.suggestion ?? 0}${
+          unmetCriteria(status) > 0 ? `, UNMET ${unmetCriteria(status)}` : ''
+        })`,
       });
+      // Reads the findings in pending_review.md — produces no card file.
       const fix = await this.dispatch(rt, issue, PROMPTS.applyReviewFixes, true, 'implementation');
       if (!fix.ok) return null;
     }
   }
 
-  private async reviewStatus(handle: WorkspaceHandle): Promise<{ blocker: number; suggestion: number; nit: number } | null> {
-    const raw = await this.workspace.io.readFile(handle, SCRATCH.reviewStatus);
-    if (!raw) return null;
-    try {
-      const p = JSON.parse(raw) as Record<string, unknown>;
-      return { blocker: Number(p.blocker) || 0, suggestion: Number(p.suggestion) || 0, nit: Number(p.nit) || 0 };
-    } catch {
-      return null;
-    }
+  private async reviewStatus(handle: WorkspaceHandle): Promise<ReviewStatus | null> {
+    return parseReviewStatus(await this.workspace.io.readFile(handle, SCRATCH.reviewStatus));
   }
 
   private async reviewApproved(rt: IssueRuntime, issue: Issue): Promise<void> {
@@ -1391,6 +1848,18 @@ export class Orchestrator {
     log.info('issue completed; workspace cleaned up');
   }
 
+  /**
+   * Whether planning runs as three spec gates or one plan.
+   *
+   * The dashboard needs it, not just the flow: the phase bar shows three approval stages in
+   * split mode, and deriving that from the current phase would make the bar collapse from
+   * three stages back to one the moment the gates are passed — losing the reader's place
+   * exactly when the long part of the run starts (CRL-104).
+   */
+  get specMode(): 'single' | 'split' {
+    return this.config.spec_mode;
+  }
+
   /** Snapshot for the dashboard: each tracked issue + its accumulated cost. */
   snapshot(): Array<IssueRuntime & { cost: number }> {
     return this.store.all().map((rt) => ({ ...rt, cost: this.cost.get(rt.identifier)?.costUsd ?? 0 }));
@@ -1408,7 +1877,12 @@ export class Orchestrator {
 
   // ─────────────────────────────────────────────────────────── helpers
 
-  private async resendApproval(rt: IssueRuntime, issue: Issue, kind: 'plan' | 'review' | 'pr_plan', file: string): Promise<void> {
+  private async resendApproval(
+    rt: IssueRuntime,
+    issue: Issue,
+    kind: 'plan' | 'review' | 'pr_plan' | SpecStage,
+    file: string,
+  ): Promise<void> {
     const handle = this.handles.get(rt.identifier)!;
     const body = await this.readOutput(handle, file);
     if (!body) {
@@ -1420,7 +1894,9 @@ export class Orchestrator {
       kind,
       title: issue.title,
       body,
-      options: kind === 'plan' ? await this.planOptionsFor(handle) : undefined,
+      // Same rule as the first send: only the kinds whose branch writes the file get
+      // options, so a revised task list does not re-offer the design's alternatives.
+      options: kind === 'plan' || kind === 'design' ? await this.planOptionsFor(handle) : undefined,
     });
     rt.approvalId = approvalId;
     this.store.upsert(rt);
@@ -1490,14 +1966,6 @@ export class Orchestrator {
     rt.approvalId = undefined;
   }
 
-  private async wipeOutputs(handle: WorkspaceHandle): Promise<void> {
-    await Promise.all([
-      this.workspace.io.writeFile(handle, SCRATCH.pendingPlan, ''),
-      this.workspace.io.writeFile(handle, SCRATCH.pendingReview, ''),
-      this.workspace.io.writeFile(handle, SCRATCH.reply, ''),
-    ]);
-  }
-
   private async readOutput(handle: WorkspaceHandle, path: string): Promise<string | null> {
     const content = await this.workspace.io.readFile(handle, path);
     const trimmed = content?.trim();
@@ -1526,7 +1994,24 @@ export class Orchestrator {
 
 /** Compact one-line error for UI messages. */
 /** Phases whose awaited step `redispatchPhase` can re-run in place (others need a Restart). */
-const RETRYABLE_PHASES = new Set<string>(['plan_sent', 'pr_plan_sent', 'review_sent', 'implementing', 'review_fixing']);
+/** Approval phase → the spec stage whose document it gates. */
+const SPEC_GATE_PHASE: Record<string, SpecStage | undefined> = {
+  requirements_sent: 'requirements',
+  design_sent: 'design',
+  tasks_sent: 'tasks',
+};
+
+const RETRYABLE_PHASES = new Set<string>([
+  'plan_sent',
+  'pr_plan_sent',
+  'requirements_sent',
+  'design_sent',
+  'tasks_sent',
+  'review_sent',
+  'implementing',
+  'reviewing',
+  'review_fixing',
+]);
 
 function oneLineErr(err: unknown): string {
   const msg = err instanceof Error ? err.message : String(err);

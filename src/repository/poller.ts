@@ -3,7 +3,7 @@
  * and merge events. Stateless: the orchestrator owns the tracking table and
  * advances `since` after handling events.
  *
- * Lifted from upstream. Adaptation: merge detection now calls
+ * Carried over from corral's pre-rename implementation. Adaptation: merge detection now calls
  * RepositoryAdapter.refreshPullRequest directly (interface method) instead of a
  * GitHub-specific `instanceof` check — keeps the poller provider-neutral.
  */

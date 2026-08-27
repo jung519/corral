@@ -1,6 +1,6 @@
 {
   "name": "corral",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent. BYOK, provider-neutral, self-hostable.",
   "type": "module",
   "license": "Apache-2.0",
@@ -9,27 +9,32 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.test.json --noEmit",
     "dev": "tsx watch src/ipc-main.ts",
-    "test": "vitest run",
+    "test": "npm run typecheck && vitest run",
     "test:watch": "vitest",
     "build:renderer": "pnpm -C renderer build",
     "build:desktop": "pnpm -C desktop build",
     "build:all": "pnpm build && pnpm build:renderer && pnpm build:desktop",
     "app": "pnpm build:all && pnpm -C desktop start",
     "app:run": "pnpm -C desktop start",
-    "package": "pnpm build:all && pnpm -C desktop dist",
+    "package": "pnpm licenses && pnpm build:all && pnpm -C desktop dist",
     "version:set": "node scripts/set-version.mjs",
-    "preinstall": "npx only-allow pnpm"
+    "licenses": "node scripts/licenses.mjs",
+    "licenses:check": "node scripts/licenses.mjs --check",
+    "preinstall": "npx only-allow pnpm",
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "liquidjs": "^10.19.0",
     "marked": "^18.0.5",
+    "ws": "^8.21.3",
     "yaml": "^2.6.1",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

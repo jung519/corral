@@ -3,7 +3,7 @@
  * dashboard (HTTP+SSE) subscribes. A ring buffer keeps recent history so a newly
  * opened dashboard shows the timeline so far, not just future events.
  *
- * Lifted from upstream (renamed SymphonyEvent → CorralEvent).
+ * Carried over from corral's pre-rename implementation (renamed SymphonyEvent → CorralEvent).
  */
 import { EventEmitter } from 'node:events';
 
@@ -13,6 +13,7 @@ export type EventKind =
   | 'activity' // live agent action (tool use / text / cost)
   | 'approval' // approval requested / received
   | 'notice' // generic info
+  | 'run' // operational-AI pipeline run start/end (the unit is a run, not an issue)
   | 'error';
 
 export interface CorralEvent {

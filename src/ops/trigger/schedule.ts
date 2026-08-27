@@ -1,0 +1,86 @@
+/**
+ * Run a pipeline on a cron schedule.
+ *
+ * Ticks once a minute and asks whether this is a minute the expression names. A minute is
+ * cron's own resolution, so nothing finer is being given up — and a timer that wakes 60
+ * times an hour costs nothing next to the work it triggers.
+ *
+ * Each firing is remembered by the minute it belongs to, so a tick that lands twice in the
+ * same minute (timer drift, a clock nudged backwards) does not run the pipeline twice.
+ */
+import { logger } from '../../core/logger.js';
+import type { Pipeline } from '../pipeline/schema.js';
+import { calendarFieldsIn, cronMatches, parseCron, type CronFields } from './cron.js';
+import type { FireFn, ReportFn, StopFn, TriggerAdapter, TriggerContext } from './types.js';
+
+const TICK_MS = 60_000;
+
+export class ScheduleTrigger implements TriggerAdapter {
+  readonly kind = 'schedule' as const;
+
+  constructor(private readonly ctx: TriggerContext = {}) {}
+
+  start(pipeline: Pipeline, fire: FireFn, report?: ReportFn): StopFn {
+    if (pipeline.trigger.kind !== 'schedule') throw new Error('ScheduleTrigger given a non-schedule trigger');
+    const { cron, timezone } = pipeline.trigger;
+
+    let fields: CronFields;
+    try {
+      fields = parseCron(cron);
+    } catch (err) {
+      // A schedule nobody can read is a pipeline that silently never runs. Say so once,
+      // loudly, and stay stopped rather than firing at some guessed interval.
+      logger.error(`ops: pipeline "${pipeline.key}" has an unusable schedule "${cron}" — ${message(err)}`);
+      // Nothing about waiting makes a cron expression parse.
+      report?.({ state: 'blocked', reason: `unusable schedule "${cron}" — ${message(err)}` });
+      return () => {};
+    }
+
+    const now = this.ctx.now ?? (() => Date.now());
+    let lastFired = '';
+    let running = false;
+
+    const tick = (): void => {
+      const at = new Date(now());
+      if (!cronMatches(fields, at, timezone)) return;
+
+      // Keyed on the same clock the match was made on, so the guard cannot disagree with
+      // the decision it is guarding.
+      //
+      // The year is part of the key. Without it `0 0 1 1 *` produced `1-1 0:0` in every
+      // year alike, so a core that stayed up past a new year skipped its own anniversary —
+      // nothing else fires in between to overwrite the value (CRL-54).
+      const on = calendarFieldsIn(at, timezone);
+      const minute = `${on.year}-${on.month}-${on.dayOfMonth} ${on.hour}:${on.minute}`;
+      if (minute === lastFired) return; // already fired for this minute
+      lastFired = minute;
+
+      // A schedule that fires while the previous run is still going would stack up work
+      // the concurrency limit would only throttle later; skipping is the honest answer
+      // for a periodic job that has fallen behind.
+      if (running) {
+        logger.warn(`ops: pipeline "${pipeline.key}" skipped a scheduled run — the previous one is still going`);
+        return;
+      }
+      running = true;
+      void fire({ scheduledAt: at.toISOString(), pipeline: pipeline.key })
+        .catch((err: unknown) => logger.warn(`ops: scheduled run of "${pipeline.key}" failed — ${message(err)}`))
+        .finally(() => (running = false));
+    };
+
+    const timer = setInterval(tick, TICK_MS);
+    // The expression parsed and the timer is running — there is nothing else this trigger
+    // depends on. A schedule cannot be refused by anybody the way a subscription can.
+    report?.({ state: 'attached' });
+    // Never hold the process open for a timer; a core with nothing else to do should be
+    // able to exit.
+    timer.unref?.();
+    logger.info(`ops: pipeline "${pipeline.key}" scheduled (${cron}${timezone ? ` ${timezone}` : ''})`);
+
+    return () => clearInterval(timer);
+  }
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}

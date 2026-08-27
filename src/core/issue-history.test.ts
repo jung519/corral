@@ -40,10 +40,10 @@ function rec(identifier: string, over: Partial<HistoryRecord> = {}): HistoryReco
 
 describe('JsonlHistoryStore', () => {
   it('appends and reads back across instances', () => {
-    new JsonlHistoryStore(dir).append(rec('MASIL-1'));
+    new JsonlHistoryStore(dir).append(rec('ISS-1'));
     const all = new JsonlHistoryStore(dir).all();
     expect(all).toHaveLength(1);
-    expect(all[0]?.identifier).toBe('MASIL-1');
+    expect(all[0]?.identifier).toBe('ISS-1');
     expect(all[0]?.agentActiveMs).toBe(500);
   });
 
@@ -60,9 +60,9 @@ describe('JsonlHistoryStore', () => {
 
   it('get() returns the most recent record for a re-run identifier', () => {
     const s = new JsonlHistoryStore(dir);
-    s.append(rec('MASIL-9', { endedAt: 100, costUsd: 1 }));
-    s.append(rec('MASIL-9', { endedAt: 500, costUsd: 9 }));
-    expect(s.get('MASIL-9')?.costUsd).toBe(9);
+    s.append(rec('ISS-9', { endedAt: 100, costUsd: 1 }));
+    s.append(rec('ISS-9', { endedAt: 500, costUsd: 9 }));
+    expect(s.get('ISS-9')?.costUsd).toBe(9);
     expect(s.get('absent')).toBeUndefined();
   });
 

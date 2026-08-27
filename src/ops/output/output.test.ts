@@ -1,0 +1,330 @@
+/**
+ * Delivering the result — and, just as much, NOT delivering one that failed its checks.
+ *
+ * Both sinks run against real servers here, and the "not delivered" cases go through the
+ * whole lifecycle, because that is where the decision actually lives.
+ */
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { FileCredentialStore } from '../../credentials/file-store.js';
+import { startOpsHost } from '../ops-host.js';
+import type { OperationRunner } from '../pipeline/ports.js';
+import { PipelineSchema, type Pipeline } from '../pipeline/schema.js';
+import { HttpOutputSink } from './http.js';
+import { PubSubOutputSink } from './pubsub.js';
+
+let server: Server;
+let base: string;
+let dir: string;
+let requests: Array<{ method: string; url: string; headers: Record<string, unknown>; body: string }>;
+let status = 200;
+
+beforeEach(async () => {
+  dir = mkdtempSync(join(tmpdir(), 'corral-output-'));
+  requests = [];
+  status = 200;
+  server = createServer((req, res) => {
+    let body = '';
+    req.on('data', (c) => (body += c));
+    req.on('end', () => {
+      requests.push({ method: req.method ?? '', url: req.url ?? '', headers: req.headers, body });
+      res.writeHead(status, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ messageIds: ['1'] }));
+    });
+  });
+  await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+  base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+});
+afterEach(async () => {
+  delete process.env.PUBSUB_EMULATOR_HOST;
+  await new Promise<void>((r) => server.close(() => r()));
+  rmSync(dir, { recursive: true, force: true });
+});
+
+const output = (o: Record<string, unknown>): Pipeline['output'] =>
+  PipelineSchema.parse({
+    key: 'p',
+    trigger: { kind: 'manual' },
+    input: { kind: 'none' },
+    agent: { prompt: { system: 's', user_template: 'u' }, schema: { type: 'object', properties: { a: { type: 'string' } } } },
+    output: o,
+  }).output;
+
+describe('calling the user API', () => {
+  it('sends the request the definition describes', async () => {
+    const sink = new HttpOutputSink();
+
+    await sink.send(
+      output({
+        kind: 'http',
+        request: { method: 'PATCH', url: `${base}/api/records/{{id}}`, body: { labels: '{{items}}' } },
+      }),
+      { id: 42, items: 'news' },
+    );
+
+    expect(requests[0]).toMatchObject({ method: 'PATCH', url: '/api/records/42' });
+    expect(JSON.parse(requests[0]!.body)).toEqual({ labels: 'news' });
+  });
+
+  it('can reference the identifier it came in with as well as the answer', async () => {
+    const sink = new HttpOutputSink();
+
+    // `fields` is the input's selection merged with the model's answer, which is what
+    // makes "PATCH back to the record you just read" the obvious definition.
+    await sink.send(
+      output({ kind: 'http', request: { method: 'POST', url: `${base}/r`, body: { id: '{{id}}', title: '{{title}}' } } }),
+      { id: 7, title: 'a record', items: [] },
+    );
+
+    // 7 stays a number: the body template is the receiver's JSON, not a rendering of it.
+    expect(JSON.parse(requests[0]!.body)).toEqual({ id: 7, title: 'a record' });
+  });
+
+  it('attaches the credential the definition names', async () => {
+    const credentials = new FileCredentialStore(join(dir, 'c.json'));
+    await credentials.set({ service: 'backend', account: 'default' }, 'super-secret');
+
+    await new HttpOutputSink(credentials).send(
+      output({ kind: 'http', request: { method: 'POST', url: `${base}/r`, credential: { service: 'backend', account: 'default' } } }),
+      {},
+    );
+
+    expect(requests[0]!.headers.authorization).toBe('Bearer super-secret');
+  });
+
+  /**
+   * The address is the part of a request that cannot have a hole in it.
+   *
+   * A schedule's event carries `scheduledAt` and the pipeline's name, so a definition that
+   * writes back to `/records/{{id}}` without selecting an `id` out of the response used to
+   * PATCH `/records/` — and a receiver that answers 200 to that left the run recorded
+   * `completed` with the answer nowhere anyone wanted (CRL-74).
+   */
+  describe('a request with a hole in its address', () => {
+    it('is refused before it is sent, naming the field', async () => {
+      const sink = new HttpOutputSink();
+
+      await expect(
+        sink.send(output({ kind: 'http', request: { method: 'PATCH', url: `${base}/api/records/{{id}}` } }), {
+          items: ['a'],
+        }),
+      ).rejects.toThrow(/"id"/);
+
+      // The point of the whole change: nothing reached the receiver.
+      expect(requests).toEqual([]);
+    });
+
+    it('is refused for a header too, since a header is filled the same way', async () => {
+      await expect(
+        new HttpOutputSink().send(
+          output({ kind: 'http', request: { url: `${base}/r`, headers: { 'x-tenant': '{{tenant}}' } } }),
+          {},
+        ),
+      ).rejects.toThrow(/header "x-tenant".*"tenant"/);
+      expect(requests).toEqual([]);
+    });
+
+    it('sends when the field is an empty string, because that is a value', async () => {
+      // Somebody chose ''. Refusing it would be second-guessing data rather than catching
+      // an absent field — the line `fillValue` already draws for bodies.
+      await new HttpOutputSink().send(output({ kind: 'http', request: { url: `${base}/r?q={{term}}` } }), { term: '' });
+
+      expect(requests[0]).toMatchObject({ url: '/r?q=' });
+    });
+
+    it('leaves a body alone — a missing field there is already answered with null', async () => {
+      // The receiver can see a null and act on it; an address cannot carry one.
+      await new HttpOutputSink().send(
+        output({ kind: 'http', request: { method: 'POST', url: `${base}/r`, body: { labels: '{{items}}' } } }),
+        {},
+      );
+
+      expect(JSON.parse(requests[0]!.body)).toEqual({ labels: null });
+    });
+  });
+
+  it('raises a rejected write rather than swallowing it', async () => {
+    status = 401;
+
+    await expect(new HttpOutputSink().send(output({ kind: 'http', request: { url: `${base}/r` } }), {})).rejects.toThrow(
+      /401/,
+    );
+  });
+});
+
+describe('publishing a message', () => {
+  beforeEach(() => {
+    process.env.PUBSUB_EMULATOR_HOST = base.replace('http://', '');
+  });
+
+  /**
+   * The bag a sink receives is the event, the fetched record and the answer, merged —
+   * everything a template might want to reach, which is not the same as everything worth
+   * publishing. While `message` was optional the sink published the lot: a pipeline
+   * classifying a record put its own source material on the topic, along with whatever
+   * arrived on the queue message (CRL-51).
+   */
+  it('publishes only what the template names, not everything it was handed', async () => {
+    await new PubSubOutputSink().send(
+      output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: { labels: '{{items}}' } }),
+      {
+        items: ['news'],
+        body: 'the full text of the record, hundreds of characters of it',
+        contact: { email: 'organizer@example.com' },
+        internalToken: 'arrived-on-the-queue-message',
+      },
+    );
+
+    expect(requests[0]!.url).toBe('/v1/projects/p/topics/results:publish');
+    const sent = JSON.parse(requests[0]!.body) as { messages: Array<{ data: string }> };
+    expect(JSON.parse(Buffer.from(sent.messages[0]!.data, 'base64').toString())).toEqual({ labels: ['news'] });
+  });
+
+  it('refuses a pubsub output with nothing to publish', () => {
+    // No default any more: the one thing a default could mean here was "everything".
+    expect(() => output({ kind: 'pubsub', topic: 'projects/p/topics/results' })).toThrow(/needs a message/);
+    expect(() => output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: {} })).toThrow(/needs a message/);
+  });
+
+  it('fills a message template when one is', async () => {
+    await new PubSubOutputSink().send(
+      output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: { recordId: '{{id}}', labels: '{{items}}' } }),
+      { id: 42, items: 'news' },
+    );
+
+    const sent = JSON.parse(requests[0]!.body) as { messages: Array<{ data: string }> };
+    expect(JSON.parse(Buffer.from(sent.messages[0]!.data, 'base64').toString())).toEqual({
+      recordId: 42,
+      labels: 'news',
+    });
+  });
+
+  it('raises a refused publish', async () => {
+    status = 403;
+
+    await expect(
+      new PubSubOutputSink().send(output({ kind: 'pubsub', topic: 'projects/p/topics/results', message: { a: '{{a}}' } }), {}),
+    ).rejects.toThrow(/403/);
+  });
+});
+
+describe('what never gets sent', () => {
+  function writePipeline(body: string): void {
+    mkdirSync(join(dir, 'pipelines'), { recursive: true });
+    writeFileSync(join(dir, 'pipelines', 'c.yaml'), body);
+  }
+
+  const definition = (validate: string, onLow = 'report'): string => `
+key: classify
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema:
+    type: object
+    properties: { items: { type: array }, confidence: { type: number } }
+  validate:${validate}
+output:
+  kind: http
+  request: { method: PATCH, url: "${base}/api/records/1", body: { labels: "{{items}}" } }
+on_low_confidence: { action: ${onLow}, review_url: "https://example.test/review" }
+`;
+
+  const answers = (answer: Record<string, unknown>): OperationRunner => ({
+    run: async () => ({ ok: true, answer, tokens: 10 }),
+  });
+
+  it('holds back a doubtful answer and records where to look', async () => {
+    writePipeline(definition('\n    min_confidence: { field: confidence, threshold: 0.7 }'));
+    const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'], confidence: 0.3 }) });
+
+    const { run } = await host.runManually('classify', {});
+
+    // A doubtful answer written into someone's system is worse than no answer.
+    expect(run).toMatchObject({ outcome: 'reported', reviewUrl: 'https://example.test/review' });
+    expect(requests).toHaveLength(0);
+    expect((await host.history.list({ days: 1 }))[0]).toMatchObject({ outcome: 'reported', lowConfidence: true });
+  });
+
+  it('sends nothing when the answer broke a rule outright', async () => {
+    writePipeline(definition('\n    allowed_values: { field: items, values: [news] }\n    min_confidence: { field: confidence, threshold: 0.1 }'));
+    const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'], confidence: 'not a number' }) });
+
+    const { run } = await host.runManually('classify', {});
+
+    expect(run?.outcome).toBe('rejected');
+    expect(requests).toHaveLength(0);
+  });
+
+  it('sends the cleaned answer, not the raw one, when the operator chose to send anyway', async () => {
+    writePipeline(
+      definition('\n    allowed_values: { field: items, values: [news] }\n    min_confidence: { field: confidence, threshold: 0.7 }', 'send'),
+    );
+    const host = await startOpsHost({
+      stateDir: dir,
+      operation: answers({ items: ['news', 'invented'], confidence: 0.3 }),
+    });
+
+    const { run } = await host.runManually('classify', {});
+
+    expect(run?.outcome).toBe('completed');
+    expect(JSON.parse(requests[0]!.body)).toEqual({ labels: ['news'] }); // the dropped value never left
+  });
+
+  it('records a failed delivery as its own thing, with the tokens it already spent', async () => {
+    status = 500;
+    writePipeline(definition(' {}'));
+    const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'], confidence: 1 }) });
+
+    const { run } = await host.runManually('classify', {});
+
+    // The expensive failure: the turn is already paid for. An operator reading history
+    // has to be able to tell it from a run that never called the model.
+    expect(run).toMatchObject({ outcome: 'output_failed', stage: 'output', tokens: 10 });
+    expect((await host.history.list({ days: 1 }))[0]).toMatchObject({ outcome: 'output_failed', tokens: 10 });
+  });
+
+  it('is not a completed run when the address had a hole in it', async () => {
+    // The definition writes back to the record it read, but nothing named `id` reaches
+    // this run — a schedule's event carries no identifier and no `select` supplies one.
+    mkdirSync(join(dir, 'pipelines'), { recursive: true });
+    writeFileSync(
+      join(dir, 'pipelines', 'c.yaml'),
+      `
+key: classify
+trigger: { kind: manual }
+input: { kind: none }
+agent:
+  prompt: { system: s, user_template: u }
+  schema: { type: object, properties: { items: { type: array } } }
+output:
+  kind: http
+  request: { method: PATCH, url: "${base}/api/records/{{id}}/labels", body: { labels: "{{items}}" } }
+`,
+    );
+    const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'] }) });
+
+    const { run } = await host.runManually('classify', {});
+
+    // Before CRL-74 this PATCHed `/api/records//labels`, the test server answered 200, and
+    // the run was recorded `completed` — an answer produced, paid for, and delivered
+    // nowhere. The reason names the field so the definition can be fixed.
+    expect(run).toMatchObject({ outcome: 'output_failed', stage: 'output', tokens: 10 });
+    expect(run?.reason).toMatch(/"id"/);
+    expect(requests).toEqual([]);
+  });
+
+  it('delivers when everything passed', async () => {
+    writePipeline(definition('\n    min_confidence: { field: confidence, threshold: 0.7 }'));
+    const host = await startOpsHost({ stateDir: dir, operation: answers({ items: ['news'], confidence: 0.9 }) });
+
+    expect((await host.runManually('classify', {})).run?.outcome).toBe('completed');
+    // A list answer arrives as a list. Joining it into "news" would be a different value
+    // than the one the model gave and the validator approved.
+    expect(JSON.parse(requests[0]!.body)).toEqual({ labels: ['news'] });
+  });
+});

@@ -3,7 +3,7 @@
  * stream-json output as normalized AgentEvents. Works for both the local backend
  * (spawn in the workdir) and docker (exec into the issue container).
  *
- * Lifted from upstream's ClaudeBackend. KEY ADAPTATION (BYOK): auth is the user's
+ * Carried over from the pre-rename implementation's ClaudeBackend. KEY ADAPTATION (BYOK): auth is the user's
  * own credential, injected as env (local: process env; docker: `exec -e`) — never
  * the host ~/.claude subscription mount. Two credential kinds are supported:
  *   - ANTHROPIC_API_KEY        — pay-per-use API key
@@ -14,9 +14,10 @@
  */
 import { logger } from '../core/logger.js';
 import { containerName, WORKER_USER } from '../workspace/docker-io.js';
-import { type CliStreamParser, runCliTurn, shq } from './cli-runner.js';
+import { type CliStreamParser, runCliTurn, SECRET_ENV_PATH, shq } from './cli-runner.js';
 import {
   activityEvents,
+  answerText,
   applyUsage,
   looksLikeAuth,
   looksLikeRateLimit,
@@ -27,6 +28,8 @@ import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from 
 
 /** Maps Claude Code's stream-json output to normalized events. */
 const claudeParser: CliStreamParser<StreamEvent> = {
+  provider: 'claude',
+  answerText,
   parse: parseStreamLine,
   activity: activityEvents,
   usage: applyUsage,
@@ -60,26 +63,31 @@ export class ClaudeCliTransport implements AgentTransport {
     if (spec.workflow) await spec.io.writeFile(spec.handle, CLAUDE_RULES_PATH, spec.workflow);
 
     const flags = buildFlags(spec);
-    const { command, args, cwd } = this.spawnSpec(spec, flags);
+    const { command, args, cwd, secretEnv } = this.spawnSpec(spec, flags);
     log.info(`agent run model=${spec.model ?? 'default'} continue=${spec.continueSession}`);
 
-    await runCliTurn(spec, { command, args, cwd, env: this.localEnv() }, claudeParser, onEvent, log);
+    await runCliTurn(spec, { command, args, cwd, secretEnv, env: this.localEnv() }, claudeParser, onEvent, log);
   }
 
   private spawnSpec(
     spec: AgentTurnSpec,
     flags: string[],
-  ): { command: string; args: string[]; cwd?: string } {
+  ): { command: string; args: string[]; cwd?: string; secretEnv?: Record<string, string> } {
     if (spec.handle.backend === 'local') {
+      // The credential goes in the process environment, which the kernel shows to its owner
+      // only — unlike a command line (CRL-125).
       return { command: 'claude', args: ['-p', spec.prompt, ...flags], cwd: spec.handle.workdir };
     }
-    // docker: run inside the container as the worker user; inject the credential via -e.
+    // docker: run inside the container as the worker user. The credential travels on a file
+    // descriptor, NOT as `-e KEY=value` — an argument is world-readable (CRL-125).
     const claudeCmd = ['claude', '-p', shq(spec.prompt), ...flags.map(shq)].join(' ');
-    const envArgs: string[] = [];
-    if (this.apiKey) envArgs.push('-e', `ANTHROPIC_API_KEY=${this.apiKey}`);
-    if (this.oauthToken) envArgs.push('-e', `CLAUDE_CODE_OAUTH_TOKEN=${this.oauthToken}`);
+    const secretEnv: Record<string, string> = {};
+    if (this.apiKey) secretEnv.ANTHROPIC_API_KEY = this.apiKey;
+    if (this.oauthToken) secretEnv.CLAUDE_CODE_OAUTH_TOKEN = this.oauthToken;
+    const envArgs = Object.keys(secretEnv).length > 0 ? ['--env-file', SECRET_ENV_PATH] : [];
     return {
       command: 'docker',
+      secretEnv: Object.keys(secretEnv).length > 0 ? secretEnv : undefined,
       args: [
         'exec',
         '--user',
@@ -112,10 +120,17 @@ export class ClaudeCliTransport implements AgentTransport {
 function buildFlags(spec: AgentTurnSpec): string[] {
   const flags = ['--verbose', '--output-format', 'stream-json'];
   if (spec.model) flags.push('--model', spec.model);
+  // Thinking depth. Only claude names this on the command line; the other transports warn
+  // at startup instead of dropping it in silence (CRL-131).
+  if (spec.effort) flags.push('--effort', spec.effort);
   if (spec.continueSession) flags.push('--continue');
   if (spec.maxTurns) flags.push('--max-turns', String(spec.maxTurns));
   if (spec.maxBudgetUsd) flags.push('--max-budget-usd', String(spec.maxBudgetUsd));
   if (spec.allowedTools && spec.allowedTools.length > 0) flags.push('--allowedTools', spec.allowedTools.join(','));
+  // No tools at all — the only setting measured to stop both commands and file writes
+  // (CRL-43). Narrowing to `--tools Write` still let the agent write outside its working
+  // directory, so an operational turn gets nothing and answers in text instead.
+  if (spec.noTools) flags.push('--tools', '');
   // Unattended operation. claude refuses this as root, so docker uses the non-root
   // worker user and local relies on the host being a non-root user.
   flags.push('--dangerously-skip-permissions');

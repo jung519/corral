@@ -3,7 +3,7 @@
  * can resume mid-flow (the recovery step cross-checks workspace + tracker state).
  * Stored in the orchestrator state dir (NOT the workspace, so it outlives cleanup).
  *
- * Lifted from upstream. Adaptations: state dir renamed `.symphony-state` →
+ * Carried over from corral's pre-rename implementation. Adaptations: state dir renamed `.symphony-state` →
  * `.corral-state` and made injectable (constructor arg / CORRAL_STATE_DIR) for
  * testability.
  */
@@ -62,6 +62,29 @@ export interface IssueRuntime {
    * resumed; cleared once a resume dispatch starts.
    */
   stuck?: boolean;
+  /**
+   * The last check found edits sitting in a work tree with no commit. Persisted because a
+   * resume can follow a restart, and the resume prompt has to tell the agent to commit what
+   * is already there instead of re-deriving it (CRL-89/91).
+   */
+  uncommitted?: boolean;
+  /**
+   * Which spec gate the run is at, in `spec_mode: split`.
+   *
+   * The critique phase is shared — there is one `plan_reviewing`, not three — so this is
+   * what says *which* document is being vetted when a restart lands mid-stage. Absent means
+   * the single-plan flow, which is also how state files written before spec mode existed
+   * read: no field, no split.
+   */
+  specStage?: 'requirements' | 'design' | 'tasks';
+  /**
+   * Task counts for the dashboard, refreshed by the task loop.
+   *
+   * Recorded where the loop already re-reads `tasks.md` each round, so showing progress
+   * costs no extra I/O — and because it is persisted, the count survives a restart and is
+   * there before the loop has run again (CRL-107).
+   */
+  taskProgress?: { done: number; total: number; warnings: number };
 }
 
 export class IssueStateStore {

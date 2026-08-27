@@ -1,8 +1,31 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { t } from './lib/i18n.svelte';
   import { prefs, setPref } from './lib/prefs.svelte';
 
   const hasBridge = typeof window !== 'undefined' && !!window.corral;
+
+  // Planning shape lives in the core's config, not in local prefs — it changes how runs
+  // work, not how this window looks.
+  let specMode = $state<'single' | 'split'>('single');
+  let specBusy = $state(false);
+  let specError = $state('');
+
+  onMount(async () => {
+    const got = await window.corral?.config.parsed();
+    const c = got?.config as { spec_mode?: string } | undefined;
+    if (c?.spec_mode === 'split') specMode = 'split';
+  });
+
+  async function setSpecMode(mode: 'single' | 'split') {
+    if (specBusy || mode === specMode) return;
+    specBusy = true;
+    specError = '';
+    const res = await window.corral?.config.specMode(mode);
+    if (res && !res.ok) specError = res.error ?? '';
+    else specMode = mode;
+    specBusy = false;
+  }
 </script>
 
 <div class="prefs">
@@ -29,6 +52,33 @@
       <input type="checkbox" checked={prefs.notifyError} onchange={(e) => setPref('notifyError', e.currentTarget.checked)} />
     </label>
   </section>
+
+  {#if hasBridge}
+    <section>
+      <h2>{t('prefs.specMode')}</h2>
+      <p class="hint">{t('prefs.specMode.hint')}</p>
+
+      <label class="row">
+        <span>
+          <strong>{t('prefs.specMode.single')}</strong>
+          <span class="sub">{t('prefs.specMode.single.hint')}</span>
+        </span>
+        <input type="radio" name="spec-mode" checked={specMode === 'single'} disabled={specBusy} onchange={() => setSpecMode('single')} />
+      </label>
+
+      <label class="row">
+        <span>
+          <strong>{t('prefs.specMode.split')}</strong>
+          <!-- The cost is the reason the default is `single`; someone turning it on
+               should read it here rather than discover it in a bill (CRL-101). -->
+          <span class="sub">{t('prefs.specMode.split.hint')}</span>
+        </span>
+        <input type="radio" name="spec-mode" checked={specMode === 'split'} disabled={specBusy} onchange={() => setSpecMode('split')} />
+      </label>
+
+      {#if specError}<p class="hint warn">{specError}</p>{/if}
+    </section>
+  {/if}
 </div>
 
 <style>

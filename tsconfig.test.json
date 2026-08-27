@@ -1,0 +1,14 @@
+{
+  // Everything under src/, tests included.
+  //
+  // The build config has to leave tests out — it emits, and `dist` is what ships. That
+  // exclusion was doing double duty as "tests are not type-checked", which is not a
+  // decision anybody made: a port signature could change and the tests would compile
+  // fine, then fail at runtime with 27 red lines to read backwards (CRL-59).
+  //
+  // So: same compiler options, no emit, nothing excluded.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

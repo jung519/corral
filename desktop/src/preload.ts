@@ -5,6 +5,7 @@
  * starting the orchestrator after the setup wizard completes.
  */
 import { contextBridge, ipcRenderer } from 'electron';
+import type { TunnelConfig, TunnelStatus } from './core-link/tunnel.js';
 
 const api = {
   /** Host OS platform ('darwin' | 'win32' | 'linux'). Lets the wizard pick
@@ -16,7 +17,16 @@ const api = {
   config: {
     exists: (): Promise<boolean> => ipcRenderer.invoke('config:exists'),
     read: (): Promise<string | null> => ipcRenderer.invoke('config:read'),
-    write: (yaml: string): Promise<void> => ipcRenderer.invoke('config:write', yaml),
+    /** The config as the core reads it: `config` with the schema's defaults applied, and
+     *  `raw` exactly as written. The window has no YAML parser and no schema. Both are
+     *  needed — for some fields, being written down at all is the meaning. */
+    parsed: (): Promise<{ config?: unknown; raw?: unknown }> => ipcRenderer.invoke('config:parsed'),
+    /** Save the config. Against a remote core this also restarts it on the new config,
+     *  so the result carries why that failed (bad token, unreachable tracker). */
+    write: (yaml: string): Promise<{ ok: boolean; error?: string }> => ipcRenderer.invoke('config:write', yaml),
+    /** Change planning shape only — the core rewrites the file so nothing else is lost. */
+    specMode: (mode: 'single' | 'split'): Promise<{ ok: boolean; error?: string }> =>
+      ipcRenderer.invoke('config:specMode', mode),
   },
   /** In-progress wizard draft (non-secret fields) persisted to userData. */
   draft: {
@@ -26,9 +36,52 @@ const api = {
   },
   /** Global Direction (free-text "방향성") persisted to userData/direction.md. The core
    *  reads the same file to inject it into prompts (from Phase 1). */
+  /** Third-party attribution text, or null when the build did not ship it. */
+  thirdPartyLicenses: (): Promise<string | null> => ipcRenderer.invoke('licenses:read'),
   direction: {
     read: (): Promise<string> => ipcRenderer.invoke('direction:read'),
     write: (text: string): Promise<void> => ipcRenderer.invoke('direction:write', text),
+  },
+  /** Where the core runs: here (`local`) or on another machine (`remote`, over WebSocket).
+   *  Pairing exchanges a one-time code shown in the remote core's log for a stored token. */
+  remote: {
+    get: (): Promise<{
+      mode: 'local' | 'remote';
+      url: string;
+      label: string;
+      paired: boolean;
+      /** Saved tunnel settings, or null when the address is used as-is. */
+      tunnel: TunnelConfig | null;
+      state: 'connected' | 'connecting' | 'disconnected';
+      denial?: string;
+      tunnelStatus: TunnelStatus;
+    }> => ipcRenderer.invoke('remote:get'),
+    setMode: (
+      mode: 'local' | 'remote',
+      url?: string,
+      label?: string,
+      tunnel?: TunnelConfig,
+    ): Promise<{ ok: boolean }> => ipcRenderer.invoke('remote:setMode', mode, url, label, tunnel),
+    pair: (
+      url: string,
+      code: string,
+      label?: string,
+      tunnel?: TunnelConfig,
+    ): Promise<{ ok: boolean; error?: string; tunnelStatus?: TunnelStatus }> =>
+      ipcRenderer.invoke('remote:pair', url, code, label, tunnel),
+    unpair: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('remote:unpair'),
+    /**
+     * Live connection state. Carries the tunnel's own status because "reconnecting" and
+     * "there is no tunnel" are different facts and only one of them is actionable.
+     */
+    onState: (cb: (s: { state: string; denial?: string; tunnelStatus?: TunnelStatus }) => void): (() => void) => {
+      const listener = (
+        _e: unknown,
+        payload: { state: string; denial?: string; tunnelStatus?: TunnelStatus },
+      ): void => cb(payload);
+      ipcRenderer.on('core-link-state', listener);
+      return () => ipcRenderer.off('core-link-state', listener);
+    },
   },
   secret: {
     set: (service: string, account: string, value: string): Promise<void> =>
@@ -43,11 +96,20 @@ const api = {
   /** Detect a provider's official agent CLI (claude/gemini/codex) — install check. */
   detectCli: (provider: string): Promise<{ installed: boolean; version?: string }> =>
     ipcRenderer.invoke('cli:detect', provider),
-  /** Run `claude setup-token` to obtain a subscription OAuth token at save time
-   *  (opens the browser; returns the token or an error/URL tail). */
-  claudeSetupToken: (): Promise<{ ok: boolean; token?: string; error?: string }> =>
-    ipcRenderer.invoke('claude:setup-token'),
-  /** Import the host codex login (~/.codex/auth.json, base64) for docker injection. */
+  /** The window is a `file://` page — not a secure context — so `navigator.clipboard`
+   *  does not exist here. Anything a user would hand-copy goes through the main process. */
+  clipboard: {
+    write: (text: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('clipboard:write', text),
+    read: (): Promise<{ ok: boolean; text: string }> => ipcRenderer.invoke('clipboard:read'),
+  },
+  /** `claude setup-token`, in three steps: the code only exists after the browser
+   *  sign-in, so one call could never carry it (CRL-83). */
+  claudeTokenStart: (): Promise<{ ok: boolean; url?: string; reason?: string; error?: string }> =>
+    ipcRenderer.invoke('claude:token-start'),
+  claudeTokenCode: (code: string): Promise<{ ok: boolean; token?: string; reason?: string; error?: string }> =>
+    ipcRenderer.invoke('claude:token-code', code),
+  claudeTokenAlive: (): Promise<{ alive: boolean }> => ipcRenderer.invoke('claude:token-alive'),
+  claudeTokenCancel: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('claude:token-cancel'),
   codexImportAuth: (): Promise<{ ok: boolean; b64?: string; error?: string }> =>
     ipcRenderer.invoke('codex:import-auth'),
   /** Show an OS notification (human action needed). No-op while the window is focused. */

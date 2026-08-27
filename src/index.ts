@@ -2,9 +2,8 @@
  * Corral public surface (S1 — skeleton).
  *
  * Exposes the 5-axis adapter interfaces, the registry, the net-new agent and
- * credential boundaries, and the config schema. The orchestrator core is lifted
- * from upstream in S2 (see docs/development-plan.md §1.3) — there is no runnable
- * entrypoint yet.
+ * credential boundaries, and the config schema. There is no runnable entrypoint
+ * here — the orchestrator has its own.
  */
 export * from './core/types.js';
 export * from './core/registry.js';
@@ -66,4 +65,7 @@ export { workspaces, dockerOptionsFromConfig, type WorkspaceCtx } from './worksp
 export { run, runOrThrow, type ExecResult, type ExecOptions } from './util/exec.js';
 export { channels } from './channel/index.js';
 export { WebChannel, type PendingAction, type IssueDiff } from './channel/web.js';
-export { startIpcHost, type IpcHostDeps, type SetupInput } from './ipc-host.js';
+export { type ControlPlaneDeps, dispatch } from './control-plane/dispatch.js';
+export { SetupHost, type SetupHostOptions } from './control-plane/setup-host.js';
+export { startIpcHost } from './control-plane/ipc.js';
+export { startWsHost, type WsHost, type WsHostOptions } from './control-plane/ws.js';

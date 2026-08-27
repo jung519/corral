@@ -2,7 +2,7 @@
  * Structured logging. Writes a single system-wide log plus one log file per issue
  * identifier (logs/<identifier>.log) — the per-issue file is the debugging entrypoint.
  *
- * Lifted from upstream.
+ * Carried over from corral's pre-rename implementation.
  */
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';

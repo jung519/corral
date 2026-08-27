@@ -14,7 +14,7 @@
  */
 import { logger } from '../core/logger.js';
 import { containerName, WORKER_USER } from '../workspace/docker-io.js';
-import { type CliSpawnSpec, runCliTurn, shq } from './cli-runner.js';
+import { type CliSpawnSpec, runCliTurn, SECRET_ENV_PATH, shq } from './cli-runner.js';
 import { CodexStreamParser } from './codex-stream.js';
 import type { AgentEvent, AgentTransport, AgentTurnSpec, PreflightResult } from './types.js';
 
@@ -67,15 +67,19 @@ export class CodexCliTransport implements AgentTransport {
     // Subscription: inject the host auth.json (base64) → ~/.codex/auth.json.
     // API key: `codex login --with-api-key` (codex doesn't read OPENAI_API_KEY at exec).
     const inner = ['codex', ...args.map(shq)].join(' ');
-    const envArgs: string[] = [];
+    // Both of these travel on a file descriptor rather than in the arguments — a command
+    // line is world-readable on the host (CRL-125). The prelude is unchanged: it reads the
+    // value from the environment inside the container, which is where it still arrives.
+    let secretEnv: Record<string, string> | undefined;
     let prelude = '';
     if (this.codexAuthB64) {
-      envArgs.push('-e', `CODEX_AUTH_B64=${this.codexAuthB64}`);
+      secretEnv = { CODEX_AUTH_B64: this.codexAuthB64 };
       prelude = 'mkdir -p "$HOME/.codex" && printf %s "$CODEX_AUTH_B64" | base64 -d > "$HOME/.codex/auth.json" && ';
     } else if (this.apiKey) {
-      envArgs.push('-e', `OPENAI_API_KEY=${this.apiKey}`);
+      secretEnv = { OPENAI_API_KEY: this.apiKey };
       prelude = 'printf %s "$OPENAI_API_KEY" | codex login --with-api-key >/dev/null 2>&1 && ';
     }
+    const envArgs = secretEnv ? ['--env-file', SECRET_ENV_PATH] : [];
     return {
       command: 'docker',
       args: [
@@ -90,6 +94,7 @@ export class CodexCliTransport implements AgentTransport {
         '-lc',
         prelude + inner,
       ],
+      secretEnv,
       env: this.localEnv(),
     };
   }

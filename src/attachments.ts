@@ -1,7 +1,7 @@
 /**
  * Minimal attachment handling: download text/markdown attachments into the
  * workspace so the agent can read them; everything else is listed in a manifest.
- * Non-fatal. (A richer pdf/image reader can be lifted later.)
+ * Non-fatal. (A richer pdf/image reader can be added later.)
  */
 import { logger } from './core/logger.js';
 import { SCRATCH } from './core/paths.js';

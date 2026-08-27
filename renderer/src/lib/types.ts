@@ -1,4 +1,4 @@
-/** Shapes mirrored from the control-plane (src/ipc-host.ts). */
+/** Shapes mirrored from the control-plane (src/control-plane/dispatch.ts). */
 
 export interface IssuePr {
   repoKey: string;
@@ -17,6 +17,12 @@ export interface IssueRuntime {
   prs?: IssuePr[];
   stuck?: boolean;
   cost: number;
+  /** Task counts while a spec-mode implementation runs. Absent otherwise (CRL-107). */
+  taskProgress?: { done: number; total: number; warnings: number };
+  /** Which spec document the planning ladder is on, while it is on one. The three vetting
+   *  passes share one phase, so this is what says which (CRL-128). Cleared on the way into
+   *  implementation, and absent in single mode. */
+  specStage?: 'requirements' | 'design' | 'tasks';
 }
 
 export interface PendingAction {
@@ -35,12 +41,17 @@ export interface CorralEvent {
   kind: string;
   label: string;
   phase?: string;
+  /** Extra context the emitter attached. An operational run puts its pipeline key,
+   *  outcome and failing stage here — the identifier is the run, not the pipeline. */
+  data?: Record<string, unknown>;
 }
 
 export interface StateResponse {
   issues: IssueRuntime[];
   pending: PendingAction[];
   events: CorralEvent[];
+  /** Planning shape. Absent from an older core's reply, which means single (CRL-104). */
+  specMode?: 'single' | 'split';
 }
 
 export interface Candidate {
@@ -85,4 +96,11 @@ export interface HistoryRecord {
   agentProvider: string;
   failoverUsed?: boolean;
   qa?: { q: string; a: string; ts: number; phase?: string }[];
+}
+
+/** One approved spec document, markdown and rendered HTML (CRL-107). */
+export interface SpecDoc {
+  stage: 'requirements' | 'design' | 'tasks';
+  markdown: string;
+  html: string;
 }

@@ -1,10 +1,10 @@
 # Corral Design System
 
-Single source of truth for Corral's visual language, shared across the **PC application**
-(desktop orchestrator) and the **mobile app** (control + sync companion).
+Single source of truth for Corral's visual language. There is one surface today — the
+desktop app — and `renderer/src/app.css` is where these tokens actually live.
 
-> Principle: **one accent, two surfaces.** The coral accent, type scale, iconography, and
-> status semantics are identical on every platform. Only layout density and navigation differ.
+> Principle: **coral is a spark, not a flood.** The accent carries brand and interaction;
+> everything structural is slate.
 
 ---
 
@@ -21,7 +21,10 @@ Single source of truth for Corral's visual language, shared across the **PC appl
 
 ## 2. Color tokens
 
-Dark is the primary theme (developer tool); light is fully supported. Use tokens, never raw hex.
+Dark is the only theme the app ships today — `app.css` defines one `:root` and no
+`prefers-color-scheme` block. The light values below are reserved so a light theme is a
+re-skin rather than a re-pick; two of them (`--ink-50`, `--white`) are not defined in CSS yet
+because nothing consumes them. Use tokens, never raw hex.
 
 ### Accent · Coral (interactive + brand only — keep under ~10% of any screen)
 
@@ -40,10 +43,10 @@ Dark is the primary theme (developer tool); light is fully supported. Use tokens
 | `--ink-800` | `#1E293B` | dark surfaces, panels, cards |
 | `--ink-700` | `#334155` | dark borders, dividers |
 | `--ink-500` | `#64748B` | secondary text |
-| `--ink-300` | `#CBD5E1` | light-mode borders |
+| `--ink-300` | `#CBD5E1` | borders, once there is a light theme |
 | `--ink-100` | `#E2E8F0` | primary text on dark |
-| `--ink-50`  | `#F8FAFC` | light UI base background |
-| `--white`   | `#FFFFFF` | light surfaces, cards |
+| `--ink-50`  | `#F8FAFC` | reserved — light UI base background (not in CSS yet) |
+| `--white`   | `#FFFFFF` | reserved — light surfaces, cards (not in CSS yet) |
 
 ### Semantic · Status
 
@@ -71,7 +74,10 @@ Dark is the primary theme (developer tool); light is fully supported. Use tokens
 
 ## 3. Typography
 
-- **UI font:** Inter (fallback: system-ui). **Code/IDs/logs:** a monospace (JetBrains Mono / ui-monospace).
+- **UI font:** the platform's own — `system-ui, -apple-system, "Segoe UI", sans-serif`.
+  **Code/IDs/logs:** `ui-monospace, monospace`. No webfont is shipped: a font file is a
+  bundled binary, and this project does not carry those. Inter and JetBrains Mono are what
+  the mockups are drawn in, not what the app loads.
 - **Weights:** 400 regular, 500 medium, 600 semibold (headings/emphasis only). Sentence case everywhere.
 
 | Style | Size / Line | Weight |
@@ -90,8 +96,10 @@ Dark is the primary theme (developer tool); light is fully supported. Use tokens
 ## 4. Spacing, radius, borders
 
 - **Spacing scale (4px base):** 4, 8, 12, 16, 24, 32, 48. Use for padding, gaps, vertical rhythm.
-- **Radius:** `sm 6` (inputs, chips) · `md 8` (buttons, cards) · `lg 12` (panels, modals) · `pill 999`.
-- **Borders:** 1px hairline using `--ink-700` (dark) / `--ink-300` (light). No drop shadows for
+- **Radius:** one token today — `--radius: 10px`, used for panels, cards and inputs alike.
+  A few places still hardcode `8px`. The four-step scale below is the intent, not the state:
+  `sm 6` (inputs, chips) · `md 8` (buttons, cards) · `lg 12` (panels, modals) · `pill 999`.
+- **Borders:** 1px hairline using `--ink-700`; `--ink-300` is the light-theme pair. No drop shadows for
   structure — use borders + surface elevation. Shadows only for true overlays (modals, menus).
 
 ---
@@ -119,32 +127,9 @@ Dark is the primary theme (developer tool); light is fully supported. Use tokens
 
 ---
 
-## 7. Platform guidance
+## 7. The desktop app
 
-**Shared (identical on both):** color tokens, type scale, iconography, status semantics, radius, the
-coral accent and its ≤10% rule.
-
-### PC application — desktop orchestrator
-- Information-dense. Dark theme default.
+- Information-dense. One dark theme.
 - Layout: action panel + run timeline + progress indicators + collapsible logs (multi-column).
-- Current template-based UI is acceptable until user count grows; tokens above still apply so the
-  later redesign is a re-skin, not a rebuild.
-
-### Mobile app — control + sync companion
-- Focused, not dense. Single column, bottom nav.
-- Core jobs: monitor runs, act on approval gates, view sync status. No full orchestration authoring.
-- Needs full wireframes + component library in Figma before build (see §8).
-
----
-
-## 8. Figma structure (file: Corral)
-
-Build foundations first, then components, then screens (mind starter-tier rate limits).
-
-1. **Color styles:** `accent/50…700`, `ink/50…900`, `semantic/info|success|warning|danger`.
-2. **Variables (modes: Light / Dark):** `bg`, `surface`, `text`, `text-muted`, `border`, `accent`.
-3. **Text styles:** display, h1, h2, h3, body, small, caption, mono.
-4. **Components:** Button (variants), Input, Card, Badge/StatusPill, ApprovalBanner, NavItem.
-5. **Screens:** PC dashboard frames, then mobile app flows (monitor → approve → sync).
-
-Keep Figma style/variable names matching the token names in §2–§4 so design and code stay in sync.
+- The current UI is template-based and that is acceptable for now; the tokens above are what
+  make a later redesign a re-skin rather than a rebuild.

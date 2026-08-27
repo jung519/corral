@@ -58,6 +58,108 @@ describe('prompt-builder', () => {
     expect(def).toContain('English'); // default when no language given
   });
 
+  /**
+   * The language rule names files, and a document added later is a document the rule does
+   * not reach. That is what happened: spec mode arrived (CRL-101/106) writing
+   * `.corral/spec/*.md`, the rule kept listing only the pre-spec files, and a Korean run
+   * came back with its acceptance criteria in English — prose, not notation (CRL-126).
+   */
+  it('brings the spec documents under the language rule', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    for (const doc of ['.corral/spec/requirements.md', '.corral/spec/design.md', '.corral/spec/tasks.md']) {
+      expect(out, `${doc} is not named in the output-language rule`).toContain(doc);
+    }
+    // And the rule must not read as a closed list, or the next new document repeats this.
+    expect(out).toContain('every file a person reads');
+  });
+
+  /**
+   * An English keyword does not make its sentence English. The keywords stay so the format
+   * stays checkable; the condition and the response are prose and follow the output
+   * language. Saying only "keep the keywords in English" left a whole criteria block in
+   * English (CRL-126).
+   */
+  it('says the body of a REQ line is prose, not notation', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    expect(out).toContain('including the body of every `REQ-n` line');
+    expect(out).toMatch(/English heading does not make the\s+text under it English/);
+    // The only worked examples are English; they must say so or they read as the rule.
+    expect(out).toContain('in English because this guide is');
+  });
+
+  /**
+   * EARS is a notation, not prose. A Korean user gets the explanation in Korean and the
+   * keywords in English — the same split the guide already makes for BLOCKER/SUGGESTION/NIT.
+   * If the keywords translated, nothing downstream could ever check the format (CRL-98).
+   */
+  it('keeps the EARS keywords in English whatever the output language is', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const ko = await renderWorkflow({ issue, tracker_kind: 'notion', repos, language: 'Korean (한국어)' }, 'WORKFLOW.md');
+    expect(ko).toContain('THE SYSTEM SHALL');
+    expect(ko).toContain('REQ-n');
+  });
+
+  it('gives the planner every EARS form, not just WHEN', async () => {
+    // Only offering WHEN makes the agent contort invariants ("WHEN the build runs THE
+    // SYSTEM SHALL have no type errors") — that would measure the template, not the agent.
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    for (const form of ['THE SYSTEM SHALL', 'WHEN', 'WHILE', 'IF', 'THEN', 'WHERE']) {
+      expect(out, `EARS form ${form} missing from branch A`).toContain(form);
+    }
+    expect(out).toContain('REQ-1');
+    // The IDs have to be pointed at by something, or they are decoration.
+    expect(out).toMatch(/mark each file you will change and each\s+edge case with the `REQ-n`/);
+  });
+
+  it('tells the consolidation to carry the REQ verdicts into pending_review.md', async () => {
+    // The rounds rule on each criterion; without this the verdicts die in consolidation and
+    // the human never sees which requirement the code missed (CRL-99).
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(out).toContain('## Acceptance criteria');
+    expect(out).toMatch(/carry those verdicts through/);
+    // An older plan without REQ labels must not grow an empty section.
+    expect(out).toMatch(/Omit the `## Acceptance criteria` section entirely/);
+  });
+
+  /**
+   * `claude -p` is one shot: when the model stops talking the process exits. The agent did
+   * not know that — it left a background verification running, said it would "wait", and
+   * ended the turn with 4.35M tokens of work uncommitted (CRL-89). The guide said nothing
+   * about how many turns there are.
+   */
+  it('tells the worker this is the only turn, and names the background-work trap', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(out).toContain('single unattended turn');
+    expect(out).toMatch(/There is no next turn/);
+    // A generic "do not defer" is not enough — the incident WAS a background job whose
+    // result was to be collected later, so the guide has to name that shape.
+    expect(out).toMatch(/background job and plan to collect its result later/);
+  });
+
+  it('orders branch C so the commit precedes any further verification', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    const commit = out.indexOf('Commit, before any further verification');
+    expect(commit).toBeGreaterThan(-1);
+    expect(out).toMatch(/Never end the turn with uncommitted changes/);
+    // The same failure mode applies to the fix turn, so the rule has to reach it too.
+    expect(out.indexOf('this turn is just as final as that one')).toBeGreaterThan(commit);
+  });
+
+  it('asks the consolidation to record how the criteria came out', async () => {
+    const repos = [{ key: 'server', dir: 'server', description: 'API', base_branch: 'main', branch: 'feature/ISS-9' }];
+    const out = await renderWorkflow({ issue, tracker_kind: 'notion', repos }, 'WORKFLOW.md');
+    expect(out).toMatch(/"criteria": \{"total": N, "met": N\}/);
+    // Absent and {0,0} mean different things — a plan with no REQ labels vs a plan that
+    // defined none — and only the first must leave the old behaviour alone (CRL-108).
+    expect(out).toMatch(/Leave `criteria` out entirely when the plan had\s+no `REQ-n` labels/);
+  });
+
   it('renders signals in the configured language', () => {
     const ko = buildSignals(createTranslator('ko'));
     expect(ko.approve).toBe('✅ 승인됨');

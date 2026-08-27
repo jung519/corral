@@ -3,8 +3,9 @@
  * actions the UI renders (plan/review as HTML); the user approves / gives feedback
  * via POST. No polling: the user's click is the signal.
  *
- * Lifted from upstream. The HTTP server lives in ../server/dashboard.ts; this class
- * holds the pending-action + diff state and the approve/feedback callbacks.
+ * Carried over from corral's pre-rename implementation, minus its HTTP server: the desktop app talks to the core over the
+ * control plane, so this class is only the pending-action + diff state and the
+ * approve/feedback callbacks.
  */
 import { marked } from 'marked';
 import { bus } from '../core/events.js';

@@ -1,9 +1,9 @@
 /** Stack calibration profiles — the tech-stack seam.
  *
- * Upstream hardcoded stack-specific review examples (NestJS provider injection,
+ * The pre-rename implementation hardcoded stack-specific review examples (NestJS provider injection,
  * Mongoose query without index, Flutter setState after dispose). Those become
- * selectable profiles so the S2 review pipeline calibrates severity per the user's
- * stack instead of a single project's. External profiles can be added later. */
+ * selectable profiles so the review pipeline calibrates severity per the user's stack
+ * instead of a single project's. External profiles can be added later. */
 
 export interface StackProfile {
   id: string;

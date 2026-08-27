@@ -2,8 +2,9 @@
  * Claude Code `--output-format stream-json` parsing. Pure functions, unit-tested —
  * the riskiest part of the CLI transport, kept free of spawn/IO so it's verifiable.
  *
- * Lifted/adapted from upstream's inline parser, emitting normalized AgentEvents.
+ * Carried over and adapted from the pre-rename implementation's inline parser, emitting normalized AgentEvents.
  */
+import type { InputBreakdown } from './pricing.js';
 import type { AgentEvent } from './types.js';
 
 export interface StreamEvent {
@@ -11,7 +12,23 @@ export interface StreamEvent {
   subtype?: string;
   is_error?: boolean;
   total_cost_usd?: number;
-  usage?: { input_tokens?: number; output_tokens?: number };
+  /**
+   * What the turn actually cost, as claude reports it. All four numbers, because the
+   * first one alone is not the input — a real turn came back like this:
+   *
+   *     {"input_tokens":2,"cache_creation_input_tokens":4035,
+   *      "cache_read_input_tokens":0,"output_tokens":4}
+   *
+   * The prompt was 4,037 tokens. Reading only `input_tokens` counted 2 of them (CRL-58).
+   */
+  usage?: {
+    input_tokens?: number;
+    /** Written to the cache this turn. Billed, and usually the bulk of a short turn. */
+    cache_creation_input_tokens?: number;
+    /** Served from the cache. Cheaper than the rest, but not free. */
+    cache_read_input_tokens?: number;
+    output_tokens?: number;
+  };
   message?: { content?: Array<{ type: string; text?: string; name?: string; input?: unknown }> };
 }
 
@@ -42,20 +59,60 @@ export function activityEvents(event: StreamEvent): AgentEvent[] {
   return out;
 }
 
+/**
+ * The assistant's text, uncapped.
+ *
+ * `activityEvents` caps the same text for the live timeline. An answer that has to parse
+ * as JSON cannot be capped, so this is the same walk without `oneLine`.
+ */
+export function answerText(event: StreamEvent): string | null {
+  if (event.type !== 'assistant' || !event.message?.content) return null;
+  let out = '';
+  for (const block of event.message.content) {
+    if (block.type === 'text' && block.text) out += block.text;
+  }
+  return out || null;
+}
+
 export interface UsageAcc {
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
+  /**
+   * How the input splits, for the CLIs whose cost has to be estimated.
+   *
+   * `inputTokens` above is the sum and stays the sum — that is what the ceiling counts
+   * (CRL-58). This is the same tokens seen a second way, and only the price cares
+   * (CRL-86).
+   */
+  input?: InputBreakdown;
 }
 
-/** Fold a stream event's cost/token data into the accumulator.
- *  total_cost_usd is cumulative (replace); token counts are per-event (sum). */
+/**
+ * Fold a stream event's cost/token data into the accumulator.
+ *
+ * Both numbers are the turn's running total, so both replace rather than add. The cost
+ * always worked that way; the tokens used to be summed, on the belief that each event
+ * carried its own slice. They do not — `result` carries the tally for the whole turn.
+ *
+ * It happened not to double anything, because the only other event with a usage block
+ * keeps it under `message`, where this never looked. That is a thin thing to rely on:
+ * the day an `assistant` event gains a top-level `usage`, summing would count the turn
+ * twice. Reading the final tally says what is meant and cannot drift (CRL-58).
+ *
+ * **The input is all three input numbers.** See `StreamEvent.usage` for the measurement.
+ */
 export function applyUsage(event: StreamEvent, acc: UsageAcc): void {
   if (typeof event.total_cost_usd === 'number') acc.costUsd = event.total_cost_usd;
-  if (event.usage) {
-    if (typeof event.usage.input_tokens === 'number') acc.inputTokens += event.usage.input_tokens;
-    if (typeof event.usage.output_tokens === 'number') acc.outputTokens += event.usage.output_tokens;
-  }
+  const usage = event.usage;
+  if (!usage) return;
+  acc.inputTokens =
+    (usage.input_tokens ?? 0) + (usage.cache_creation_input_tokens ?? 0) + (usage.cache_read_input_tokens ?? 0);
+  acc.outputTokens = usage.output_tokens ?? 0;
+  acc.input = {
+    cacheWrite: usage.cache_creation_input_tokens ?? 0,
+    cacheRead: usage.cache_read_input_tokens ?? 0,
+  };
 }
 
 /** Whether the text indicates an auth/credential failure (non-retryable). */

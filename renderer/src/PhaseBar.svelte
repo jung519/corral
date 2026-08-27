@@ -1,14 +1,15 @@
 <script lang="ts">
   import { t } from './lib/i18n.svelte';
-  import { phaseActivity, STAGE_KEYS, stageIndex } from './lib/phase';
+  import { phaseActivity, stageKeys, stageIndex } from './lib/phase';
 
-  let { phase }: { phase: string } = $props();
-  const cur = $derived(stageIndex(phase));
+  let { phase, specMode, specStage }: { phase: string; specMode?: string; specStage?: string } = $props();
+  const keys = $derived(stageKeys(specMode));
+  const cur = $derived(stageIndex(phase, specMode, specStage));
   const activity = $derived(phaseActivity(phase));
 </script>
 
 <div class="bar">
-  {#each STAGE_KEYS as key, i}
+  {#each keys as key, i}
     {#if i > 0}<span class="sep"></span>{/if}
     <span class="stage" class:done={i < cur} class:active={i === cur}>
       {#if i < cur}<span class="check">✓</span>{/if}

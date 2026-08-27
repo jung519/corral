@@ -2,8 +2,8 @@
  * Environment-variable credential store — the headless / CI fallback.
  *
  * Read-only: secrets come from `process.env` under the CORRAL_<SERVICE>_<ACCOUNT>
- * convention (see envVarNameFor). The OS-keychain store for the desktop app lands
- * in S3; this keeps the core runnable without a GUI.
+ * convention (see envVarNameFor). The desktop app keeps secrets in the OS keychain
+ * instead; this store is what keeps the core runnable without a GUI.
  */
 import { type CredentialRef, type CredentialStore, envVarNameFor } from './types.js';
 

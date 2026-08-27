@@ -31,7 +31,9 @@ tracker:
     # plan_review: "Plan review"   # optional refinement
     # in_review: "In review"       # optional refinement
   scope:
-    type: checkbox       # only issues with this checkbox are picked up
+    # checkbox | select | multi_select | status. `select`/`multi_select`/`status` take a
+    # `values: [...]` list instead; this one picks up issues whose checkbox is ticked.
+    type: checkbox
     property: "Corral"
 
 # All repos are cloned side by side into the workspace (each under its <key>/).
@@ -62,12 +64,26 @@ repositories:
 
 agent:
   provider: claude        # claude | gemini | gpt
-  transport: cli          # cli (spawns your installed CLI; implemented) | api (stub)
+  transport: cli          # cli (spawns your installed CLI) | api (official SDK, your key)
   credential: { service: anthropic, account: default }  # API key injected as ANTHROPIC_API_KEY (BYOK)
   models:
     planning: opus
     implementation: sonnet
     review: opus
+  # How hard the model thinks before it acts, per stage — low | medium | high | xhigh | max.
+  # Omit and the CLI's own default applies, which is what every run does today.
+  #
+  # Worth knowing before you set it: on one measured issue, thinking was 55.6% of the wall
+  # time (writing documents was 31.7%, running the tools 0.1%). `low` removed the thinking
+  # entirely and left the number of tool calls unchanged — it changes how deeply the model
+  # deliberates, not how much it looks at. The output got thinner with it.
+  #
+  # Only `claude` + `transport: cli` takes this. Set it elsewhere and corral says so at
+  # startup rather than dropping it silently.
+  # effort:
+  #   planning: high
+  #   implementation: low
+  #   review: high
 
 workspace:
   backend: local          # local | docker
@@ -78,7 +94,68 @@ workspace:
   #   auto_build: true            # analyze repos → generate Dockerfile → build (default)
   #   mount_host_login: true      # mount ~/.claude into the container (no API key needed).
   #                               # set false to authenticate with an agent API key instead.
+  #   env:                        # extra env for the worker container — NOT for secrets.
+  #     CI: "true"                 # docker keeps these in the container's own config, so
+  #                               # `docker inspect` reads them back for as long as the
+  #                               # container lives. Agent credentials never go here.
+
+# Daily ceiling, SHARED by the development and operational AI (first come, first served —
+# when the day's budget is gone, both stop). The token counts are the figure of record:
+# they come back from the response itself and are exactly what was spent, while a price
+# table belongs to the vendor and the vendor changes it. `daily_cost_usd` is estimated
+# from that table — a guard rail in the unit you actually budget in, not an invoice.
+# Set any of the three on its own; whichever runs out first stops the work.
+# Omit for no ceiling.
+# limits:
+#   daily_input_tokens: 2000000
+#   daily_output_tokens: 200000
+#   daily_cost_usd: 20
 
 channel:
-  kind: web               # web | slack
-  port: 4400
+  kind: web               # the app itself is the channel — no port, nothing to open.
+
+# How the desktop app reaches a core running somewhere else. Off by default: the app forks
+# the core itself for a single-machine install. Binding stays on loopback because the plane
+# is authenticated but NOT encrypted — the app opens an SSH tunnel to carry it.
+# The `--control-plane [host:]port` flag overrides this for one run.
+# control_plane:
+#   enabled: true
+#   host: 127.0.0.1
+#   port: 4410
+
+# Issues worked on at once. Each gets its own workspace, so this is disk and CPU as much
+# as it is money.
+# max_active_issues: 3
+
+# Self-review after implementation. `rounds` are independent passes (fresh session each).
+# `max_fix_rounds: 0` means review runs once and then a human decides — auto-fixing costs
+# Opus output twice over, which was the expensive part.
+# review:
+#   rounds: 1
+#   max_fix_rounds: 0
+#   auto_pr_when_clean: false
+#   semgrep: { config: ["p/default"], paths: ["."] }   # omit to skip; detected on PATH
+
+# Independent critics vetting the plan before you see it. A round is a fresh session, and
+# whatever it finds is folded in by a consolidation turn — so one round costs two dispatches.
+# plan_review:
+#   enabled: true
+#   rounds: 1
+#   heavy_labels: []      # labels that get `heavy_rounds` instead
+#   heavy_rounds: 2
+#   # Spec mode only: per-stage overrides. Omit and every stage uses the counts above.
+#   # `0` skips both the critique and its consolidation for that stage — the draft goes
+#   # straight to the approval card.
+#   #
+#   # Worth considering because the stages differ: `design` and `tasks` are written from a
+#   # document you already approved, while `requirements` comes from the issue text alone.
+#   # Do not turn all three off — the critique is the only check on EARS form and on
+#   # assumptions the plan made about your code.
+#   stages:
+#     design: 0
+#     tasks: 0
+
+# `single` = one plan document, approved once (default). `split` = the three spec gates
+# (requirements → design → tasks), each approved on its own. Roughly 2.4x the model calls
+# per issue, and the daily ceiling is shared with the operational AI — hence the default.
+# spec_mode: single

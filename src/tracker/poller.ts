@@ -1,7 +1,7 @@
 /**
  * Tracker poller — every `intervalMs` fetches active issues and hands them to a
  * callback. Self-scheduling (no overlapping runs); errors are logged, not fatal.
- * Lifted from upstream.
+ * Carried over from corral's pre-rename implementation.
  */
 import { logger } from '../core/logger.js';
 import type { Issue, TrackerAdapter } from '../core/types.js';

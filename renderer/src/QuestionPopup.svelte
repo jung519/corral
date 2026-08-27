@@ -18,7 +18,10 @@
   // popup asks the agent read-only questions and routes change-requests / approve-with-
   // instructions to the agent. Approve-with-notes only matters on plan-like cards.
   const isQuestion = $derived(action.kind === 'question');
-  const isPlan = $derived(['plan', 'pr_plan', 'fix_plan'].includes(action.kind));
+  // The spec gates belong here too: each approves a document the agent can be asked to
+  // revise, so leaving them out would remove approve-with-instructions from three of the
+  // six card kinds (CRL-104).
+  const isPlan = $derived(['plan', 'pr_plan', 'fix_plan', 'requirements', 'design', 'tasks'].includes(action.kind));
 
   // `html` is set for agent answers (markdown rendered by the core); rendered via {@html}.
   type Msg = { role: 'you' | 'agent'; text: string; html?: string };

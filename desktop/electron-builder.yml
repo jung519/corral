@@ -19,6 +19,10 @@ extraResources:
     to: renderer
   - from: ../WORKFLOW.md
     to: core/WORKFLOW.md
+  # MIT/ISC 는 바이너리 배포에도 라이선스 전문과 저작권 표시를 함께 요구한다.
+  # `pnpm package` 가 빌드 전에 이 파일을 다시 만든다 (CRL-118).
+  - from: ../THIRD-PARTY-LICENSES.txt
+    to: THIRD-PARTY-LICENSES.txt
 mac:
   category: public.app-category.developer-tools
   target: dmg

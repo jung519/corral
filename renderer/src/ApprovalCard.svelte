@@ -19,6 +19,11 @@
 
   // Plain accept-as-is. Free-text (change requests, approve-with-instructions, questions,
   // answering the agent) all live in the "질문·논의" popup now.
+  // Only the spec gates carry one: plan/review/question have always been self-evident.
+  const hint = $derived(
+    ['requirements', 'design', 'tasks'].includes(action.kind) ? t(`kind.${action.kind}.hint`) : '',
+  );
+
   function approve() {
     return onApprove(action.id, action.options ? selection : undefined);
   }
@@ -26,10 +31,16 @@
 
 <div class="card">
   <div class="head">
-    <span class="badge">{action.kind}</span>
+    <span class="badge">{t(`kind.${action.kind}`)}</span>
     <strong>{action.title}</strong>
     <span class="id">{action.identifier}</span>
   </div>
+
+  {#if hint}
+    <!-- Three spec cards look alike but approve very different things; the badge alone
+         does not say which, and getting it wrong sends the run down the wrong path. -->
+    <p class="hint">{hint}</p>
+  {/if}
 
   <div class="body">{@html action.bodyHtml}</div>
 
@@ -80,6 +91,11 @@
     border-radius: 6px;
     padding: 2px 8px;
     font-size: 12px;
+  }
+  .hint {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #5f5e5a;
   }
   .id {
     margin-left: auto;
