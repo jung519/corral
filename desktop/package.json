@@ -2,8 +2,8 @@
   "name": "corral-desktop",
   "private": true,
   "license": "Apache-2.0",
-  "version": "0.1.0",
-  "description": "Corral Electron shell \u2014 wraps the headless control plane in a desktop app (BYOK keychain, setup wizard).",
+  "version": "1.0.0",
+  "description": "Corral Electron shell — wraps the headless control plane in a desktop app (BYOK keychain, setup wizard).",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc -p tsconfig.json",
