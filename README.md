@@ -15,9 +15,9 @@ A human is at every gate.
 
 *Optional:* turn on **spec mode** and that one plan becomes three — requirements, design,
 tasks — each approved on its own, with the implementation then working the task list one
-task at a time and the dashboard showing how far it has got. It costs roughly 2.4× the model
-calls per issue, so it is off by default — set `spec_mode: split` in `corral.yaml` to turn
-it on.
+task at a time and the dashboard showing how far it has got. Three documents and three
+approvals cost more model calls than one, so it is off by default — set `spec_mode: split`
+in `corral.yaml` to turn it on.
 
 **Operations — a queue becomes an answer.**
 `trigger → fetch → one model turn → checks → your API`
