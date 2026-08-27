@@ -21,6 +21,7 @@
   import { t } from './lib/i18n.svelte';
   import { toast } from './lib/toast.svelte';
   import type { CorralEvent } from './lib/types';
+  import { changesCounts, isOpsEvent } from './lib/ops-events';
 
   let overview = $state<api.OpsOverview>({ pipelines: [], counts: {} });
   let online = $state(false);
@@ -116,9 +117,9 @@
     // Runs are seconds long and there are many of them; without this the list would only
     // ever be as fresh as the last poll.
     const unsub = api.subscribeEvents((e) => {
-      if (e.kind !== 'run') return;
+      if (!isOpsEvent(e)) return;
       live = [...live, e].slice(-200);
-      void refresh();
+      if (changesCounts(e)) void refresh();
     });
     const poll = setInterval(() => void refresh(), 15000);
     return () => {
