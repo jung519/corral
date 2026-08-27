@@ -1,7 +1,7 @@
 {
   "name": "corral",
-  "version": "0.1.0",
-  "description": "Open-source agent development orchestrator \u2014 tracker \u2192 repo \u2192 human approval \u2192 AI coding agent. BYOK, provider-neutral, self-hostable.",
+  "version": "1.0.0",
+  "description": "Open-source agent development orchestrator — tracker → repo → human approval → AI coding agent. BYOK, provider-neutral, self-hostable.",
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
